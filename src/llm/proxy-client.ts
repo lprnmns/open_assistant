@@ -8,7 +8,7 @@
  *
  * Environment variables consumed:
  *   LITELLM_PROXY_URL      Base URL of the LiteLLM proxy  (default: http://localhost:4000)
- *   LITELLM_MASTER_KEY     Bearer token for the proxy     (default: sk-local-master)
+ *   LITELLM_MASTER_KEY     Bearer token for the proxy     (REQUIRED — no default; throws if absent)
  *
  * Model alias → LiteLLM name mapping (mirrors litellm_config.yaml):
  *   strong tier: claude-sonnet | gpt-4o | gemini-pro
@@ -16,12 +16,39 @@
  */
 
 import { BYOK_KEY_NAMES } from "../config/byok-secrets.js";
-import type { ByokProvider, LlmSource, ProxyCallOptions, ProxyCallResult, ProxyModelTier } from "./types.js";
+import type {
+  ByokProvider,
+  LlmSource,
+  ProxyCallOptions,
+  ProxyCallResult,
+  ProxyModelTier,
+} from "./types.js";
+
+// ── Response type guard ────────────────────────────────────────────────────────
+
+type ProxyResponseShape = {
+  model: string;
+  choices: Array<{
+    message: {
+      content: string;
+    };
+  }>;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+};
+
+function isProxyResponse(value: unknown): value is ProxyResponseShape {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return Array.isArray(v["choices"]);
+}
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const DEFAULT_PROXY_URL = "http://localhost:4000";
-const DEFAULT_MASTER_KEY = "sk-local-master";
 const DEFAULT_MAX_TOKENS = 2048;
 const DEFAULT_TEMPERATURE = 0.7;
 
@@ -92,7 +119,14 @@ function getProxyUrl(): string {
 }
 
 function getMasterKey(): string {
-  return process.env.LITELLM_MASTER_KEY ?? DEFAULT_MASTER_KEY;
+  const key = process.env.LITELLM_MASTER_KEY;
+  if (!key) {
+    throw new Error(
+      "LITELLM_MASTER_KEY is not set. " +
+        "Set this env var to the LiteLLM proxy master key before making LLM calls.",
+    );
+  }
+  return key;
 }
 
 /**
@@ -131,24 +165,23 @@ export async function proxyCall(options: ProxyCallOptions): Promise<ProxyCallRes
     );
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const data = (await response.json()) as any;
+  const raw: unknown = await response.json();
+  if (!isProxyResponse(raw)) {
+    throw new Error("LiteLLM proxy returned an unexpected response shape");
+  }
 
-  const choice = data?.choices?.[0];
+  const choice = raw.choices[0];
   if (!choice) {
     throw new Error("LiteLLM proxy returned no choices in response");
   }
 
-  const content: string =
-    typeof choice.message?.content === "string" ? choice.message.content : "";
-
   return {
-    content,
-    model: typeof data.model === "string" ? data.model : model,
+    content: choice.message.content,
+    model: raw.model || model,
     usage: {
-      promptTokens: data.usage?.prompt_tokens ?? 0,
-      completionTokens: data.usage?.completion_tokens ?? 0,
-      totalTokens: data.usage?.total_tokens ?? 0,
+      promptTokens: raw.usage?.prompt_tokens ?? 0,
+      completionTokens: raw.usage?.completion_tokens ?? 0,
+      totalTokens: raw.usage?.total_tokens ?? 0,
     },
   };
 }

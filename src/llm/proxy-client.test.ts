@@ -185,6 +185,24 @@ describe("proxyCall", () => {
     ).rejects.toThrow(/no choices/);
   });
 
+  it("throws when LITELLM_MASTER_KEY is not set", async () => {
+    delete process.env.LITELLM_MASTER_KEY;
+    await expect(
+      proxyCall({ source: "chat", messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/LITELLM_MASTER_KEY/);
+  });
+
+  it("throws when proxy returns an unexpected response shape", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ error: "bad shape" }),
+    } as Response);
+
+    await expect(
+      proxyCall({ source: "chat", messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/unexpected response shape/);
+  });
+
   it("uses LITELLM_PROXY_URL env var for base URL", async () => {
     process.env.LITELLM_PROXY_URL = "http://custom-proxy:9000";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
