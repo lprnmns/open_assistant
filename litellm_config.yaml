@@ -4,11 +4,13 @@
 # which are injected at runtime from the encrypted secrets file.
 # See: src/config/secrets.ts, scripts/init-secrets.ts
 #
-# Usage tiers:
-#   "chat"          — User-initiated conversations (strong model)
-#   "consciousness" — Background Consciousness Loop ticks (cheap model)
-#   "extraction"    — Memory extraction pipeline (cheap model)
-#   "sleep"         — Sleep phase consolidation/reflection (cheap model)
+# Available model aliases (caller selects by model_name):
+#   claude-sonnet / gpt-4o / gemini-pro    — strong models for chat
+#   claude-haiku / gpt-4o-mini / gemini-flash — cheap models for background tasks
+#
+# NOTE: Source-aware routing (chat vs consciousness vs extraction vs sleep)
+# will be implemented in Sub-Task 1.3 (LLM Proxy Integration Layer).
+# For now, the caller explicitly passes the desired model_name.
 
 model_list:
   # ── Anthropic ──────────────────────────────────────────────────────────────
