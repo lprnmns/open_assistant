@@ -1,0 +1,68 @@
+# LiteLLM Proxy Configuration — Open Assistant BYOK
+#
+# Keys are NOT stored here. They come from environment variables,
+# which are injected at runtime from the encrypted secrets file.
+# See: src/config/secrets.ts, scripts/init-secrets.ts
+#
+# Usage tiers:
+#   "chat"          — User-initiated conversations (strong model)
+#   "consciousness" — Background Consciousness Loop ticks (cheap model)
+#   "extraction"    — Memory extraction pipeline (cheap model)
+#   "sleep"         — Sleep phase consolidation/reflection (cheap model)
+
+model_list:
+  # ── Anthropic ──────────────────────────────────────────────────────────────
+  - model_name: claude-sonnet          # strong model for chat
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-haiku           # cheap model for background tasks
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # ── OpenAI ─────────────────────────────────────────────────────────────────
+  - model_name: gpt-4o                 # strong model for chat
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o-mini            # cheap model for background tasks
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  # ── Google ─────────────────────────────────────────────────────────────────
+  - model_name: gemini-pro             # strong model for chat
+    litellm_params:
+      model: gemini/gemini-1.5-pro
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: gemini-flash           # cheap model for background tasks
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+# ── Router: Source-aware model selection ────────────────────────────────────
+# The gateway sets x-source header to route to appropriate model tier.
+router_settings:
+  routing_strategy: simple-shuffle
+
+# ── General proxy settings ──────────────────────────────────────────────────
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Disable telemetry — no data leaves to LiteLLM servers
+  disable_spend_logs: false   # keep for cost dashboard
+  store_model_in_db: false
+
+# ── Logging — token usage only, never log key material ──────────────────────
+litellm_settings:
+  success_callback: []
+  failure_callback: []
+  # Redact sensitive data from all logs
+  redact_messages_in_logging: false   # message content ok to log
+  # Drop any key-like strings from logs (belt-and-suspenders)
+  drop_params:
+    - api_key
+    - authorization
