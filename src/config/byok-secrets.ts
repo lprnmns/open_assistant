@@ -184,11 +184,9 @@ export function loadAndInjectByokSecrets(secretsFilePath: string): ByokKeyName[]
 
   for (const name of BYOK_KEY_NAMES) {
     const value = keys[name];
-    if (value) {
+    if (value && !process.env[name]) {
       // Only inject if not already present (process env takes precedence)
-      if (!process.env[name]) {
-        process.env[name] = value;
-      }
+      process.env[name] = value;
       injected.push(name);
     }
   }

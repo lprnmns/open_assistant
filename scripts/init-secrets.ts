@@ -13,9 +13,8 @@
  *   --out <path>   Output path (default: config/secrets.enc)
  *   --force        Overwrite existing secrets file without prompting
  *
- * The master password is also written to the terminal for the operator to
- * store in their deployment's BYOK_MASTER_PASSWORD environment variable.
- * It is NEVER persisted by this script.
+ * The master password is NEVER printed to stdout or logged.
+ * The operator must record it from their own input before proceeding.
  */
 
 import fs from "node:fs";
@@ -153,6 +152,13 @@ async function main(): Promise<void> {
   // Allow pre-seeding from env for non-interactive / CI use
   const envPassword = process.env[MASTER_PASSWORD_ENV_VAR];
   if (envPassword) {
+    if (envPassword.length < 12) {
+      console.error(
+        `\n${MASTER_PASSWORD_ENV_VAR} is too short (minimum 12 characters). Aborted.`,
+      );
+      rl.close();
+      process.exit(1);
+    }
     console.log(
       `Using master password from ${MASTER_PASSWORD_ENV_VAR} env var.`,
     );
@@ -182,14 +188,10 @@ async function main(): Promise<void> {
   writeSecretsFile(OUT_PATH, encrypted);
 
   console.log(`\nSealed ${filledCount} key(s) → ${path.resolve(OUT_PATH)}`);
-  console.log("\n⚠️  IMPORTANT — set this in your deployment environment:");
-  console.log(`   ${MASTER_PASSWORD_ENV_VAR}=<your master password>`);
-  console.log("\n   docker-compose.yml or .env:\n");
-  console.log(`   ${MASTER_PASSWORD_ENV_VAR}=${password}\n`);
-  console.log(
-    "The master password is NOT stored anywhere by this script.\n" +
-      "Save it in your password manager and deployment secrets now.\n",
-  );
+  console.log("\nIMPORTANT — set the master password in your deployment environment:");
+  console.log(`  ${MASTER_PASSWORD_ENV_VAR}=<the password you just entered>`);
+  console.log("\nThe master password is NOT stored or printed by this script.");
+  console.log("Record it in your password manager and deployment secrets now.\n");
 }
 
 main().catch((err: unknown) => {

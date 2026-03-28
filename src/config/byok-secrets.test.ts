@@ -143,6 +143,22 @@ describe("loadAndInjectByokSecrets", () => {
     expect(process.env.OPENAI_API_KEY).toBe(existing);
   });
 
+  it("does not include already-present env keys in returned injected list", () => {
+    // OPENAI_API_KEY is already in env — vault has both keys
+    const existing = "sk-proj-alreadySetByEnv1234567890abcdefABCDEF";
+    process.env.OPENAI_API_KEY = existing;
+    delete process.env.ANTHROPIC_API_KEY;
+    writeSecretsFile(tmpPath, encryptSecrets(TEST_KEYS, TEST_PASSWORD));
+    process.env[MASTER_PASSWORD_ENV_VAR] = TEST_PASSWORD;
+
+    const injected = loadAndInjectByokSecrets(tmpPath);
+
+    // OPENAI_API_KEY was skipped (already present), so it must NOT appear in injected
+    expect(injected).not.toContain("OPENAI_API_KEY");
+    // ANTHROPIC_API_KEY was absent — it was actually injected
+    expect(injected).toContain("ANTHROPIC_API_KEY");
+  });
+
   it("file has mode 0o600 (owner-read-write only)", () => {
     writeSecretsFile(tmpPath, encryptSecrets(TEST_KEYS, TEST_PASSWORD));
     // On POSIX systems, verify file permissions
