@@ -137,3 +137,8 @@ docs/superpowers
 
 # Deprecated changelog fragment workflow
 changelog/fragments/
+
+# Open Assistant — encrypted secrets (never commit plaintext or encrypted keys)
+config/secrets.enc
+.secrets.enc
+*.secrets.enc
