@@ -9,6 +9,27 @@ Bu bir chatbot değil. Bu bir **varlık**.
 - Seni tanır. Unutmaz. Öğrenir.
 - Sana adapte olur — sen ona değil.
 
+## İş Modeli: "Bulut Garajı + Bilinç" Satıyoruz
+
+```
+BİZ NE SATIYORUZ?                   BİZ NE SATMIYORUZ?
+─────────────────                    ────────────────────
+7/24 yaşayan izole MicroVM/Container LLM token'ı (kullanıcı kendi öder)
+Consciousness Loop (Bilinç Döngüsü)  API key (kullanıcı kendi getirir)
+Living Brain (Kalıcı Bellek)          Model erişimi
+Act-First Karar Motoru                Yapay zeka "zekası"
+Proaktif Zeka Altyapısı
+Scale-to-Zero Yönetimi
+Güvenli API Key Kasası (Vault)
+
+BYOK (Bring Your Own Keys):
+├── Kullanıcı kendi OpenAI/Anthropic/Gemini key'ini getirir
+├── Key'ler şifreli kasada (Vault) saklanır
+├── LLM maliyetini kullanıcı kendi hesabından öder
+├── Platform sadece altyapı + bilinç ücreti alır (~$10/ay)
+└── Kullanıcı istediği modeli, istediği sağlayıcıyla kullanır
+```
+
 ---
 
 ## Sistem Geneli: Kuş Bakışı
@@ -62,9 +83,70 @@ Bu bir chatbot değil. Bu bir **varlık**.
 │  │ │  BRAIN   ││     │              │     │              │        │
 │  │ │(Bellek)  ││     │              │     │              │        │
 │  │ └──────────┘│     │              │     │              │        │
+│  │              │     │              │     │              │        │
+│  │ ┌──────────┐│     │              │     │              │        │
+│  │ │ VAULT    ││     │              │     │              │        │
+│  │ │(API Keys)││     │              │     │              │        │
+│  │ └──────────┘│     │              │     │              │        │
 │  │ 🔒 İzole    │     │ 🔒 İzole    │     │ 🔒 İzole    │        │
 │  └──────────────┘     └──────────────┘     └──────────────┘        │
 └─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## BYOK: Kendi Anahtarını Getir (Bring Your Own Keys)
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    BYOK MİMARİSİ                              │
+│                                                               │
+│  Kullanıcı kayıt oldu → Ayarlar panelinden API key girer     │
+│       │                                                       │
+│       ▼                                                       │
+│  ┌──────────────────────────────────────────────┐            │
+│  │  SECURE VAULT (API Key Kasası)                │            │
+│  │  ═══════════════════════════════════════════  │            │
+│  │                                                │            │
+│  │  Şifreleme: AES-256-GCM (at rest)             │            │
+│  │  Key derivation: Per-tenant master key         │            │
+│  │  Erişim: Sadece tenant'ın kendi container'ı    │            │
+│  │  Audit: Her key erişimi loglanır               │            │
+│  │                                                │            │
+│  │  usr_abc123:                                   │            │
+│  │  ├── openai:    sk-proj-****  (şifreli)       │            │
+│  │  ├── anthropic: sk-ant-****   (şifreli)       │            │
+│  │  └── gemini:    AI****        (şifreli)       │            │
+│  │                                                │            │
+│  │  Key asla:                                     │            │
+│  │  ├── Loglanmaz (düz metin olarak)             │            │
+│  │  ├── Platform çalışanlarına görünmez           │            │
+│  │  ├── Başka tenant'a sızmaz                    │            │
+│  │  └── Disk'e şifresiz yazılmaz                 │            │
+│  └──────────────────┬───────────────────────────┘            │
+│                     │                                         │
+│                     ▼                                         │
+│  ┌──────────────────────────────────────────────┐            │
+│  │  LiteLLM PROXY (Per-Tenant)                   │            │
+│  │                                                │            │
+│  │  Gateway LLM çağrısı yapar                    │            │
+│  │       │                                        │            │
+│  │       ▼                                        │            │
+│  │  LiteLLM → Vault'tan key'i çeker (runtime)   │            │
+│  │       │    (bellekte tutar, diske yazmaz)      │            │
+│  │       ▼                                        │            │
+│  │  API çağrısı (kullanıcının kendi key'iyle)    │            │
+│  │       │                                        │            │
+│  │  Token kullanımını logla                       │            │
+│  │  (maliyet dashboard için — key değil!)        │            │
+│  │       │                                        │            │
+│  │  Yanıtı Gateway'e döndür                      │            │
+│  └──────────────────────────────────────────────┘            │
+│                                                               │
+│  Platform maliyeti: $0 (LLM için)                            │
+│  Kullanıcı maliyeti: Kendi API kullanımı kadar               │
+│  Platform geliri: Aylık abonelik (~$10/ay)                   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -185,7 +267,9 @@ Redis Stream (Event Buffer) → tenant.usr_abc.inbox'a yaz
 │     ├── Cognitive Load algıla (ton, uzunluk, hız)        │
 │     └── Context paketi oluştur                           │
 │                                                           │
-│  3. LLM ÇAĞRISI (Platform LLM Proxy üzerinden)          │
+│  3. LLM ÇAĞRISI (BYOK — kullanıcının kendi key'iyle)    │
+│     ├── Vault'tan API key çek (runtime, bellekte)        │
+│     ├── LiteLLM Proxy üzerinden çağrı yap               │
 │     ├── System: Cortex + ilgili bellekler + mod bilgisi  │
 │     ├── User: Kullanıcı mesajı                           │
 │     ├── Tools: Primitives (schedule, notify, watch...)   │
@@ -196,7 +280,7 @@ Redis Stream (Event Buffer) → tenant.usr_abc.inbox'a yaz
 │  4. EYLEM MOTORU                                         │
 │     ├── LLM tool call'ları var mı?                       │
 │     │   ├── LLM Reversibility Score atar                 │
-│     │   ├── ⚠️ POLICY ENGINE (DPE) kontrol eder  🛡️#3  │
+│     │   ├── POLICY ENGINE (DPE) kontrol eder      🛡️#3  │
 │     │   │   └── Policy min_score > LLM skoru → OVERRIDE │
 │     │   ├── Final skor 1-3 → SORMADAN YAP               │
 │     │   ├── Final skor 4-6 → YAP + BİLDİR               │
@@ -222,6 +306,11 @@ Redis Stream (Event Buffer) → tenant.usr_abc.inbox'a yaz
 Her 1-5 dakikada (adaptive):
 
 CONSCIOUSNESS LOOP TICK
+    │
+    ├── WATCHDOG ($0, LLM çağırmaz)
+    │   ├── Delta check: değişen bir şey var mı?
+    │   ├── Yoksa → TICK ATLA (maliyet: $0)
+    │   └── Varsa → LLM'i uyandır (BYOK key ile)
     │
     ├── Zaman farkındalığı
     │   ├── Saat kontrolü → kullanıcı normalde ne yapar?
@@ -288,10 +377,12 @@ SLEEP PHASE BAŞLA
 02-Güvenlik     Act-First    ■            Tenant       Bellek
 (Security)      skoru        ─            izolasyonu   şifreleme
                 hesapla                    NetworkPolicy
+                                          + Vault BYOK
 
 03-SaaS         Per-user     Zero-trust   ■            Per-user
 (Platform)      loop         her          ─            LanceDB +
                 instance     katmanda                  Kuzu PVC
+                             Vault key
 
 06-Bellek       Her tick'te  Encrypted    Cloud'da     ■
 (Living Brain)  arama yapar  at rest      kalıcı       ─
@@ -310,10 +401,12 @@ SLEEP PHASE BAŞLA
        ├── Yansıma: "Manas sınava yeterli çalışmıyor"
        ├── Gece araştırması: Fizik formül listesi hazırlandı
        └── Cortex güncellendi
+       (Tüm LLM çağrıları kullanıcının BYOK key'iyle yapıldı)
 
 07:30  CONSCIOUSNESS TICK
+       ├── Watchdog: Takvim event 90dk içinde → WAKE
        ├── Zaman: Kullanıcı genelde şimdi uyanır
-       ├── Hava: Yağmurlu (API kontrolü)
+       ├── Hava: Yağmurlu (API kontrolü — ücretsiz)
        ├── Takvim: 09:00 Ali ile toplantı, 14:00 ders
        ├── Mail: X şirketinden yeni mail! (gece gelmiş)
        ├── Deadline: Fizik sınavı 3 gün sonra
@@ -333,11 +426,11 @@ SLEEP PHASE BAŞLA
        └── AI: [formül listesi] (kısa, emoji yok)
 
 09:50  CONSCIOUSNESS TICK
-       ├── Toplantı 09:00-09:45 (takvimden)
-       ├── 50 dk sessizlik → normal (toplantıdaydı)
-       └── KARAR: SESSİZ_KAL
+       ├── Watchdog: Hiçbir delta yok → TICK ATLA ($0)
+       └── (Toplantı 09:00-09:45, sessizlik normal)
 
 12:00  CONSCIOUSNESS TICK
+       ├── Watchdog: Sessizlik eşiği + bekleyen not → WAKE
        ├── X şirketi mailine hala yanıt yazılmadı
        ├── Aciliyet: Mülakat daveti, 2 gün var
        └── KARAR: MESAJ_AT
@@ -360,11 +453,11 @@ SLEEP PHASE BAŞLA
        └── AI: Detaylı konu listesi + öneri
 
 18:00  CONSCIOUSNESS TICK
-       ├── Spor saati (PzSaSa 18:00 rutini)
-       ├── Bugün Perşembe → spor günü değil
-       └── KARAR: SESSİZ_KAL
+       ├── Watchdog: Hiçbir delta yok → TICK ATLA ($0)
+       └── Spor saati değil (bugün Perşembe)
 
 20:00  CONSCIOUSNESS TICK
+       ├── Watchdog: Bekleyen not var → WAKE
        ├── Akşam oldu, fizik sınavı 3 gün sonra
        ├── Bugün fizik hakkında 1 soru soruldu (az)
        └── KARAR: NOT_AL (yarın sabah fizik check-in)
@@ -379,88 +472,111 @@ SLEEP PHASE BAŞLA
 
 ```
 gelistirme-plani/
-├── 00-mega-mimari.md      ← BU DOSYA (sistem geneli)
+├── 00-mega-mimari.md      ← BU DOSYA (sistem geneli + BYOK iş modeli)
 ├── 01-proaktif-zeka.md    ← Consciousness Loop + Dynamic Compiler
 │                             + Silence-is-Data + Temporal Anomaly
 │                             + Cognitive Load Detection
 ├── 02-guvenlik-sandbox.md ← Cloud tenant izolasyonu
 │                             + Act-First Reversibility Score
-│                             + Zero-trust + Audit trail
-├── 03-kolay-kurulum.md    ← Zero-Config Cloud SaaS
-│                             + Auto-provisioning + Platform LLM
-│                             + Pricing + Onboarding UX
-├── 04-maliyet-dashboard.md ← Token izleme + Model cascading
-│                              (güncellenecek: SaaS billing entegrasyonu)
+│                             + Zero-trust + Audit trail + Vault BYOK
+├── 03-kolay-kurulum.md    ← BYOK SaaS: API Key Vault + Auto-Provisioning
+│                             + Onboarding UX + Hetzner M1 planı
+├── 04-maliyet-dashboard.md ← BYOK Maliyet İzleme: Kullanıcının kendi
+│                              key harcamasını takip + bütçe uyarıları
 ├── 05-turkce-i18n.md      ← Çok dilli destek + Türkçe NLP
-│                             (güncellenecek: cloud TTS/STT)
 ├── 06-kalici-bellek.md    ← Living Brain (4 katman)
 │                             + REM Sleep Phase + Knowledge Graph
 │                             + Behavioral Model + Auto-extraction
 ├── 07-avatar-workflow.md  ← Animasyonlu avatar + No-code builder
-│                             (güncellenecek: web-first avatar)
-└── README.md              ← Index (güncellenecek)
+└── README.md              ← Index + Milestone planı
 ```
 
 ---
 
-## Faz Planı (Büyük Resim)
+## Milestone Planı (3 Aşamalı Yol Haritası)
 
 ```
-FAZ 1: MVP — "Konuşan Beyin" (0-3 ay)
-├── Cloud SaaS altyapısı (K8s + provisioner)
-├── Web chat UI + auth (Google/Apple)
-├── Living Brain: Cortex + Hippocampus
-├── Act-First karar motoru (temel)
-├── Consciousness Loop (basit, 5dk tick)
-├── Memory extraction (her mesajda)
-├── Free plan (günde 50 mesaj, temel model)
-└── Deliverable: Kayıt ol, konuş, seni tanımaya başlasın
+MILESTONE 1: "Single-Tenant MVP" — Sadece Benim İçin (Proof of Concept)
+═══════════════════════════════════════════════════════════════════════
+Hedef: Sistemi sadece Kurucu (Manas) için, kendi Hetzner sunucusunda
+       ve kendi Pro API hesaplarıyla 7/24 kusursuz çalışır hale getirmek.
 
-FAZ 2: "Uyanık Varlık" (3-6 ay)
-├── WhatsApp + Telegram entegrasyonu
-├── Dynamic Trigger Compiler
-├── Consciousness Loop: Tam özellikli (adaptive tick)
-├── Silence-is-Data + Temporal Anomaly
-├── Cognitive Load Detection
-├── Sleep Phase (çöp toplama + konsolidasyon)
-├── Pro plan + Stripe billing
-├── Maliyet dashboard (temel)
-└── Deliverable: Proaktif mesajlar, seni tanıyan asistan
+İçerik:
+├── Heuristic Watchdog (delta check, $0 pre-LLM filtre)
+├── Consciousness Loop (adaptive tick, LLM düşünce motoru)
+├── Living Brain — Cortex + Hippocampus (LanceDB + temporal search)
+├── Act-First Karar Motoru + DPE (Deterministic Policy Engine)
+├── Memory Extraction Pipeline (her mesajdan otomatik çıkarım)
+├── Sleep Phase (çöp toplama + konsolidasyon + yansıma)
+├── BYOK Key Yönetimi (basit — .env veya encrypted config)
+├── Web Chat UI (basit, tek kullanıcı)
+├── WhatsApp/Telegram entegrasyonu (en az 1 kanal)
+└── Docker Compose ile Hetzner'de deploy
 
-FAZ 3: "Yaşayan Varlık" (6-12 ay)
-├── Knowledge Graph (Kuzu)
-├── Behavioral Model (rutin + anomali tespiti)
-├── Sleep Phase: Gece araştırması
-├── Yansıma (reflection) motoru
-├── Animasyonlu avatar (web, basit 2D)
-├── Sesli etkileşim (Whisper + TTS)
-├── Türkçe + i18n (temel)
-├── No-code workflow builder (temel)
-├── Mobile app (PWA)
-├── Firecracker izolasyonu
-└── Deliverable: Gerçekten "yaşayan" hissettiren asistan
+Çıktı: Kusursuz çalışan, uyuyan ve uyanan, proaktif mesajlar atan
+       tek kişilik bir Yaşayan Varlık.
 
-FAZ 4: "Ekosistem" (12+ ay)
-├── Tam i18n (10+ dil)
-├── Native mobile app (iOS/Android)
-├── Team plan + admin panel
-├── 3D avatar + lip-sync
-├── Plugin/skill marketplace
-├── Self-host deployment kit
-├── Enterprise features (SSO, compliance)
-└── Deliverable: Global platform
+Altyapı: Hetzner VPS (CX31 veya CX41), Docker Compose, Redis,
+         LanceDB, kendi API key'leri (OpenAI/Anthropic/Gemini)
+
+MILESTONE 2: "Startup Landing & Yatırım" — Demo Aşaması
+═══════════════════════════════════════════════════════════
+Hedef: M1'deki çalışan sistemin ekran kayıtlarıyla bir Landing Page
+       (tanıtım sitesi) kurmak ve bulut kredisi/hibe almak.
+
+İçerik:
+├── Landing page: "Zero-Config, BYOK tabanlı 7/24 Kişisel AI Altyapısı"
+├── Demo videoları (M1'in gerçek çalışma kayıtları)
+├── Waitlist sistemi (e-posta toplama)
+├── Pitch deck hazırlığı
+└── Başvurular:
+    ├── AWS Activate ($10,000+ kredi)
+    ├── Microsoft for Startups ($25,000+ Azure kredisi)
+    ├── Google for Startups ($100,000 Cloud kredisi)
+    ├── Hetzner startup programı
+    └── YC / Techstars başvuruları
+
+Çıktı: $10,000+ bulut kredisi (hibe) ve erken kullanıcı waitlist'i.
+
+MILESTONE 3: "Multi-Tenant SaaS" — Production
+═══════════════════════════════════════════════
+Hedef: Alınan hibe ile sistemi Kubernetes/MicroVM altyapısına taşıyıp
+       genel kullanıma açmak.
+
+İçerik:
+├── Kubernetes cluster (hibelerle finanse)
+├── Auto-provisioner (kayıt → izole container, <10 saniye)
+├── Secure Vault (HashiCorp Vault / Sealed Secrets)
+├── BYOK API Key yönetimi (UI + güvenli saklama)
+├── Scale-to-Zero + Event Buffer (sıfır mesaj kaybı)
+├── Stripe billing (~$10/ay abonelik)
+├── Multi-kanal (WhatsApp + Telegram + Discord + Web)
+├── Maliyet Dashboard (kullanıcının kendi BYOK harcamasını izler)
+├── Admin panel + kullanıcı ayarları
+└── Firecracker MicroVM izolasyonu (Faz 2)
+
+Fiyatlandırma:
+├── Free: 7 gün deneme, temel özellikler
+├── Pro (~$10/ay): 7/24 container, tüm özellikler, tüm kanallar
+└── Team (~$25/kullanıcı/ay): Admin panel, paylaşılan bilgi tabanı
+
+Çıktı: Kullanıcıların kayıt olup kendi API key'lerini güvenle
+       Vault'a girdiği, anında izole container'larının ayağa kalktığı
+       gerçek SaaS platformu.
 ```
 
 ---
 
 ## Son Söz
 
-Bu mimari tek bir ilkeye dayanır:
+Bu mimari iki ilkeye dayanır:
 
 > **"Asistan, kullanıcının hayatına adapte olur — kullanıcı asistana değil."**
 
-Kullanıcı kurulum yapmaz. API key yapıştırmaz. Trigger ayarlamaz.
-Hatırlatma istemez. İzin vermek için beklenmez (risk yoksa).
-Bellek yönetmez. Çöp toplamaz.
+> **"Biz zeka satmıyoruz, zekanın 7/24 yaşayacağı evi satıyoruz."**
+
+Kullanıcı kurulum yapmaz. VPS kurmaz. Docker bilmez.
+Kendi API key'ini güvenle girer. Container'ı saniyede ayağa kalkar.
+Asistanı 7/24 yaşar, düşünür, öğrenir.
 
 **Sadece konuşur. Gerisi olur.**
