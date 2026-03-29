@@ -11,6 +11,8 @@ import {
   applyToolPolicyPipeline,
   buildDefaultToolPolicyPipelineSteps,
 } from "../agents/tool-policy-pipeline.js";
+import { evaluateToolEnforcement } from "../agents/tool-policy-enforce.js";
+import { getSessionRateLimitStore } from "../agents/tool-policy-rate-limit-store.js";
 import {
   collectExplicitAllowlist,
   mergeAlsoAllowPolicy,
@@ -45,6 +47,12 @@ type ToolsInvokeBody = {
   args?: unknown;
   sessionKey?: unknown;
   dryRun?: unknown;
+  /**
+   * Set to true when a human has explicitly approved this tool call.
+   * Required for tools declared as requiresHuman in policy metadata.
+   * Absent or false → requiresHuman tools are blocked (fail-closed).
+   */
+  humanApproved?: unknown;
 };
 
 function resolveSessionKeyFromBody(body: ToolsInvokeBody): string | undefined {
@@ -180,6 +188,7 @@ export async function handleToolsInvokeHttpRequest(
     sendInvalidRequest(res, "tools.invoke requires body.tool");
     return true;
   }
+  const humanApproved = body.humanApproved === true;
 
   if (process.env.VITEST && MEMORY_TOOL_NAMES.has(toolName)) {
     const reasons = resolveMemoryToolDisableReasons(cfg);
@@ -312,6 +321,24 @@ export async function handleToolsInvokeHttpRequest(
     });
     return true;
   }
+
+  // Policy enforcement: requiresHuman (fail-closed) + rate-limit.
+  // Per-session store persists counts across HTTP requests for the same session.
+  const rateLimitStore = getSessionRateLimitStore(sessionKey);
+  const enforcement = evaluateToolEnforcement({
+    toolName,
+    meta: subagentFiltered.meta,
+    humanApproved,
+    callCounts: rateLimitStore,
+  });
+  if (!enforcement.allowed) {
+    sendJson(res, 403, {
+      ok: false,
+      error: { type: enforcement.reason, message: enforcement.message },
+    });
+    return true;
+  }
+  rateLimitStore.record(toolName);
 
   try {
     const toolCallId = `http-${Date.now()}`;
