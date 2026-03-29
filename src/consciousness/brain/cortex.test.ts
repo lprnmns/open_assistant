@@ -128,6 +128,30 @@ describe("InMemoryCortex — recent ordering", () => {
     expect(c.recent(3)).toEqual([]);
     expect(c.recent(0)).toEqual([]);
   });
+
+  it("fractional n is floored — recent(1.2) returns 1 item, not 2", () => {
+    const c = new InMemoryCortex(5);
+    c.stage(note("a"));
+    c.stage(note("b"));
+    c.stage(note("c"));
+    expect(c.recent(1.2).length).toBe(1);
+    expect(c.recent(1.2)[0].content).toBe("c");
+  });
+
+  it("fractional n is floored — recent(2.9) returns 2 items", () => {
+    const c = new InMemoryCortex(5);
+    c.stage(note("a"));
+    c.stage(note("b"));
+    c.stage(note("c"));
+    expect(c.recent(2.9).length).toBe(2);
+  });
+
+  it("negative fractional n is treated as 0", () => {
+    const c = new InMemoryCortex(5);
+    c.stage(note("x"));
+    expect(c.recent(-0.5)).toEqual([]);
+    expect(c.recent(-1.9)).toEqual([]);
+  });
 });
 
 // ── circular wrap-around ──────────────────────────────────────────────────────

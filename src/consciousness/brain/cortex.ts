@@ -64,7 +64,7 @@ export class InMemoryCortex implements Cortex {
    * Returns min(n, size) items.  Never throws; returns [] for n ≤ 0.
    */
   recent(n: number): readonly MemoryNote[] {
-    const count = Math.min(Math.max(0, n), this.size);
+    const count = Math.min(Math.max(0, Math.floor(n)), this.size);
     const result: MemoryNote[] = [];
     for (let i = 0; i < count; i++) {
       // (head - 1) is the most recent, (head - 2) the one before, etc.
