@@ -9,11 +9,96 @@ import {
   type ToolPolicyLike,
 } from "./tool-policy.js";
 
-export type ToolPolicyPipelineStep = {
-  policy: ToolPolicyLike | undefined;
-  label: string;
-  stripPluginOnlyAllowlist?: boolean;
+// ── Metadata types ────────────────────────────────────────────────────────────
+
+/**
+ * Rate-limit configuration for a single tool.
+ * All fields are optional; a missing field means "no limit on that window".
+ */
+export type RateLimitConfig = {
+  /** Maximum invocations allowed per minute. */
+  perMinute?: number;
+  /** Maximum invocations allowed per hour. */
+  perHour?: number;
+  /** Maximum invocations allowed per day. */
+  perDay?: number;
 };
+
+/**
+ * Per-tool metadata contributed by a single pipeline step.
+ * Keys are tool names (normalized before storage — see normalizeToolName).
+ */
+export type ToolPolicyMeta = {
+  /**
+   * Reversibility score per tool (0.0 = fully destructive, 1.0 = fully reversible).
+   * Example: { exec: 0.0, read: 1.0 }
+   * When multiple steps supply a score for the same tool, the last step wins.
+   */
+  reversibilityScore?: Record<string, number>;
+
+  /**
+   * Tool names that must not execute without explicit human approval.
+   * Accumulated as a union across all steps — adding a tool here can never be undone
+   * by a later step.
+   */
+  requiresHuman?: string[];
+
+  /**
+   * Per-tool rate-limit configuration.
+   * When multiple steps supply limits for the same tool, the last step wins.
+   */
+  rateLimits?: Record<string, RateLimitConfig>;
+};
+
+/**
+ * Resolved (merged) metadata from all pipeline steps.
+ * Produced by applyToolPolicyPipeline() alongside the filtered tool list.
+ */
+export type ResolvedToolPolicyMeta = {
+  /**
+   * Merged reversibility scores (later step overrides earlier per tool).
+   * Absent entry means no score was declared — callers should treat unknown
+   * tools as needing explicit review.
+   */
+  readonly reversibilityScores: Readonly<Record<string, number>>;
+
+  /**
+   * Union of all requiresHuman entries across all steps.
+   * Use .has(normalizeToolName(toolName)) to check a specific tool.
+   */
+  readonly requiresHuman: ReadonlySet<string>;
+
+  /**
+   * Merged rate limits (later step overrides earlier per tool).
+   */
+  readonly rateLimits: Readonly<Record<string, RateLimitConfig>>;
+};
+
+// ── Pipeline types ────────────────────────────────────────────────────────────
+
+export type ToolPolicyPipelineStep = {
+  /** Allow/deny filter to apply at this step. undefined = step is a no-op for filtering. */
+  policy: ToolPolicyLike | undefined;
+  /** Human-readable label used in warning messages. */
+  label: string;
+  /** When true, strips plugin-only allowlists to prevent accidentally hiding core tools. */
+  stripPluginOnlyAllowlist?: boolean;
+  /**
+   * Per-tool metadata contributed by this step.
+   * Accumulated independently of policy filtering — a metadata-only step
+   * (policy: undefined, meta: {...}) is valid and its meta is always applied.
+   */
+  meta?: ToolPolicyMeta;
+};
+
+export type ToolPolicyPipelineResult = {
+  /** Tools that passed all policy filter steps. */
+  tools: AnyAgentTool[];
+  /** Merged metadata from all steps in the pipeline. */
+  meta: ResolvedToolPolicyMeta;
+};
+
+// ── Default step builder ──────────────────────────────────────────────────────
 
 export function buildDefaultToolPolicyPipelineSteps(params: {
   profilePolicy?: ToolPolicyLike;
@@ -63,12 +148,29 @@ export function buildDefaultToolPolicyPipelineSteps(params: {
   ];
 }
 
+// ── Pipeline engine ───────────────────────────────────────────────────────────
+
+/**
+ * Apply a sequence of tool-policy filter steps and accumulate step metadata.
+ *
+ * Each step may contribute:
+ *   - A policy (allow/deny filter) — when present, removes tools from the working set
+ *   - Metadata (reversibilityScore, requiresHuman, rateLimits) — always accumulated,
+ *     even when policy is undefined
+ *
+ * Metadata merge rules:
+ *   - reversibilityScores: last step wins per tool name
+ *   - requiresHuman:       cumulative union (entries can only be added, never removed)
+ *   - rateLimits:          last step wins per tool name
+ *
+ * @returns ToolPolicyPipelineResult with filtered tools and merged metadata
+ */
 export function applyToolPolicyPipeline(params: {
   tools: AnyAgentTool[];
   toolMeta: (tool: AnyAgentTool) => { pluginId: string } | undefined;
   warn: (message: string) => void;
   steps: ToolPolicyPipelineStep[];
-}): AnyAgentTool[] {
+}): ToolPolicyPipelineResult {
   const coreToolNames = new Set(
     params.tools
       .filter((tool) => !params.toolMeta(tool))
@@ -81,8 +183,37 @@ export function applyToolPolicyPipeline(params: {
     toolMeta: params.toolMeta,
   });
 
+  // Mutable accumulators for metadata
+  const reversibilityScores: Record<string, number> = {};
+  const requiresHuman = new Set<string>();
+  const rateLimits: Record<string, RateLimitConfig> = {};
+
   let filtered = params.tools;
+
   for (const step of params.steps) {
+    // ── Accumulate metadata (always, even when policy is absent) ────────────
+    if (step.meta) {
+      if (step.meta.reversibilityScore) {
+        for (const [name, score] of Object.entries(step.meta.reversibilityScore)) {
+          const key = normalizeToolName(name);
+          if (key) reversibilityScores[key] = score;
+        }
+      }
+      if (step.meta.requiresHuman) {
+        for (const name of step.meta.requiresHuman) {
+          const key = normalizeToolName(name);
+          if (key) requiresHuman.add(key);
+        }
+      }
+      if (step.meta.rateLimits) {
+        for (const [name, limit] of Object.entries(step.meta.rateLimits)) {
+          const key = normalizeToolName(name);
+          if (key) rateLimits[key] = limit;
+        }
+      }
+    }
+
+    // ── Apply policy filter (only when policy is present) ───────────────────
     if (!step.policy) {
       continue;
     }
@@ -111,8 +242,14 @@ export function applyToolPolicyPipeline(params: {
     const expanded = expandPolicyWithPluginGroups(policy, pluginGroups);
     filtered = expanded ? filterToolsByPolicy(filtered, expanded) : filtered;
   }
-  return filtered;
+
+  return {
+    tools: filtered,
+    meta: { reversibilityScores, requiresHuman, rateLimits },
+  };
 }
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
 
 function describeUnknownAllowlistSuffix(params: {
   strippedAllowlist: boolean;
