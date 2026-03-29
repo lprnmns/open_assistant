@@ -163,6 +163,19 @@ const coreEntries: CoreCliEntry[] = [
   {
     commands: [
       {
+        name: "cost",
+        description: "Show BYOK LLM spending from the local cost store",
+        hasSubcommands: true,
+      },
+    ],
+    register: async ({ program }) => {
+      const mod = await import("../../commands/cost.js");
+      mod.registerCostCli(program);
+    },
+  },
+  {
+    commands: [
+      {
         name: "mcp",
         description: "Manage embedded Pi MCP servers",
         hasSubcommands: true,
