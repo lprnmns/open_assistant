@@ -47,6 +47,7 @@ import { cleanToolSchemaForGemini, normalizeToolParameters } from "./pi-tools.sc
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import type { SandboxContext } from "./sandbox.js";
 import { createToolFsPolicy, resolveToolFsConfig } from "./tool-fs-policy.js";
+import { wrapToolWithEnforcement } from "./tool-policy-enforce.js";
 import {
   applyToolPolicyPipeline,
   buildDefaultToolPolicyPipelineSteps,
@@ -608,7 +609,12 @@ export function createOpenClawCodingTools(options?: {
       modelCompat: options?.modelCompat,
     }),
   );
-  const withHooks = normalized.map((tool) =>
+  // Wrap each tool with policy enforcement (requiresHuman fail-closed, rate-limit).
+  // callCounts is undefined here — rate-limit counting is wired at a higher layer.
+  const withEnforcement = normalized.map((tool) =>
+    wrapToolWithEnforcement(tool, subagentFiltered.meta),
+  );
+  const withHooks = withEnforcement.map((tool) =>
     wrapToolWithBeforeToolCallHook(tool, {
       agentId,
       sessionKey: options?.sessionKey,
