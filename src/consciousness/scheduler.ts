@@ -59,6 +59,14 @@ export class ConsciousnessScheduler {
   private state: ConsciousnessState;
   private timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private running = false;
+  /**
+   * Separate pause flag — does NOT alias state.phase.
+   * Reason: tick() returns a new ConsciousnessState with phase:"IDLE", and
+   * runTick() writes `this.state = result.state`, which would silently
+   * overwrite any "PAUSED" phase set by pause() while the tick was in-flight.
+   * A dedicated boolean is immune to that overwrite.
+   */
+  private paused = false;
   private readonly options: SchedulerOptions;
 
   constructor(options: SchedulerOptions) {
@@ -93,6 +101,7 @@ export class ConsciousnessScheduler {
    * reschedule.  State phase is set to PAUSED.
    */
   pause(): void {
+    this.paused = true;
     if (this.timer !== undefined) {
       clearTimeout(this.timer);
       this.timer = undefined;
@@ -102,10 +111,12 @@ export class ConsciousnessScheduler {
 
   /**
    * Resume from PAUSED.  Schedules the next tick after minTickIntervalMs.
-   * No-op if the scheduler was never started.
+   * No-op if the scheduler was never started OR if it is not currently paused
+   * (guards against duplicate timers when called from a non-paused state).
    */
   resume(): void {
-    if (!this.running) return;
+    if (!this.running || !this.paused) return;
+    this.paused = false;
     this.state = { ...this.state, phase: "IDLE" };
     this.scheduleNext(this.state.config.minTickIntervalMs);
   }
@@ -113,7 +124,8 @@ export class ConsciousnessScheduler {
   // ── Internal tick loop ──────────────────────────────────────────────────────
 
   private scheduleNext(delayMs: number): void {
-    if (!this.running) return;
+    // paused flag is authoritative — immune to state.phase being overwritten by tick()
+    if (!this.running || this.paused) return;
     this.timer = setTimeout(() => {
       void this.runTick();
     }, delayMs);
@@ -133,7 +145,9 @@ export class ConsciousnessScheduler {
 
     // ② Run one consciousness tick
     const result = await tick(snap, this.state);
-    this.state = result.state;
+    // Preserve PAUSED phase if pause() was called while this tick was in-flight;
+    // tick() always returns phase:"IDLE" and would otherwise overwrite it.
+    this.state = this.paused ? { ...result.state, phase: "PAUSED" } : result.state;
 
     // ③ Dispatch decision side-effects (errors caught inside dispatchDecision)
     if (result.decision !== undefined) {

@@ -159,6 +159,54 @@ describe("ConsciousnessScheduler — pause / resume", () => {
     expect(buildSnapshot).toHaveBeenCalledOnce();
     scheduler.stop();
   });
+
+  it("in-flight tick does not reschedule when pause() arrived during execution", async () => {
+    // Use a deferred promise so we can pause() while the tick is suspended at buildSnapshot
+    let resolveSnapshot!: (v: WorldSnapshot) => void;
+    const inflightPromise = new Promise<WorldSnapshot>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    const buildSnapshot = vi
+      .fn()
+      .mockReturnValueOnce(inflightPromise) // first call: suspended
+      .mockResolvedValue(makeSnap());       // subsequent calls: instant
+
+    const scheduler = new ConsciousnessScheduler({ buildSnapshot, dispatch: makeDispatch() });
+    scheduler.start();
+
+    // Fire the timer synchronously — runTick() starts but suspends at await buildSnapshot()
+    vi.advanceTimersByTime(cfg.minTickIntervalMs);
+
+    // While tick is in-flight, pause the scheduler
+    scheduler.pause();
+
+    // Now let buildSnapshot resolve — runTick() continues to completion
+    resolveSnapshot(makeSnap());
+    await Promise.resolve(); // flush buildSnapshot microtask
+    await Promise.resolve(); // flush tick() microtask
+    await Promise.resolve(); // flush dispatchDecision / scheduleNext microtask
+
+    // scheduleNext() should have seen phase=PAUSED and NOT scheduled another tick
+    await vi.advanceTimersByTimeAsync(cfg.maxTickIntervalMs);
+    expect(buildSnapshot).toHaveBeenCalledOnce();
+
+    scheduler.stop();
+  });
+
+  it("resume() is a no-op when scheduler is already running (not paused)", async () => {
+    const buildSnapshot = vi.fn().mockResolvedValue(makeSnap());
+    const scheduler = new ConsciousnessScheduler({ buildSnapshot, dispatch: makeDispatch() });
+
+    scheduler.start();
+    // Calling resume() on an IDLE (not PAUSED) scheduler must not create a duplicate timer
+    scheduler.resume();
+
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+
+    // Exactly one tick, not two from a duplicate timer
+    expect(buildSnapshot).toHaveBeenCalledOnce();
+    scheduler.stop();
+  });
 });
 
 // ── resilience ────────────────────────────────────────────────────────────────
