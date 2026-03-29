@@ -48,7 +48,7 @@ import type { AnyAgentTool } from "./pi-tools.types.js";
 import type { SandboxContext } from "./sandbox.js";
 import { createToolFsPolicy, resolveToolFsConfig } from "./tool-fs-policy.js";
 import { wrapToolWithEnforcement } from "./tool-policy-enforce.js";
-import { InMemoryRateLimitStore } from "./tool-policy-rate-limit-store.js";
+import { getSessionRateLimitStore, InMemoryRateLimitStore } from "./tool-policy-rate-limit-store.js";
 import {
   applyToolPolicyPipeline,
   buildDefaultToolPolicyPipelineSteps,
@@ -610,9 +610,12 @@ export function createOpenClawCodingTools(options?: {
       modelCompat: options?.modelCompat,
     }),
   );
-  // One rate-limit store per createOpenClawCodingTools call (= per session init).
-  // Sliding-window counts persist for the lifetime of this tool set.
-  const rateLimitStore = new InMemoryRateLimitStore();
+  // Use the session-keyed store so counts survive across attempt/compact cycles
+  // that re-invoke createOpenClawCodingTools.  Fall back to a fresh instance only
+  // when no sessionKey is available (e.g. isolated unit tests).
+  const rateLimitStore = options?.sessionKey
+    ? getSessionRateLimitStore(options.sessionKey)
+    : new InMemoryRateLimitStore();
   // Wrap each tool with policy enforcement (requiresHuman fail-closed, rate-limit).
   const withEnforcement = normalized.map((tool) =>
     wrapToolWithEnforcement(tool, subagentFiltered.meta, rateLimitStore),
