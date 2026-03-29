@@ -347,6 +347,13 @@ export type ConsciousnessState = {
   llmCallCount: number;
 
   /**
+   * The adaptive tick interval currently in effect (ms).
+   * Grows toward maxTickIntervalMs when idle; resets to minTickIntervalMs on wake.
+   * Seeded to config.minTickIntervalMs at boot.
+   */
+  currentDelayMs: number;
+
+  /**
    * Unix ms when the loop was last started (or restarted after PAUSED).
    */
   startedAt: number;
@@ -366,6 +373,7 @@ export function makeInitialConsciousnessState(
     lastDecision: undefined,
     tickCount: 0,
     llmCallCount: 0,
+    currentDelayMs: config.minTickIntervalMs,
     startedAt: Date.now(),
   };
 }
