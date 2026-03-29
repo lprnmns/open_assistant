@@ -35,6 +35,15 @@ export type RateLimitCallCounts = {
   getCount: (toolName: string, window: RateLimitWindow) => number;
 };
 
+/**
+ * Extends RateLimitCallCounts with a write side: record one call for a tool.
+ * record() must be called after enforcement passes so the count advances for
+ * the next caller in the same window.
+ */
+export type RateLimitStore = RateLimitCallCounts & {
+  record: (toolName: string) => void;
+};
+
 // ── Enforcement decision ──────────────────────────────────────────────────────
 
 export type ToolEnforcementDecision =
@@ -119,12 +128,14 @@ export function evaluateToolEnforcement(params: {
  *
  * @param tool       The tool to wrap (any object with .name and optional .execute).
  * @param meta       Pipeline metadata for enforcement lookups.
- * @param callCounts Optional rate-limit store; undefined disables rate-limit checks.
+ * @param store Optional rate-limit store; undefined disables rate-limit checks.
+ *             When provided, record() is called after enforcement passes so the
+ *             count advances for subsequent callers in the same window.
  */
 export function wrapToolWithEnforcement<T extends { name: string }>(
   tool: T,
   meta: ResolvedToolPolicyMeta,
-  callCounts?: RateLimitCallCounts,
+  store?: RateLimitStore,
 ): T {
   // oxlint-disable-next-line typescript/no-explicit-any
   const asAny = tool as any;
@@ -138,11 +149,12 @@ export function wrapToolWithEnforcement<T extends { name: string }>(
         toolName: tool.name,
         meta,
         humanApproved: false, // agent path: LLM cannot self-approve requiresHuman tools
-        callCounts,
+        callCounts: store,
       });
       if (!decision.allowed) {
         throw new Error(decision.message);
       }
+      store?.record(tool.name);
       return original(...args);
     },
   } as T;

@@ -12,6 +12,7 @@ import {
   buildDefaultToolPolicyPipelineSteps,
 } from "../agents/tool-policy-pipeline.js";
 import { evaluateToolEnforcement } from "../agents/tool-policy-enforce.js";
+import { getSessionRateLimitStore } from "../agents/tool-policy-rate-limit-store.js";
 import {
   collectExplicitAllowlist,
   mergeAlsoAllowPolicy,
@@ -321,14 +322,14 @@ export async function handleToolsInvokeHttpRequest(
     return true;
   }
 
-  // Policy enforcement: requiresHuman (fail-closed) + rate-limit
-  // callCounts is undefined here — rate-limit counting is a separate concern
-  // (Redis-backed store wired at a higher layer when available).
+  // Policy enforcement: requiresHuman (fail-closed) + rate-limit.
+  // Per-session store persists counts across HTTP requests for the same session.
+  const rateLimitStore = getSessionRateLimitStore(sessionKey);
   const enforcement = evaluateToolEnforcement({
     toolName,
     meta: subagentFiltered.meta,
     humanApproved,
-    callCounts: undefined,
+    callCounts: rateLimitStore,
   });
   if (!enforcement.allowed) {
     sendJson(res, 403, {
@@ -337,6 +338,7 @@ export async function handleToolsInvokeHttpRequest(
     });
     return true;
   }
+  rateLimitStore.record(toolName);
 
   try {
     const toolCallId = `http-${Date.now()}`;
