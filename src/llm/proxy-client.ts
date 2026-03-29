@@ -51,12 +51,33 @@ function isProxyChoice(value: unknown): value is ProxyResponseShape["choices"][n
   );
 }
 
+function isOptionalNumber(v: unknown): boolean {
+  return v === undefined || typeof v === "number";
+}
+
 function isProxyResponse(value: unknown): value is ProxyResponseShape {
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
+
+  // model: must be a string if present (empty string is allowed; we fall back
+  // to the locally-known model name in that case)
+  if (v["model"] !== undefined && typeof v["model"] !== "string") return false;
+
+  // choices: must be an array where every element passes isProxyChoice
   if (!Array.isArray(v["choices"])) return false;
-  // Validate every choice in the array, not just that it is an array
-  return (v["choices"] as unknown[]).every(isProxyChoice);
+  if (!(v["choices"] as unknown[]).every(isProxyChoice)) return false;
+
+  // usage: if present, must be an object with optional numeric fields
+  const usage = v["usage"];
+  if (usage !== undefined) {
+    if (!usage || typeof usage !== "object") return false;
+    const u = usage as Record<string, unknown>;
+    if (!isOptionalNumber(u["prompt_tokens"])) return false;
+    if (!isOptionalNumber(u["completion_tokens"])) return false;
+    if (!isOptionalNumber(u["total_tokens"])) return false;
+  }
+
+  return true;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────

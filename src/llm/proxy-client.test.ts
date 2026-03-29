@@ -232,6 +232,52 @@ describe("proxyCall", () => {
     ).rejects.toThrow(/unexpected response shape/);
   });
 
+  it("throws when model field is not a string", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: 123,
+        choices: [{ message: { content: "ok" } }],
+      }),
+    } as Response);
+
+    await expect(
+      proxyCall({ source: "chat", messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/unexpected response shape/);
+  });
+
+  it("throws when usage.total_tokens is a string instead of a number", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-sonnet",
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: "12" },
+      }),
+    } as Response);
+
+    await expect(
+      proxyCall({ source: "chat", messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/unexpected response shape/);
+  });
+
+  it("accepts response with no usage field", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-sonnet",
+        choices: [{ message: { content: "ok" } }],
+        // no usage — should not throw
+      }),
+    } as Response);
+
+    const result = await proxyCall({
+      source: "chat",
+      messages: [{ role: "user", content: "hi" }],
+    });
+    expect(result.usage.totalTokens).toBe(0);
+  });
+
   it("uses LITELLM_PROXY_URL env var for base URL", async () => {
     process.env.LITELLM_PROXY_URL = "http://custom-proxy:9000";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
