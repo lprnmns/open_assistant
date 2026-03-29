@@ -118,21 +118,31 @@ function parseTickDecision(raw: string): TickDecision {
   const obj = parsed as Record<string, unknown>;
   const action = obj["action"];
 
+  // Extract optional base fields shared by all TickDecision variants
+  function parseBase(o: Record<string, unknown>) {
+    const base: { reasoning?: string; suggestedNextTickDelayMs?: number } = {};
+    if (typeof o["reasoning"] === "string") base.reasoning = o["reasoning"];
+    if (typeof o["suggestedNextTickDelayMs"] === "number") {
+      base.suggestedNextTickDelayMs = o["suggestedNextTickDelayMs"];
+    }
+    return base;
+  }
+
   switch (action) {
     case "SEND_MESSAGE": {
       const content = typeof obj["messageContent"] === "string" ? obj["messageContent"].trim() : "";
       if (!content) return { action: "STAY_SILENT", reasoning: "SEND_MESSAGE had empty messageContent" };
-      return { action: "SEND_MESSAGE", messageContent: content };
+      return { action: "SEND_MESSAGE", messageContent: content, ...parseBase(obj) };
     }
     case "TAKE_NOTE": {
       const content = typeof obj["noteContent"] === "string" ? obj["noteContent"].trim() : "";
       if (!content) return { action: "STAY_SILENT", reasoning: "TAKE_NOTE had empty noteContent" };
-      return { action: "TAKE_NOTE", noteContent: content };
+      return { action: "TAKE_NOTE", noteContent: content, ...parseBase(obj) };
     }
     case "STAY_SILENT":
-      return { action: "STAY_SILENT" };
+      return { action: "STAY_SILENT", ...parseBase(obj) };
     case "ENTER_SLEEP":
-      return { action: "ENTER_SLEEP" };
+      return { action: "ENTER_SLEEP", ...parseBase(obj) };
     default:
       return { action: "STAY_SILENT", reasoning: `Unknown action: ${String(action)}` };
   }
@@ -224,7 +234,7 @@ export async function tick(snap: WorldSnapshot, state: ConsciousnessState): Prom
     const currentDelay = computeNextTickDelayMs({
       woke: false,
       decision: undefined,
-      currentDelayMs: config.minTickIntervalMs,
+      currentDelayMs: state.currentDelayMs,
       config,
     });
 
@@ -232,6 +242,7 @@ export async function tick(snap: WorldSnapshot, state: ConsciousnessState): Prom
       ...watchingState,
       phase: "IDLE",
       lastWatchdogResult: watchdogResult,
+      currentDelayMs: currentDelay,
     };
 
     return { state: idleState, watchdogResult, decision: undefined, nextDelayMs: currentDelay };
@@ -271,7 +282,7 @@ export async function tick(snap: WorldSnapshot, state: ConsciousnessState): Prom
   const nextDelay = computeNextTickDelayMs({
     woke: true,
     decision,
-    currentDelayMs: config.minTickIntervalMs,
+    currentDelayMs: state.currentDelayMs,
     config,
   });
 
@@ -281,6 +292,7 @@ export async function tick(snap: WorldSnapshot, state: ConsciousnessState): Prom
     lastSnapshot: updatedSnap,
     lastDecision: decision,
     llmCallCount: thinkingState.llmCallCount + 1,
+    currentDelayMs: nextDelay,
   };
 
   return { state: finalState, watchdogResult, decision, nextDelayMs: nextDelay };

@@ -126,6 +126,17 @@ describe("tick() — Watchdog returns wake:false", () => {
 
     expect(result.nextDelayMs).toBeGreaterThanOrEqual(cfg.minTickIntervalMs);
   });
+
+  it("adaptive interval accumulates across consecutive idle ticks", async () => {
+    const snap = makeSnap();
+    const state = makeInitialConsciousnessState();
+
+    const r1 = await tick(snap, state);
+    const r2 = await tick(snap, r1.state);
+
+    // Each idle tick steps 25% of remaining range toward max — second delay must be larger
+    expect(r2.nextDelayMs).toBeGreaterThan(r1.nextDelayMs);
+  });
 });
 
 // ── tick() — Watchdog: wake:true → LLM call ──────────────────────────────────
@@ -235,7 +246,7 @@ describe("tick() — Watchdog returns wake:true", () => {
     expect(result.state.phase).toBe("SLEEPING");
   });
 
-  it("next delay is minTickIntervalMs after a wake", async () => {
+  it("next delay is minTickIntervalMs after a wake (no suggestion)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -249,6 +260,22 @@ describe("tick() — Watchdog returns wake:true", () => {
     const result = await tick(snap, makeInitialConsciousnessState());
 
     expect(result.nextDelayMs).toBe(cfg.minTickIntervalMs);
+  });
+
+  it("honours suggestedNextTickDelayMs from LLM JSON at runtime", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"STAY_SILENT","suggestedNextTickDelayMs":60000}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"] });
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    expect(result.nextDelayMs).toBe(60_000);
   });
 
   it("increments llmCallCount", async () => {

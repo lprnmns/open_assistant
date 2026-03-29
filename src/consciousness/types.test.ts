@@ -268,6 +268,11 @@ describe("makeInitialConsciousnessState", () => {
     expect(state.llmCallCount).toBe(0);
   });
 
+  it("initialises currentDelayMs to config.minTickIntervalMs", () => {
+    const state = makeInitialConsciousnessState();
+    expect(state.currentDelayMs).toBe(DEFAULT_CONSCIOUSNESS_CONFIG.minTickIntervalMs);
+  });
+
   it("starts with no prior snapshot, watchdog result, or decision", () => {
     const state = makeInitialConsciousnessState();
     expect(state.lastSnapshot).toBeUndefined();
