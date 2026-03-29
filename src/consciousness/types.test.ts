@@ -16,6 +16,7 @@ import {
   type ConsciousnessConfig,
   type ConsciousnessPhase,
   type ConsciousnessState,
+  type ExhaustiveRecord,
   type TickAction,
   type TickDecision,
   type WakeReason,
@@ -24,61 +25,61 @@ import {
 } from "./types.js";
 
 // ── WakeReason exhaustiveness ─────────────────────────────────────────────────
+//
+// ExhaustiveRecord<WakeReason> forces a compile error if any member of
+// WakeReason is missing from the object literal.  If a new value is added to
+// the union without updating this object, `tsc` will reject the file.
+// This is the real exhaustiveness guarantee — not a runtime array check.
+
+const _WAKE_REASON_EXHAUSTIVE: ExhaustiveRecord<WakeReason> = {
+  TRIGGER_FIRED: true,
+  SILENCE_THRESHOLD: true,
+  PENDING_NOTE: true,
+  CRON_DUE: true,
+  EXTERNAL_WORLD_DELTA: true,
+};
 
 describe("WakeReason", () => {
-  it("contains exactly the approved reasons", () => {
-    // Compile-time: if a new reason is added to the union, this array must
-    // be updated — TypeScript will error otherwise.
-    const ALL_WAKE_REASONS: WakeReason[] = [
-      "TRIGGER_FIRED",
-      "SILENCE_THRESHOLD",
-      "PENDING_NOTE",
-      "CRON_DUE",
-      "EXTERNAL_WORLD_DELTA",
-    ];
-    expect(ALL_WAKE_REASONS).toHaveLength(5);
+  it("exhaustive record covers all 5 reasons", () => {
+    expect(Object.keys(_WAKE_REASON_EXHAUSTIVE)).toHaveLength(5);
   });
 
-  it("does NOT include new_message", () => {
-    const reasons: string[] = [
-      "TRIGGER_FIRED",
-      "SILENCE_THRESHOLD",
-      "PENDING_NOTE",
-      "CRON_DUE",
-      "EXTERNAL_WORLD_DELTA",
-    ];
-    expect(reasons).not.toContain("new_message");
-    expect(reasons).not.toContain("NEW_MESSAGE");
-    expect(reasons).not.toContain("INBOUND_MESSAGE");
+  it("does NOT include new_message (compile + runtime)", () => {
+    const keys = Object.keys(_WAKE_REASON_EXHAUSTIVE);
+    expect(keys).not.toContain("new_message");
+    expect(keys).not.toContain("NEW_MESSAGE");
+    expect(keys).not.toContain("INBOUND_MESSAGE");
   });
 });
 
 // ── TickAction exhaustiveness ─────────────────────────────────────────────────
 
+const _TICK_ACTION_EXHAUSTIVE: ExhaustiveRecord<TickAction> = {
+  SEND_MESSAGE: true,
+  TAKE_NOTE: true,
+  STAY_SILENT: true,
+  ENTER_SLEEP: true,
+};
+
 describe("TickAction", () => {
-  it("contains exactly the four approved actions", () => {
-    const ALL_TICK_ACTIONS: TickAction[] = [
-      "SEND_MESSAGE",
-      "TAKE_NOTE",
-      "STAY_SILENT",
-      "ENTER_SLEEP",
-    ];
-    expect(ALL_TICK_ACTIONS).toHaveLength(4);
+  it("exhaustive record covers all 4 actions", () => {
+    expect(Object.keys(_TICK_ACTION_EXHAUSTIVE)).toHaveLength(4);
   });
 });
 
 // ── ConsciousnessPhase state machine ─────────────────────────────────────────
 
+const _PHASE_EXHAUSTIVE: ExhaustiveRecord<ConsciousnessPhase> = {
+  IDLE: true,
+  WATCHING: true,
+  THINKING: true,
+  SLEEPING: true,
+  PAUSED: true,
+};
+
 describe("ConsciousnessPhase", () => {
-  it("contains all expected states", () => {
-    const ALL_PHASES: ConsciousnessPhase[] = [
-      "IDLE",
-      "WATCHING",
-      "THINKING",
-      "SLEEPING",
-      "PAUSED",
-    ];
-    expect(ALL_PHASES).toHaveLength(5);
+  it("exhaustive record covers all 5 states", () => {
+    expect(Object.keys(_PHASE_EXHAUSTIVE)).toHaveLength(5);
   });
 });
 
@@ -155,8 +156,10 @@ describe("WorldSnapshot", () => {
 
 // ── TickDecision ──────────────────────────────────────────────────────────────
 
-describe("TickDecision", () => {
-  it("SEND_MESSAGE carries messageContent", () => {
+describe("TickDecision (discriminated union)", () => {
+  it("SEND_MESSAGE requires messageContent — compile+runtime", () => {
+    // If messageContent were optional, the next line would compile without it.
+    // With the discriminated union it is required — tsc enforces this.
     const decision: TickDecision = {
       action: "SEND_MESSAGE",
       messageContent: "Hey, I noticed your calendar has a free slot tomorrow.",
@@ -166,7 +169,7 @@ describe("TickDecision", () => {
     expect(decision.messageContent).toBeTruthy();
   });
 
-  it("TAKE_NOTE carries noteContent", () => {
+  it("TAKE_NOTE requires noteContent — compile+runtime", () => {
     const decision: TickDecision = {
       action: "TAKE_NOTE",
       noteContent: "User mentioned they want to review the Q1 report next week.",
@@ -175,11 +178,14 @@ describe("TickDecision", () => {
     expect(decision.noteContent).toBeTruthy();
   });
 
-  it("STAY_SILENT requires no extra fields", () => {
+  it("STAY_SILENT requires no payload fields", () => {
     const decision: TickDecision = { action: "STAY_SILENT" };
     expect(decision.action).toBe("STAY_SILENT");
-    expect(decision.messageContent).toBeUndefined();
-    expect(decision.noteContent).toBeUndefined();
+    // Narrowed type has no messageContent or noteContent
+    if (decision.action === "SEND_MESSAGE") {
+      // unreachable — proves TS narrows correctly
+      expect(decision.messageContent).toBeTruthy();
+    }
   });
 
   it("ENTER_SLEEP can carry suggestedNextTickDelayMs", () => {
@@ -189,6 +195,29 @@ describe("TickDecision", () => {
     };
     expect(decision.action).toBe("ENTER_SLEEP");
     expect(decision.suggestedNextTickDelayMs).toBeGreaterThan(0);
+  });
+
+  it("narrowing on action gives access to variant-specific fields", () => {
+    const decisions: TickDecision[] = [
+      { action: "SEND_MESSAGE", messageContent: "hello" },
+      { action: "TAKE_NOTE", noteContent: "note text" },
+      { action: "STAY_SILENT" },
+      { action: "ENTER_SLEEP" },
+    ];
+    for (const d of decisions) {
+      switch (d.action) {
+        case "SEND_MESSAGE":
+          expect(typeof d.messageContent).toBe("string");
+          break;
+        case "TAKE_NOTE":
+          expect(typeof d.noteContent).toBe("string");
+          break;
+        case "STAY_SILENT":
+        case "ENTER_SLEEP":
+          expect(d.action).toBeTruthy();
+          break;
+      }
+    }
   });
 });
 

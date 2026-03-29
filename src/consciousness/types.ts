@@ -22,6 +22,32 @@
  * `new_message` is intentionally absent from WakeReason.
  */
 
+// ── Compile-time exhaustiveness helpers ──────────────────────────────────────
+
+/**
+ * Forces a compile error if `T` is not exactly `never`.
+ * Used at the bottom of switch/if-else chains to prove exhaustiveness.
+ *
+ * Usage:
+ *   function handle(r: WakeReason): string {
+ *     switch (r) { ... default: return assertNever(r); }
+ *   }
+ */
+export function assertNever(value: never): never {
+  throw new Error(`Unhandled variant: ${String(value)}`);
+}
+
+/**
+ * Type-level exhaustiveness probe.
+ * A `Record<Union, true>` object literal must list every member of the union.
+ * If a new value is added to the union, the object literal becomes a
+ * compile error — the missing key must be added explicitly.
+ *
+ * Usage:
+ *   const _: ExhaustiveRecord<WakeReason> = { TRIGGER_FIRED: true, ... };
+ */
+export type ExhaustiveRecord<T extends string> = Record<T, true>;
+
 // ── Wake reasons ──────────────────────────────────────────────────────────────
 
 /**
@@ -178,37 +204,31 @@ export type WatchdogResult =
 // ── Tick decision ─────────────────────────────────────────────────────────────
 
 /**
- * What the Loop Engine decided to do, after the LLM call.
- * One TickDecision per tick.
+ * Shared optional fields present on every TickDecision variant.
  */
-export type TickDecision = {
-  action: TickAction;
-
-  /**
-   * Present when action === "SEND_MESSAGE".
-   * The text to post to WorldSnapshot.activeChannelId.
-   */
-  messageContent?: string;
-
-  /**
-   * Present when action === "TAKE_NOTE".
-   * The note text to append to the agent's memory.
-   */
-  noteContent?: string;
-
-  /**
-   * Optional reasoning trace from the LLM (for debug / audit logs).
-   * Never sent to the user directly.
-   */
+type TickDecisionBase = {
+  /** Reasoning trace from the LLM (debug / audit only, never sent to user). */
   reasoning?: string;
-
   /**
    * How long the Loop Engine should wait before the next tick.
-   * The Loop Engine may ignore this and apply adaptive interval logic
-   * (e.g. clamp to [minTickIntervalMs, maxTickIntervalMs]).
+   * May be ignored; the engine clamps to [minTickIntervalMs, maxTickIntervalMs].
    */
   suggestedNextTickDelayMs?: number;
 };
+
+/**
+ * What the Loop Engine decided to do, after the LLM call.
+ * One TickDecision per tick.
+ *
+ * Proper discriminated union: each action variant enforces its required
+ * payload.  { action: "SEND_MESSAGE" } without messageContent is a
+ * compile-time error.
+ */
+export type TickDecision =
+  | ({ action: "SEND_MESSAGE"; messageContent: string } & TickDecisionBase)
+  | ({ action: "TAKE_NOTE"; noteContent: string } & TickDecisionBase)
+  | ({ action: "STAY_SILENT" } & TickDecisionBase)
+  | ({ action: "ENTER_SLEEP" } & TickDecisionBase);
 
 // ── Consciousness configuration ───────────────────────────────────────────────
 
