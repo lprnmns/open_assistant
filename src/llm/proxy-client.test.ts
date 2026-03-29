@@ -192,10 +192,39 @@ describe("proxyCall", () => {
     ).rejects.toThrow(/LITELLM_MASTER_KEY/);
   });
 
-  it("throws when proxy returns an unexpected response shape", async () => {
+  it("throws when proxy returns an unexpected response shape (no choices key)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => ({ error: "bad shape" }),
+    } as Response);
+
+    await expect(
+      proxyCall({ source: "chat", messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/unexpected response shape/);
+  });
+
+  it("throws when a choice is missing message.content", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-sonnet",
+        // message exists but content is a number, not a string
+        choices: [{ message: { content: 42 } }],
+      }),
+    } as Response);
+
+    await expect(
+      proxyCall({ source: "chat", messages: [{ role: "user", content: "hi" }] }),
+    ).rejects.toThrow(/unexpected response shape/);
+  });
+
+  it("throws when a choice has no message field", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-sonnet",
+        choices: [{ index: 0 }],
+      }),
     } as Response);
 
     await expect(

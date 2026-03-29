@@ -40,10 +40,23 @@ type ProxyResponseShape = {
   };
 };
 
+function isProxyChoice(value: unknown): value is ProxyResponseShape["choices"][number] {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  const msg = v["message"];
+  return (
+    !!msg &&
+    typeof msg === "object" &&
+    typeof (msg as Record<string, unknown>)["content"] === "string"
+  );
+}
+
 function isProxyResponse(value: unknown): value is ProxyResponseShape {
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
-  return Array.isArray(v["choices"]);
+  if (!Array.isArray(v["choices"])) return false;
+  // Validate every choice in the array, not just that it is an array
+  return (v["choices"] as unknown[]).every(isProxyChoice);
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
