@@ -158,16 +158,58 @@ describe("MemoryRecallResult shape", () => {
   });
 
   it("deduplication invariant: a note id in recent should not appear in recalled", () => {
-    // This test documents the contract; pipelines must enforce it.
+    // Pipelines must enforce this; the type contract documents it.
     const shared = makeMemoryNote({ content: "shared", sessionKey: "s", id: "shared-id" });
     const unique = makeMemoryNote({ content: "unique", sessionKey: "s", id: "unique-id" });
     const result: MemoryRecallResult = {
       recent: [shared],
-      recalled: [unique], // shared is NOT in recalled — pipeline deduped it
+      recalled: [unique], // shared deduped by pipeline
     };
     const recentIds = new Set(result.recent.map((n) => n.id));
     for (const n of result.recalled) {
       expect(recentIds.has(n.id)).toBe(false);
     }
+  });
+
+  // ── Embedder-failure degradation contracts ─────────────────────────────────
+
+  it("Embedder failure contract: recent non-empty, recalled empty — valid result", () => {
+    // When Embedder.embed() fails during recall, the pipeline must still return
+    // Cortex.recent() contents.  This test asserts the result shape is valid.
+    const note = makeMemoryNote({ content: "event", sessionKey: "s", id: "cortex-note" });
+    const result: MemoryRecallResult = {
+      recent: [note],   // Cortex.recent() succeeded (no embedding needed)
+      recalled: [],     // Hippocampus skipped because embed failed
+    };
+    expect(result.recent).toHaveLength(1);
+    expect(result.recalled).toHaveLength(0);
+  });
+
+  it("Embedder failure contract: recent is independent of recalled being empty", () => {
+    // Cortex.recent() never depends on the Embedder.  A result where recent has
+    // notes but recalled is empty must always be considered valid.
+    const notes = [
+      makeMemoryNote({ content: "a", sessionKey: "s", id: "n1" }),
+      makeMemoryNote({ content: "b", sessionKey: "s", id: "n2" }),
+    ];
+    const result: MemoryRecallResult = { recent: notes, recalled: [] };
+    // Both slices independently valid
+    expect(result.recent.length).toBeGreaterThan(0);
+    expect(result.recalled.length).toBe(0);
+  });
+
+  // ── Ingestion failure degradation contract ────────────────────────────────
+
+  it("Cortex-first write contract: a staged note is valid before embedding", () => {
+    // The write pipeline stages in Cortex BEFORE calling Embedder.
+    // A MemoryNote exists as a valid note the moment makeMemoryNote() returns —
+    // no embedding required for it to appear in Cortex.recent().
+    const note = makeMemoryNote({ content: "event before embed", sessionKey: "s" });
+    // Note is fully formed and Cortex-stageable with no vector field.
+    expect(note.content).toBe("event before embed");
+    expect(note.id).toBeTruthy();
+    expect(note.createdAt).toBeGreaterThan(0);
+    // MemoryNote has no vector field — vectors live in HippocampusRecord (impl layer).
+    expect("vector" in note).toBe(false);
   });
 });

@@ -16,17 +16,18 @@
  *         │                                              sessionKey when wiring
  *         ▼
  *     NoteIngestionPipeline.ingest({ content, sessionKey })
- *         ├── makeMemoryNote(...)     → id + timestamp assigned once, immutable
- *         ├── Embedder.embed(content) → dense vector
- *         ├── Cortex.stage(note)      ← synchronous, RAM-only, never throws
- *         └── Hippocampus.ingest(note, vector)  ← async, SQLite-vec, durable
- *                                                  errors caught: loop is immune
+ *         ├── makeMemoryNote(...)              → id + timestamp assigned once
+ *         ├── Cortex.stage(note)               ← FIRST — RAM-only, never throws
+ *         │                                       note is safe even if embed fails
+ *         ├── Embedder.embed(content)          → dense vector (failure stops here)
+ *         └── Hippocampus.ingest(note, vector) ← async, SQLite-vec, durable
+ *                                                 errors caught: loop is immune
  *
  *   READ PATH (tick prompt builder, before each LLM call)
  *   ─────────────────────────────────────────────────────
  *   MemoryRecallPipeline.recall({ text, k, recentN, sessionKey })
- *         ├── Embedder.embed(text) → queryVector
- *         ├── Cortex.recent(recentN)          → recent: MemoryNote[]
+ *         ├── Cortex.recent(recentN)             → recent: MemoryNote[] (UNCONDITIONAL)
+ *         ├── Embedder.embed(text) → queryVector  (failure: recalled = [], recent kept)
  *         └── Hippocampus.recall(queryVector, k) → recalled: MemoryNote[]
  *         → MemoryRecallResult { recent, recalled }
  *           (pipeline deduplicates: notes in recent are omitted from recalled)
@@ -239,13 +240,19 @@ export type NoteIngestionInput = {
  *
  * Step order (guaranteed):
  *   1. makeMemoryNote({ content, type, sessionKey })  → id + createdAt assigned
- *   2. Embedder.embed(content)                        → vector
- *   3. Cortex.stage(note)                             → synchronous, in-RAM
+ *   2. Cortex.stage(note)                             → synchronous, in-RAM, FIRST
+ *   3. Embedder.embed(content)                        → vector
+ *                                                        ↑ failure stops here;
+ *                                                          note is already in Cortex
  *   4. Hippocampus.ingest(note, vector)               → async, durable
  *
+ * Cortex.stage runs before Embedder.embed so that short-term memory is
+ * populated regardless of embedding availability.  A flaky embedding API or
+ * a missing model must not prevent the note from appearing in Cortex.recent().
+ *
  * NEVER throws — TAKE_NOTE errors must not drop the consciousness loop.
- * Implementations catch all errors from Embedder and Hippocampus, log them,
- * and return normally.  Cortex.stage errors (if any) are also swallowed.
+ * Embedder and Hippocampus errors are caught and logged; Cortex.stage errors
+ * (extremely unlikely for a RAM write) are also swallowed.
  */
 export interface NoteIngestionPipeline {
   ingest(input: NoteIngestionInput): Promise<void>;
@@ -279,14 +286,22 @@ export const RECALL_DEFAULTS = {
  * Orchestrates the full read path for prompt enrichment.
  *
  * Step order (guaranteed):
- *   1. Embedder.embed(query.text) → queryVector
- *   2. Cortex.recent(recentN)     → recent notes (synchronous)
+ *   1. Cortex.recent(recentN)     → recent notes (synchronous, NO embedding needed)
+ *                                    ↑ always succeeds; independent of Embedder
+ *   2. Embedder.embed(query.text) → queryVector
+ *                                    ↑ failure: skip step 3; recalled = []
+ *                                      recent slice is UNAFFECTED
  *   3. Hippocampus.recall(...)    → recalled notes (async, ANN search)
+ *                                    ↑ only reached when embed succeeded
  *   4. Deduplicate: notes whose id appears in recent are removed from recalled
  *   5. Return MemoryRecallResult { recent, recalled }
  *
- * Errors from Hippocampus are caught and result in recalled: [].
- * Errors from Embedder are caught and result in both slices being [].
+ * Failure modes:
+ *   Hippocampus error → recalled: []; recent is unaffected.
+ *   Embedder error    → recalled: []; recent is unaffected.
+ *
+ * Cortex.recent() is unconditional: the caller always receives at least the
+ * in-RAM recent slice even when the entire embedding/ANN stack is unavailable.
  */
 export interface MemoryRecallPipeline {
   recall(query: MemoryRecallQuery): Promise<MemoryRecallResult>;
