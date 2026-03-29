@@ -8,7 +8,7 @@ type DummyTool = { name: string };
 function run(
   tools: DummyTool[],
   steps: Parameters<typeof applyToolPolicyPipeline>[0]["steps"],
-  warn = () => {},
+  warn: (message: string) => void = () => {},
 ) {
   return applyToolPolicyPipeline({
     // oxlint-disable-next-line typescript/no-explicit-any
