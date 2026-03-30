@@ -5,6 +5,9 @@
  * are skipped when the extension cannot be loaded.  Fail-soft and metadata-only
  * tests run regardless.
  */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createHippocampus, SqliteHippocampus } from "./hippocampus.js";
 import { makeMemoryNote, type MemoryNote } from "./types.js";
@@ -210,6 +213,91 @@ describe("SqliteHippocampus — ingest + recall (requires sqlite-vec)", () => {
     const r = await h.recall(VEC_B, 5);
     const found = r.find((x) => x.id === "dup");
     expect(found?.content).toBe("updated");
+  });
+});
+
+// ── file-backed reopen / restart simulation ───────────────────────────────────
+
+describe("SqliteHippocampus — file-backed reopen (requires sqlite-vec)", () => {
+  let dbPath: string;
+  let hasVec = false;
+
+  beforeEach(async () => {
+    hasVec = await vecAvailable();
+    // Unique temp file per test — cleaned up in afterEach.
+    dbPath = path.join(os.tmpdir(), `hippocampus-test-${Date.now()}-${Math.random()}.db`);
+  });
+
+  afterEach(() => {
+    try { fs.unlinkSync(dbPath); } catch {}
+    try { fs.unlinkSync(`${dbPath}-shm`); } catch {}
+    try { fs.unlinkSync(`${dbPath}-wal`); } catch {}
+  });
+
+  it("recall on a fresh instance returns [] before any ingest (no db file yet)", async () => {
+    const h = createHippocampus(dbPath);
+    // File does not exist yet — fail-soft expected.
+    const r = await h.recall(VEC_A, 5);
+    expect(r).toEqual([]);
+    await h.close();
+  });
+
+  it("new instance pointing to existing file can recall without prior ingest call", async () => {
+    if (!hasVec) return;
+
+    // Instance A — write notes.
+    const a = createHippocampus(dbPath);
+    await a.ingest(note("persisted", { id: "persist-1" }), VEC_A);
+    await a.close();
+
+    // Instance B — fresh instance, same file.  Should recall without calling ingest.
+    const b = createHippocampus(dbPath);
+    const r = await b.recall(VEC_A, 5);
+    expect(r.some((n) => n.id === "persist-1")).toBe(true);
+    await b.close();
+  });
+
+  it("dims are restored from meta — new instance recalls correct dimensionality", async () => {
+    if (!hasVec) return;
+
+    const a = createHippocampus(dbPath);
+    await a.ingest(note("4d note", { id: "dim-test" }), VEC_A); // 4-D
+    await a.close();
+
+    const b = createHippocampus(dbPath);
+    // Query with correct dims → finds note.
+    const hit = await b.recall(VEC_A, 5);
+    expect(hit.some((n) => n.id === "dim-test")).toBe(true);
+    // Query with wrong dims → returns [] (dim guard).
+    const miss = await b.recall([1, 0, 0], 5); // 3-D
+    expect(miss).toEqual([]);
+    await b.close();
+  });
+
+  it("note metadata round-trips across a file-backed close/reopen cycle", async () => {
+    if (!hasVec) return;
+
+    const original = note("file-backed content", {
+      id: "fb-id",
+      type: "semantic",
+      sessionKey: "fb-session",
+      createdAt: 1_234_567_890_000,
+    });
+
+    const a = createHippocampus(dbPath);
+    await a.ingest(original, VEC_A);
+    await a.close();
+
+    const b = createHippocampus(dbPath);
+    const r = await b.recall(VEC_A, 1);
+    expect(r.length).toBe(1);
+    const got = r[0]!;
+    expect(got.id).toBe("fb-id");
+    expect(got.content).toBe("file-backed content");
+    expect(got.type).toBe("semantic");
+    expect(got.sessionKey).toBe("fb-session");
+    expect(got.createdAt).toBe(1_234_567_890_000);
+    await b.close();
   });
 });
 

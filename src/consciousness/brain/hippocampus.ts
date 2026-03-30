@@ -13,6 +13,7 @@
  *   consciousness_notes     — note metadata (id, content, type,
  *                             session_key, created_at)
  *   consciousness_notes_vec — vec0 virtual table: id + FLOAT[dims] embedding
+ *   consciousness_meta      — key/value pairs; persists dims across restarts
  *
  * ── Distance metric ───────────────────────────────────────────────────────────
  *
@@ -23,11 +24,16 @@
  *
  * ── Schema lifecycle ──────────────────────────────────────────────────────────
  *
- *   notes table: created synchronously on first open (openDb()).
- *   vec table:   created lazily on first ingest once dims is known.
- *                Dimension mismatch (model change) drops and recreates the vec
- *                table; existing notes remain in the notes table but become
- *                invisible to recall until the caller re-ingests them.
+ *   Both ingest() and recall() call ensureReady() which opens the DB on demand
+ *   and restores dims + vec state from consciousness_meta on every cold open.
+ *   This means a new SqliteHippocampus instance pointing to an existing file
+ *   can immediately recall() notes ingested by a previous process.
+ *
+ *   vec table:  created lazily on first ingest once dims is known; dims value
+ *               is persisted to consciousness_meta immediately after creation.
+ *   Dimension mismatch (model change): drops and recreates vec table; meta is
+ *   updated with the new dims; existing notes stay in notes table but become
+ *   invisible to recall until re-ingested.
  *
  * ── Fail-soft guarantees (Hippocampus contract) ───────────────────────────────
  *
@@ -52,14 +58,15 @@ import type { Hippocampus, MemoryNote } from "./types.js";
 
 // ── Internal constants ────────────────────────────────────────────────────────
 
-/** Metadata table — separate namespace avoids collision with workspace tables. */
 const NOTES_TABLE = "consciousness_notes";
-/** sqlite-vec virtual table for ANN search. */
 const VEC_TABLE = "consciousness_notes_vec";
+/** Persists dims (and any future config) across process restarts. */
+const META_TABLE = "consciousness_meta";
+/** Meta key under which the embedding dimensionality is stored. */
+const META_DIMS_KEY = "dims";
 
 // ── Serialization ─────────────────────────────────────────────────────────────
 
-/** Pack a float array into the binary blob format sqlite-vec expects. */
 function vectorToBlob(vec: readonly number[]): Buffer {
   return Buffer.from(new Float32Array(vec).buffer);
 }
@@ -68,15 +75,12 @@ function vectorToBlob(vec: readonly number[]): Buffer {
 
 export class SqliteHippocampus implements Hippocampus {
   private db: DatabaseSync | null = null;
-  /** Embedding dimensionality currently indexed in the vec table. null = no vec table yet. */
   private dims: number | null = null;
-  /** True once the sqlite-vec extension has been successfully loaded into this.db. */
   private vecLoaded = false;
 
   /**
-   * @param dbPath   Absolute path to the SQLite file (use ":memory:" for tests).
-   * @param log      Optional error logger; defaults to console.warn.
-   *                 Injectable to keep the module free of hard logger imports.
+   * @param dbPath  Absolute path to the SQLite file (use ":memory:" for tests).
+   * @param log     Optional error logger; injectable to avoid hard logger imports.
    */
   constructor(
     private readonly dbPath: string,
@@ -85,42 +89,82 @@ export class SqliteHippocampus implements Hippocampus {
 
   // ── Private helpers ─────────────────────────────────────────────────────────
 
-  /** Open the database and ensure the notes metadata table exists. */
-  private openDb(): DatabaseSync {
-    const { DatabaseSync } = requireNodeSqlite();
-    const db = new DatabaseSync(this.dbPath);
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS ${NOTES_TABLE} (
-        id          TEXT    PRIMARY KEY,
-        content     TEXT    NOT NULL,
-        type        TEXT    NOT NULL,
-        session_key TEXT    NOT NULL,
-        created_at  INTEGER NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_consciousness_notes_session
-        ON ${NOTES_TABLE}(session_key);
-    `);
-    return db;
+  /**
+   * Open the DB (if not already open), create base tables, and restore
+   * vec state from consciousness_meta so recall() works after a process restart.
+   *
+   * Returns the open DatabaseSync, or null when node:sqlite is unavailable.
+   * All errors are logged and swallowed.
+   */
+  private async ensureReady(): Promise<DatabaseSync | null> {
+    if (this.db) return this.db;
+
+    try {
+      const { DatabaseSync } = requireNodeSqlite();
+      const db = new DatabaseSync(this.dbPath);
+
+      // Create base tables unconditionally on every cold open.
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS ${NOTES_TABLE} (
+          id          TEXT    PRIMARY KEY,
+          content     TEXT    NOT NULL,
+          type        TEXT    NOT NULL,
+          session_key TEXT    NOT NULL,
+          created_at  INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_consciousness_notes_session
+          ON ${NOTES_TABLE}(session_key);
+        CREATE TABLE IF NOT EXISTS ${META_TABLE} (
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+      `);
+
+      this.db = db;
+
+      // Restore dims + vec state from meta (set by a previous process/instance).
+      const metaRow = db
+        .prepare(`SELECT value FROM ${META_TABLE} WHERE key = ?`)
+        .get(META_DIMS_KEY) as { value: string } | undefined;
+
+      if (metaRow) {
+        const storedDims = parseInt(metaRow.value, 10);
+        if (Number.isInteger(storedDims) && storedDims > 0) {
+          // Try to load the vec extension and confirm the vec table exists.
+          const result = await loadSqliteVecExtension({ db });
+          if (result.ok) {
+            const tableRow = db
+              .prepare(
+                `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
+              )
+              .get(VEC_TABLE) as { name: string } | undefined;
+
+            if (tableRow) {
+              this.vecLoaded = true;
+              this.dims = storedDims;
+            }
+          }
+        }
+      }
+
+      return db;
+    } catch (err) {
+      this.log(`consciousness hippocampus: failed to open db: ${String(err)}`);
+      return null;
+    }
   }
 
   /**
-   * Load the sqlite-vec extension and ensure the vec virtual table exists for
-   * the given number of dimensions.
-   *
-   * Returns true when the vec table is ready for reads/writes.
-   * Returns false when the extension is unavailable — caller falls back to
-   * metadata-only storage (notes written but not vector-searchable).
-   *
-   * Dimension change: drops the old vec table and recreates it.  Notes already
-   * in the notes table without matching vec rows are invisible to recall.
+   * Ensure the vec virtual table exists for the given dimensionality.
+   * Persists dims to consciousness_meta so future instances can restore state.
+   * Returns true when the vec table is ready; false when the extension is absent.
    */
-  private async ensureVec(dims: number): Promise<boolean> {
-    if (!this.db) return false;
-
-    // Dimension mismatch — drop stale vec table, reset state.
+  private async ensureVec(db: DatabaseSync, dims: number): Promise<boolean> {
+    // Dimension mismatch — drop stale vec table and clear persisted dims.
     if (this.dims !== null && this.dims !== dims) {
       try {
-        this.db.exec(`DROP TABLE IF EXISTS ${VEC_TABLE}`);
+        db.exec(`DROP TABLE IF EXISTS ${VEC_TABLE}`);
+        db.prepare(`DELETE FROM ${META_TABLE} WHERE key = ?`).run(META_DIMS_KEY);
       } catch (err) {
         this.log(`consciousness hippocampus: failed to drop stale vec table: ${String(err)}`);
       }
@@ -128,84 +172,71 @@ export class SqliteHippocampus implements Hippocampus {
       this.vecLoaded = false;
     }
 
-    // Already ready for this dimension.
+    // Already ready.
     if (this.vecLoaded && this.dims === dims) return true;
 
-    // Load extension (dynamic import is async; actual load is sync).
+    // Load extension.
     if (!this.vecLoaded) {
-      const result = await loadSqliteVecExtension({ db: this.db });
+      const result = await loadSqliteVecExtension({ db });
       if (!result.ok) {
-        this.log(`consciousness hippocampus: sqlite-vec unavailable — ${result.error ?? "unknown error"}`);
+        this.log(
+          `consciousness hippocampus: sqlite-vec unavailable — ${result.error ?? "unknown error"}`,
+        );
         return false;
       }
       this.vecLoaded = true;
     }
 
-    // Create vec virtual table with the given dimensionality.
-    this.db.exec(
+    // Create vec table and persist dims.
+    db.exec(
       `CREATE VIRTUAL TABLE IF NOT EXISTS ${VEC_TABLE} USING vec0(\n` +
         `  id        TEXT PRIMARY KEY,\n` +
         `  embedding FLOAT[${dims}]\n` +
         `)`,
     );
+    db
+      .prepare(`INSERT OR REPLACE INTO ${META_TABLE} (key, value) VALUES (?, ?)`)
+      .run(META_DIMS_KEY, String(dims));
     this.dims = dims;
     return true;
   }
 
   // ── Hippocampus interface ───────────────────────────────────────────────────
 
-  /**
-   * Persist a note and its embedding.
-   *
-   * The metadata row is ALWAYS written — even when the vec extension is absent.
-   * The vec row is written only when the extension is loaded and dims match.
-   * Any error is logged and swallowed; the loop is never interrupted.
-   */
   async ingest(note: MemoryNote, vector: readonly number[]): Promise<void> {
     try {
-      if (!this.db) {
-        this.db = this.openDb();
-      }
+      const db = await this.ensureReady();
+      if (!db) return;
 
-      // Normalize before storage so cosine ≡ L2 at query time.
       const normalized = sanitizeAndNormalizeEmbedding([...vector]);
 
-      // --- Metadata (always) ---
-      this.db
-        .prepare(
-          `INSERT OR REPLACE INTO ${NOTES_TABLE} (id, content, type, session_key, created_at)\n` +
-            `VALUES (?, ?, ?, ?, ?)`,
-        )
-        .run(note.id, note.content, note.type, note.sessionKey, note.createdAt);
+      // Metadata row — always written.
+      db.prepare(
+        `INSERT OR REPLACE INTO ${NOTES_TABLE} (id, content, type, session_key, created_at)\n` +
+          `VALUES (?, ?, ?, ?, ?)`,
+      ).run(note.id, note.content, note.type, note.sessionKey, note.createdAt);
 
-      // --- Vector (when extension available) ---
-      const vecReady = await this.ensureVec(normalized.length);
+      // Vec row — written when extension is available.
+      const vecReady = await this.ensureVec(db, normalized.length);
       if (vecReady) {
-        this.db
-          .prepare(`INSERT OR REPLACE INTO ${VEC_TABLE} (id, embedding) VALUES (?, ?)`)
-          .run(note.id, vectorToBlob(normalized));
+        db.prepare(
+          `INSERT OR REPLACE INTO ${VEC_TABLE} (id, embedding) VALUES (?, ?)`,
+        ).run(note.id, vectorToBlob(normalized));
       }
     } catch (err) {
       this.log(`consciousness hippocampus ingest failed [${note.id}]: ${String(err)}`);
     }
   }
 
-  /**
-   * Return the k most semantically similar notes to queryVector.
-   *
-   * Uses vec_distance_cosine on L2-normalized vectors; results are
-   * ordered closest-first (lowest cosine distance = highest similarity).
-   *
-   * Returns [] when the store is empty, the extension is unavailable,
-   * dims mismatch, or any SQL error occurs.  Never throws.
-   */
   async recall(
     queryVector: readonly number[],
     k: number,
     filter?: { sessionKey?: string },
   ): Promise<readonly MemoryNote[]> {
     try {
-      if (!this.db || !this.vecLoaded || this.dims === null) return [];
+      // ensureReady() opens the DB and restores dims from meta if needed.
+      const db = await this.ensureReady();
+      if (!db || !this.vecLoaded || this.dims === null) return [];
       if (k <= 0) return [];
       if (queryVector.length !== this.dims) return [];
 
@@ -223,7 +254,7 @@ export class SqliteHippocampus implements Hippocampus {
 
       const params: unknown[] = sessionKey ? [sessionKey, blob, k] : [blob, k];
 
-      const rows = this.db.prepare(sql).all(...params) as Array<{
+      const rows = db.prepare(sql).all(...params) as Array<{
         id: string;
         content: string;
         type: string;
@@ -243,7 +274,6 @@ export class SqliteHippocampus implements Hippocampus {
     }
   }
 
-  /** Release the SQLite connection. Idempotent, never throws. */
   async close(): Promise<void> {
     try {
       this.db?.close();
@@ -256,10 +286,6 @@ export class SqliteHippocampus implements Hippocampus {
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
-/**
- * Create a Hippocampus backed by the given database file.
- * Pass ":memory:" for test isolation (in-memory, discarded on close).
- */
 export function createHippocampus(
   dbPath: string,
   log?: (msg: string) => void,
