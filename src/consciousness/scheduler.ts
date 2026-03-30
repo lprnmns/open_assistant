@@ -20,8 +20,9 @@
  * onMessage(), or similar method on this class.
  */
 
-import { tick, type TickResult } from "./loop.js";
+import { tick, type TickContext, type TickResult } from "./loop.js";
 import { dispatchDecision, type DispatchContext } from "./integration.js";
+import type { MemoryRecallPipeline } from "./brain/types.js";
 import {
   DEFAULT_CONSCIOUSNESS_CONFIG,
   makeInitialConsciousnessState,
@@ -51,6 +52,25 @@ export type SchedulerOptions = {
    * Useful for logging, telemetry, and test assertions.
    */
   onTick?: (result: TickResult) => void;
+
+  /**
+   * Optional Living Brain components wired at boot.
+   * When provided, each tick enriches the LLM prompt with recent Cortex notes
+   * and semantically similar Hippocampus notes before the LLM call.
+   *
+   * Omitting this field is safe — the scheduler falls back to pre-4.5 behaviour
+   * (no memory enrichment) without any change to tick semantics.
+   *
+   * appendNote wiring: the caller closes over ingestion + sessionKey when
+   * constructing dispatch.appendNote so the loop itself never sees sessionKey.
+   * Only the recall pipeline needs sessionKey here (for session-scoped ANN search).
+   */
+  brain?: {
+    /** Recall pipeline for prompt enrichment (read path). */
+    recall: MemoryRecallPipeline;
+    /** Session key forwarded to Hippocampus for session-scoped recall. */
+    sessionKey: string;
+  };
 };
 
 // ── Scheduler ─────────────────────────────────────────────────────────────────
@@ -143,8 +163,11 @@ export class ConsciousnessScheduler {
       return;
     }
 
-    // ② Run one consciousness tick
-    const result = await tick(snap, this.state);
+    // ② Run one consciousness tick (with optional memory context)
+    const tickCtx: TickContext | undefined = this.options.brain
+      ? { recall: this.options.brain.recall, sessionKey: this.options.brain.sessionKey }
+      : undefined;
+    const result = await tick(snap, this.state, tickCtx);
     // Preserve PAUSED phase if pause() was called while this tick was in-flight;
     // tick() always returns phase:"IDLE" and would otherwise overwrite it.
     this.state = this.paused ? { ...result.state, phase: "PAUSED" } : result.state;

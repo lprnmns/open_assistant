@@ -34,6 +34,7 @@
 
 import { proxyCall } from "../llm/proxy-client.js";
 import type { ProxyMessage } from "../llm/types.js";
+import type { MemoryRecallPipeline, MemoryRecallResult } from "./brain/types.js";
 import {
   type ConsciousnessConfig,
   type ConsciousnessState,
@@ -45,16 +46,60 @@ import {
 } from "./types.js";
 import { runWatchdog } from "./watchdog.js";
 
+// ── Memory recall context (optional, injected by scheduler) ───────────────────
+
+/**
+ * Optional dependencies injected into tick() by the scheduler.
+ * When absent the loop runs without memory enrichment — identical to pre-4.5
+ * behaviour.  Never required; never crashes the tick if omitted.
+ */
+export type TickContext = {
+  /** Live recall pipeline wired at boot.  Omit to skip memory enrichment. */
+  recall?: MemoryRecallPipeline;
+  /** Session key forwarded to Hippocampus for session-scoped recall. */
+  sessionKey?: string;
+};
+
+/**
+ * Run a memory recall query and swallow ALL errors so the tick is never
+ * affected by a failing embedding stack or SQLite error.
+ * Returns { recent:[], recalled:[] } when pipeline is absent or throws.
+ */
+async function safeRecall(
+  pipeline: MemoryRecallPipeline | undefined,
+  text: string,
+  sessionKey: string | undefined,
+): Promise<MemoryRecallResult> {
+  if (!pipeline) return { recent: [], recalled: [] };
+  try {
+    return await pipeline.recall({ text, sessionKey });
+  } catch {
+    return { recent: [], recalled: [] };
+  }
+}
+
 // ── Prompt builder ────────────────────────────────────────────────────────────
+
+/** Maximum characters per note line in the memory context section of the prompt. */
+const NOTE_CONTENT_MAX_CHARS = 120;
+
+function truncate(s: string, max: number): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
 
 /**
  * Build the LLM messages for a Consciousness tick.
  * The system prompt tells the model its role; the user turn carries the
- * Watchdog context (why it woke) and the current world state summary.
+ * Watchdog context (why it woke), optional memory context, and world state.
+ *
+ * Memory context is injected only when at least one note is available.
+ * Each note is capped at NOTE_CONTENT_MAX_CHARS so the prompt remains bounded
+ * regardless of how many notes are in Cortex or Hippocampus.
  */
 function buildTickMessages(
   snap: WorldSnapshot,
   wakeResult: WatchdogResult & { wake: true },
+  memory: MemoryRecallResult,
 ): ProxyMessage[] {
   const system: ProxyMessage = {
     role: "system",
@@ -75,12 +120,40 @@ function buildTickMessages(
   const contextLines: string[] = [
     `Wake reason: ${wakeResult.reason}`,
     `Context: ${wakeResult.context}`,
-    ``,
-    `Current state:`,
-    `  Pending notes: ${snap.pendingNoteCount}`,
-    `  Active channel: ${snap.activeChannelId ?? "(none)"}`,
-    `  Last tick: ${snap.lastTickAt ? new Date(snap.lastTickAt).toISOString() : "never"}`,
   ];
+
+  // ── Memory context (injected only when notes are available) ───────────────
+  const hasRecent = memory.recent.length > 0;
+  const hasRecalled = memory.recalled.length > 0;
+
+  if (hasRecent || hasRecalled) {
+    contextLines.push(``);
+    contextLines.push(`Memory context:`);
+
+    if (hasRecent) {
+      contextLines.push(`  Recent (${memory.recent.length}):`);
+      for (const note of memory.recent) {
+        const ts = new Date(note.createdAt).toISOString();
+        contextLines.push(`    [${ts}] ${truncate(note.content, NOTE_CONTENT_MAX_CHARS)}`);
+      }
+    }
+
+    if (hasRecalled) {
+      contextLines.push(`  Related (${memory.recalled.length}):`);
+      for (const note of memory.recalled) {
+        contextLines.push(`    ${truncate(note.content, NOTE_CONTENT_MAX_CHARS)}`);
+      }
+    }
+  }
+
+  // ── Current world state ───────────────────────────────────────────────────
+  contextLines.push(``);
+  contextLines.push(`Current state:`);
+  contextLines.push(`  Pending notes: ${snap.pendingNoteCount}`);
+  contextLines.push(`  Active channel: ${snap.activeChannelId ?? "(none)"}`);
+  contextLines.push(
+    `  Last tick: ${snap.lastTickAt ? new Date(snap.lastTickAt).toISOString() : "never"}`,
+  );
 
   if (snap.firedTriggerIds.length > 0) {
     contextLines.push(`  Fired triggers: ${snap.firedTriggerIds.join(", ")}`);
@@ -213,8 +286,14 @@ export type TickResult = {
  *
  * @param snap    Fresh WorldSnapshot built by the caller before calling tick()
  * @param state   Current ConsciousnessState (treated as immutable; returns new state)
+ * @param ctx     Optional memory + session context.  Omitting it is safe — the tick
+ *                runs without memory enrichment (pre-4.5 behaviour).
  */
-export async function tick(snap: WorldSnapshot, state: ConsciousnessState): Promise<TickResult> {
+export async function tick(
+  snap: WorldSnapshot,
+  state: ConsciousnessState,
+  ctx?: TickContext,
+): Promise<TickResult> {
   const config = state.config;
 
   // ── Step 1: begin tick ────────────────────────────────────────────────────
@@ -257,7 +336,9 @@ export async function tick(snap: WorldSnapshot, state: ConsciousnessState): Prom
 
   let decision: TickDecision;
   try {
-    const messages = buildTickMessages(snap, watchdogResult);
+    // Recall memory BEFORE building the prompt — failure is fully swallowed by safeRecall
+    const memory = await safeRecall(ctx?.recall, watchdogResult.context, ctx?.sessionKey);
+    const messages = buildTickMessages(snap, watchdogResult, memory);
     const result = await proxyCall({ source: "consciousness", messages, maxTokens: 512 });
     decision = parseTickDecision(result.content);
   } catch (err) {
