@@ -367,6 +367,14 @@ export async function tick(
     config,
   });
 
+  // When transitioning into SLEEPING, record the timestamp so the consolidation
+  // trigger can detect a new sleep cycle.  This is the ONLY write to
+  // sleepEnteredAt — it happens at zero cost (no I/O, no LLM).
+  const consolidation =
+    decision.action === "ENTER_SLEEP"
+      ? { ...state.consolidation, sleepEnteredAt: Date.now() }
+      : state.consolidation;
+
   const finalState: ConsciousnessState = {
     ...thinkingState,
     phase: nextPhase,
@@ -374,6 +382,7 @@ export async function tick(
     lastDecision: decision,
     llmCallCount: thinkingState.llmCallCount + 1,
     currentDelayMs: nextDelay,
+    consolidation,
   };
 
   return { state: finalState, watchdogResult, decision, nextDelayMs: nextDelay };
