@@ -485,6 +485,77 @@ describe("tick() — memory recall context (TickContext)", () => {
     expect(result.state.phase).toBe("IDLE");
   });
 
+  it("ENTER_SLEEP from IDLE sets sleepEnteredAt on the returned state", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"ENTER_SLEEP"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"] });
+    const state = makeInitialConsciousnessState(); // phase: "IDLE"
+    const result = await tick(snap, state);
+
+    expect(result.state.phase).toBe("SLEEPING");
+    expect(result.state.consolidation.sleepEnteredAt).toBeGreaterThan(0);
+  });
+
+  it("ENTER_SLEEP from SLEEPING does NOT overwrite sleepEnteredAt (at-most-once guard)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"ENTER_SLEEP"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    const originalSleepEnteredAt = NOW - 5_000;
+    const snap = makeSnap({ firedTriggerIds: ["t1"] });
+    const state = {
+      ...makeInitialConsciousnessState(),
+      phase: "SLEEPING" as const,
+      consolidation: {
+        sleepEnteredAt: originalSleepEnteredAt,
+        consolidationCompletedAt: undefined,
+      },
+    };
+
+    const result = await tick(snap, state);
+    // sleepEnteredAt must remain the ORIGINAL value — not overwritten
+    expect(result.state.consolidation.sleepEnteredAt).toBe(originalSleepEnteredAt);
+  });
+
+  it("ENTER_SLEEP from SLEEPING does NOT re-open consolidation after it already completed", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"ENTER_SLEEP"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    const sleepEnteredAt = NOW - 20_000;
+    const consolidationCompletedAt = NOW - 10_000; // completed AFTER sleep entered
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"] });
+    const state = {
+      ...makeInitialConsciousnessState(),
+      phase: "SLEEPING" as const,
+      consolidation: { sleepEnteredAt, consolidationCompletedAt },
+    };
+
+    const result = await tick(snap, state);
+    // sleepEnteredAt preserved → consolidationCompletedAt still > sleepEnteredAt
+    // → evaluateConsolidationTrigger would return shouldConsolidate: false
+    expect(result.state.consolidation.sleepEnteredAt).toBe(sleepEnteredAt);
+    expect(result.state.consolidation.consolidationCompletedAt).toBe(consolidationCompletedAt);
+  });
+
   it("tick completes normally when ctx.recall is absent (no brain wired)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,

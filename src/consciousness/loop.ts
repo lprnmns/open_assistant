@@ -367,6 +367,21 @@ export async function tick(
     config,
   });
 
+  // When transitioning INTO SLEEPING (non-SLEEPING → SLEEPING), record the
+  // timestamp so the consolidation trigger can detect a new sleep cycle.
+  //
+  // Guard: state.phase !== "SLEEPING" ensures sleepEnteredAt is only written
+  // on the FIRST ENTER_SLEEP of a cycle.  If the scheduler fires another tick
+  // while already SLEEPING and the LLM again decides ENTER_SLEEP, the existing
+  // sleepEnteredAt is preserved — no new cycle is started, so the at-most-once
+  // consolidation invariant holds.
+  const enteredSleepThisTick =
+    decision.action === "ENTER_SLEEP" && state.phase !== "SLEEPING";
+
+  const consolidation = enteredSleepThisTick
+    ? { ...state.consolidation, sleepEnteredAt: Date.now() }
+    : state.consolidation;
+
   const finalState: ConsciousnessState = {
     ...thinkingState,
     phase: nextPhase,
@@ -374,6 +389,7 @@ export async function tick(
     lastDecision: decision,
     llmCallCount: thinkingState.llmCallCount + 1,
     currentDelayMs: nextDelay,
+    consolidation,
   };
 
   return { state: finalState, watchdogResult, decision, nextDelayMs: nextDelay };

@@ -306,6 +306,13 @@ export const DEFAULT_CONSCIOUSNESS_CONFIG: ConsciousnessConfig = {
 
 // ── Consciousness runtime state ───────────────────────────────────────────────
 
+import {
+  INITIAL_CONSOLIDATION_TRIGGER_STATE,
+  type ConsolidationTriggerState,
+} from "./sleep/trigger.js";
+
+export type { ConsolidationTriggerState };
+
 /**
  * Mutable runtime state of the Consciousness Loop.
  * Owned by the Loop Engine; not persisted to disk (reconstructed at boot).
@@ -357,6 +364,18 @@ export type ConsciousnessState = {
    * Unix ms when the loop was last started (or restarted after PAUSED).
    */
   startedAt: number;
+
+  /**
+   * Sleep-phase consolidation tracking.
+   *
+   * sleepEnteredAt          set by loop.ts on ENTER_SLEEP decision
+   * consolidationCompletedAt set by the scheduler when the consolidation
+   *                          pipeline finishes (Sub-Task 5.3)
+   *
+   * evaluateConsolidationTrigger() reads this field to decide whether the
+   * consolidation pass should run — zero cost, pure function.
+   */
+  consolidation: ConsolidationTriggerState;
 };
 
 /**
@@ -375,5 +394,6 @@ export function makeInitialConsciousnessState(
     llmCallCount: 0,
     currentDelayMs: config.minTickIntervalMs,
     startedAt: Date.now(),
+    consolidation: INITIAL_CONSOLIDATION_TRIGGER_STATE,
   };
 }
