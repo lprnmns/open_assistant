@@ -43,6 +43,19 @@ export class DefaultNoteIngestionPipeline implements NoteIngestionPipeline {
     private readonly log: (msg: string) => void = () => {},
   ) {}
 
+  /**
+   * Fire-and-forget wrapper around the injected logger.
+   * A throwing logger must NEVER propagate into the ingest() control flow —
+   * logging is observability, not a pipeline step.
+   */
+  private safeLog(message: string): void {
+    try {
+      this.log(message);
+    } catch {
+      // Intentionally swallowed: logging must not affect pipeline behaviour.
+    }
+  }
+
   async ingest(input: NoteIngestionInput): Promise<void> {
     try {
       // ── Step 1: create the note record ──────────────────────────────────────
@@ -58,7 +71,7 @@ export class DefaultNoteIngestionPipeline implements NoteIngestionPipeline {
       try {
         this.cortex.stage(note);
       } catch (stageErr) {
-        this.log(
+        this.safeLog(
           `ingestion: Cortex.stage failed (note may be absent from short-term memory): ${String(stageErr)}`,
         );
         // Proceed — Hippocampus may still persist the note durably.
@@ -70,7 +83,7 @@ export class DefaultNoteIngestionPipeline implements NoteIngestionPipeline {
       try {
         vector = await this.embedder.embed(note.content);
       } catch (embedErr) {
-        this.log(
+        this.safeLog(
           `ingestion: Embedder.embed failed — note staged in Cortex only: ${String(embedErr)}`,
         );
         return; // short-term memory secured; durable path skipped
@@ -80,7 +93,7 @@ export class DefaultNoteIngestionPipeline implements NoteIngestionPipeline {
       try {
         await this.hippocampus.ingest(note, vector);
       } catch (hippoErr) {
-        this.log(
+        this.safeLog(
           `ingestion: Hippocampus.ingest failed — note staged in Cortex only: ${String(hippoErr)}`,
         );
         // Acceptable degraded state: short-term memory is intact.

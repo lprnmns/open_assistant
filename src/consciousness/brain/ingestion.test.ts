@@ -278,3 +278,33 @@ describe("DefaultNoteIngestionPipeline — all three fail simultaneously", () =>
     await expect(p.ingest(input())).resolves.toBeUndefined();
   });
 });
+
+// ── throwing logger regression ────────────────────────────────────────────────
+
+describe("DefaultNoteIngestionPipeline — throwing logger never breaks ingest()", () => {
+  const throwingLog = () => { throw new Error("log fail"); };
+
+  it("Embedder failure + throwing logger → ingest() still resolves", async () => {
+    const { cortex, embedder, hippocampus } = makeDeps({
+      embedResult: new Error("embed fail"),
+    });
+    const p = createNoteIngestionPipeline({ cortex, embedder, hippocampus, log: throwingLog });
+    await expect(p.ingest(input())).resolves.toBeUndefined();
+  });
+
+  it("Cortex.stage failure + throwing logger → ingest() still resolves", async () => {
+    const { cortex, embedder, hippocampus } = makeDeps({
+      cortexStage: () => { throw new Error("stage fail"); },
+    });
+    const p = createNoteIngestionPipeline({ cortex, embedder, hippocampus, log: throwingLog });
+    await expect(p.ingest(input())).resolves.toBeUndefined();
+  });
+
+  it("Hippocampus failure + throwing logger → ingest() still resolves", async () => {
+    const { cortex, embedder, hippocampus } = makeDeps({
+      hippoIngest: async () => { throw new Error("hippo fail"); },
+    });
+    const p = createNoteIngestionPipeline({ cortex, embedder, hippocampus, log: throwingLog });
+    await expect(p.ingest(input())).resolves.toBeUndefined();
+  });
+});
