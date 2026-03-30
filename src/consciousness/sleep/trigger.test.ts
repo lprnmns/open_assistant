@@ -157,6 +157,16 @@ describe("evaluateConsolidationTrigger — at-most-once invariant", () => {
     expect(after.shouldConsolidate).toBe(false);
   });
 
+  it("regression — completed cycle + same-phase ENTER_SLEEP does NOT re-open consolidation", () => {
+    // Simulate: sleep entered T1 → consolidated T2 → LLM fires ENTER_SLEEP again
+    // (same SLEEPING phase, sleepEnteredAt stays T1 because of the non-SLEEPING guard)
+    // Trigger must remain false — at-most-once invariant holds.
+    const s = state({ sleepEnteredAt: T1, consolidationCompletedAt: T2 });
+    // sleepEnteredAt (T1) <= consolidationCompletedAt (T2): trigger is false
+    const result = evaluateConsolidationTrigger("SLEEPING", s);
+    expect(result.shouldConsolidate).toBe(false);
+  });
+
   it("result has defined reason in all outcomes", () => {
     const cases: Array<[ConsciousnessPhase, ConsolidationTriggerState]> = [
       ["IDLE", state()],
