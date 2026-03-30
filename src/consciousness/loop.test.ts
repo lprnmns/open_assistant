@@ -382,3 +382,123 @@ describe("tick() — state immutability", () => {
     expect(state.tickCount).toBe(originalTickCount);
   });
 });
+
+// ── tick() — memory recall integration ───────────────────────────────────────
+
+describe("tick() — memory recall context (TickContext)", () => {
+  beforeEach(() => {
+    process.env.LITELLM_PROXY_URL = "http://litellm-test:4000";
+    process.env.LITELLM_MASTER_KEY = "sk-test-master";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.LITELLM_PROXY_URL;
+    delete process.env.LITELLM_MASTER_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("tick() succeeds without ctx (backward-compatible, no recall)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"] });
+    await expect(tick(snap, makeInitialConsciousnessState())).resolves.toBeDefined();
+  });
+
+  it("memory context section appears in prompt when recent notes are present", async () => {
+    let capturedBody: string | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBody = typeof init?.body === "string" ? init.body : undefined;
+      return {
+        ok: true,
+        json: async () => ({
+          model: "claude-haiku",
+          choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+          usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+        }),
+      } as Response;
+    });
+
+    const recentNote = { id: "n1", content: "remember this", type: "episodic" as const,
+      createdAt: NOW, sessionKey: "s" };
+    const recall = { recall: vi.fn().mockResolvedValue({ recent: [recentNote], recalled: [] }) };
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"] });
+    await tick(snap, makeInitialConsciousnessState(), { recall, sessionKey: "s" });
+
+    expect(capturedBody).toBeDefined();
+    const body = JSON.parse(capturedBody!);
+    const userContent: string = body.messages.find((m: { role: string }) => m.role === "user").content;
+    expect(userContent).toContain("Memory context:");
+    expect(userContent).toContain("remember this");
+  });
+
+  it("memory context section is ABSENT from prompt when both slices are empty", async () => {
+    let capturedBody: string | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBody = typeof init?.body === "string" ? init.body : undefined;
+      return {
+        ok: true,
+        json: async () => ({
+          model: "claude-haiku",
+          choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+          usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+        }),
+      } as Response;
+    });
+
+    const recall = { recall: vi.fn().mockResolvedValue({ recent: [], recalled: [] }) };
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"] });
+    await tick(snap, makeInitialConsciousnessState(), { recall, sessionKey: "s" });
+
+    expect(capturedBody).toBeDefined();
+    const body = JSON.parse(capturedBody!);
+    const userContent: string = body.messages.find((m: { role: string }) => m.role === "user").content;
+    expect(userContent).not.toContain("Memory context:");
+  });
+
+  it("tick completes normally when recall pipeline throws (fail-soft)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    const recall = { recall: vi.fn().mockRejectedValue(new Error("recall exploded")) };
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"] });
+    const result = await tick(snap, makeInitialConsciousnessState(), { recall, sessionKey: "s" });
+
+    expect(result.decision?.action).toBe("STAY_SILENT");
+    expect(result.state.phase).toBe("IDLE");
+  });
+
+  it("tick completes normally when ctx.recall is absent (no brain wired)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"] });
+    const result = await tick(snap, makeInitialConsciousnessState(), { sessionKey: "s" });
+
+    expect(result.decision?.action).toBe("STAY_SILENT");
+    expect(result.state.phase).toBe("IDLE");
+  });
+});
