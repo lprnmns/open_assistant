@@ -100,7 +100,7 @@ export class DefaultNoteIngestionPipeline implements NoteIngestionPipeline {
       }
     } catch (unexpected) {
       // Belt-and-suspenders: makeMemoryNote or other unforeseen failures.
-      this.log(`ingestion: unexpected error: ${String(unexpected)}`);
+      this.safeLog(`ingestion: unexpected error: ${String(unexpected)}`);
       // Never re-throw.
     }
   }

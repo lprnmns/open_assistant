@@ -307,4 +307,16 @@ describe("DefaultNoteIngestionPipeline — throwing logger never breaks ingest()
     const p = createNoteIngestionPipeline({ cortex, embedder, hippocampus, log: throwingLog });
     await expect(p.ingest(input())).resolves.toBeUndefined();
   });
+
+  it("unexpected error in outer catch + throwing logger → ingest() still resolves", async () => {
+    // Force makeMemoryNote (or outer try body) to throw by passing a getter that throws as content.
+    const badInput = Object.defineProperty({} as NoteIngestionInput, "content", {
+      get() { throw new Error("getter explodes"); },
+      enumerable: true,
+    });
+    (badInput as NoteIngestionInput & { sessionKey: string; type: undefined }).sessionKey = "s";
+    const { cortex, embedder, hippocampus } = makeDeps();
+    const p = createNoteIngestionPipeline({ cortex, embedder, hippocampus, log: throwingLog });
+    await expect(p.ingest(badInput as NoteIngestionInput)).resolves.toBeUndefined();
+  });
 });
