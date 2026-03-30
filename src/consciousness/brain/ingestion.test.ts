@@ -38,6 +38,7 @@ function makeDeps(overrides: {
       if (overrides.hippoIngest) return overrides.hippoIngest();
     }),
     recall: vi.fn().mockResolvedValue([]),
+    listByType: vi.fn().mockResolvedValue([]),
     close: vi.fn().mockResolvedValue(undefined),
   };
 

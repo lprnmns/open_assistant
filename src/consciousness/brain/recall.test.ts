@@ -44,6 +44,7 @@ function makeDeps(overrides: {
       if (r instanceof Error) throw r;
       return r;
     }),
+    listByType: vi.fn().mockResolvedValue([]),
     close: vi.fn().mockResolvedValue(undefined),
   };
 

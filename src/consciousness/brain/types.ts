@@ -211,6 +211,17 @@ export interface Hippocampus {
     k: number,
     filter?: { sessionKey?: string },
   ): Promise<readonly MemoryNote[]>;
+  /**
+   * List notes by type without vector search.
+   * Ordered by createdAt ascending (oldest first).
+   * Used by the consolidation pipeline to fetch episodic notes for processing
+   * and to check which semantic notes already exist (idempotency).
+   * Returns [] on any internal error — never throws.
+   */
+  listByType(
+    type: NoteType,
+    filter?: { sessionKey?: string; limit?: number },
+  ): Promise<readonly MemoryNote[]>;
   /** Release the SQLite connection.  Called at graceful shutdown. */
   close(): Promise<void>;
 }

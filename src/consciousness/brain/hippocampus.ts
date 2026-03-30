@@ -274,6 +274,49 @@ export class SqliteHippocampus implements Hippocampus {
     }
   }
 
+  async listByType(
+    type: MemoryNote["type"],
+    filter?: { sessionKey?: string; limit?: number },
+  ): Promise<readonly MemoryNote[]> {
+    try {
+      const db = await this.ensureReady();
+      if (!db) return [];
+
+      const sessionKey = filter?.sessionKey?.trim() || undefined;
+      const limit = filter?.limit;
+      const applyLimit = limit !== undefined && Number.isInteger(limit) && limit > 0;
+
+      const sql =
+        `SELECT id, content, type, session_key, created_at FROM ${NOTES_TABLE}` +
+        ` WHERE type = ?` +
+        (sessionKey ? ` AND session_key = ?` : ``) +
+        ` ORDER BY created_at ASC` +
+        (applyLimit ? ` LIMIT ?` : ``);
+
+      const params: unknown[] = [type];
+      if (sessionKey) params.push(sessionKey);
+      if (applyLimit) params.push(limit!);
+
+      const rows = db.prepare(sql).all(...params) as Array<{
+        id: string;
+        content: string;
+        type: string;
+        session_key: string;
+        created_at: number;
+      }>;
+
+      return rows.map((row) => ({
+        id: row.id,
+        content: row.content,
+        type: row.type as MemoryNote["type"],
+        sessionKey: row.session_key,
+        createdAt: row.created_at,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
   async close(): Promise<void> {
     try {
       this.db?.close();
