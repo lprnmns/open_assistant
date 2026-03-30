@@ -314,3 +314,70 @@ describe("ConsciousnessScheduler — dispatch gate", () => {
     scheduler.stop();
   });
 });
+
+// ── brain thread-through ───────────────────────────────────────────────────────
+
+describe("ConsciousnessScheduler — brain.recall thread-through to tick()", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    process.env.LITELLM_PROXY_URL = "http://litellm-test:4000";
+    process.env.LITELLM_MASTER_KEY = "sk-test-master";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.LITELLM_PROXY_URL;
+    delete process.env.LITELLM_MASTER_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("recall pipeline is called once per tick when Watchdog wakes", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    const recallFn = vi.fn().mockResolvedValue({ recent: [], recalled: [] });
+    const brain = {
+      recall: { recall: recallFn },
+      sessionKey: "sched-test-session",
+    };
+
+    const buildSnapshot = vi.fn().mockResolvedValue(
+      makeSnap({ firedTriggerIds: ["trigger"] }), // force wake:true
+    );
+
+    const scheduler = new ConsciousnessScheduler({ buildSnapshot, dispatch: makeDispatch(), brain });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+
+    expect(recallFn).toHaveBeenCalledOnce();
+    expect(recallFn).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: "sched-test-session" }),
+    );
+    scheduler.stop();
+  });
+
+  it("recall pipeline is NOT called when Watchdog returns wake:false", async () => {
+    const recallFn = vi.fn().mockResolvedValue({ recent: [], recalled: [] });
+    const brain = {
+      recall: { recall: recallFn },
+      sessionKey: "sched-test-session",
+    };
+
+    const buildSnapshot = vi.fn().mockResolvedValue(makeSnap()); // no delta → wake:false
+
+    const scheduler = new ConsciousnessScheduler({ buildSnapshot, dispatch: makeDispatch(), brain });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+
+    expect(recallFn).not.toHaveBeenCalled();
+    scheduler.stop();
+  });
+});
