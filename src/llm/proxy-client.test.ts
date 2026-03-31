@@ -5,18 +5,23 @@ import { proxyCall, selectModel, sourceTier } from "./proxy-client.js";
 
 const ORIGINAL_ENV = { ...process.env };
 
-function setOnlyProvider(provider: "anthropic" | "openai" | "google") {
+function setOnlyProvider(provider: "anthropic" | "openai" | "google" | "openrouter") {
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
   delete process.env.GEMINI_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
   if (provider === "anthropic") process.env.ANTHROPIC_API_KEY = "sk-ant-test";
   if (provider === "openai") process.env.OPENAI_API_KEY = "sk-proj-test";
   if (provider === "google") process.env.GEMINI_API_KEY = "AIzaTest";
+  // Synthetic test value — never a real credential
+  if (provider === "openrouter") process.env.OPENROUTER_API_KEY = "sk-or-v1-" + "0".repeat(64);
 }
 
 function restoreEnv() {
-  for (const k of ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
-                    "LITELLM_PROXY_URL", "LITELLM_MASTER_KEY"]) {
+  for (const k of [
+    "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "OPENROUTER_API_KEY",
+    "LITELLM_PROXY_URL", "LITELLM_MASTER_KEY",
+  ]) {
     if (ORIGINAL_ENV[k] !== undefined) {
       process.env[k] = ORIGINAL_ENV[k];
     } else {
@@ -90,7 +95,52 @@ describe("selectModel", () => {
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.GEMINI_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
     expect(() => selectModel("chat")).toThrow(/No BYOK provider key/);
+  });
+
+  // ── OpenRouter-specific selectModel tests ──────────────────────────────────
+
+  it("selects openrouter-strong for chat when only OpenRouter key is present", () => {
+    setOnlyProvider("openrouter");
+    expect(selectModel("chat")).toBe("openrouter-strong");
+  });
+
+  it("selects openrouter-cheap for consciousness when only OpenRouter key is present", () => {
+    setOnlyProvider("openrouter");
+    expect(selectModel("consciousness")).toBe("openrouter-cheap");
+  });
+
+  it("selects openrouter-cheap for sleep when only OpenRouter key is present", () => {
+    setOnlyProvider("openrouter");
+    expect(selectModel("sleep")).toBe("openrouter-cheap");
+  });
+
+  it("selects openrouter-cheap for extraction when only OpenRouter key is present", () => {
+    setOnlyProvider("openrouter");
+    expect(selectModel("extraction")).toBe("openrouter-cheap");
+  });
+
+  it("Anthropic key takes priority over OpenRouter (openrouter does NOT override existing providers)", () => {
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-" + "0".repeat(64);
+    expect(selectModel("chat")).toBe("claude-sonnet");
+    expect(selectModel("consciousness")).toBe("claude-haiku");
+  });
+
+  it("OpenAI key takes priority over OpenRouter", () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    process.env.OPENAI_API_KEY = "sk-proj-test";
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-" + "0".repeat(64);
+    expect(selectModel("chat")).toBe("gpt-4o");
+  });
+
+  it("Google key takes priority over OpenRouter", () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    process.env.GEMINI_API_KEY = "AIzaTest";
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-" + "0".repeat(64);
+    expect(selectModel("chat")).toBe("gemini-pro");
   });
 });
 
@@ -308,5 +358,68 @@ describe("proxyCall", () => {
     const url = fetchSpy.mock.calls[0]![0] as string;
     expect(url).not.toContain("//v1");
     expect(url).toBe("http://litellm:4000/v1/chat/completions");
+  });
+
+  // ── OpenRouter integration path ────────────────────────────────────────────
+
+  it("sends openrouter-cheap model when only OpenRouter key is present (consciousness source)", async () => {
+    setOnlyProvider("openrouter");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "openrouter/qwen/qwen3.6-plus-preview:free",
+        choices: [{ message: { content: "pong from openrouter" } }],
+        usage: { prompt_tokens: 8, completion_tokens: 4, total_tokens: 12 },
+      }),
+    } as Response);
+
+    const result = await proxyCall({
+      source: "consciousness",
+      messages: [{ role: "user", content: "ping" }],
+    });
+
+    const body = JSON.parse(fetchSpy.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(body["model"]).toBe("openrouter-cheap");
+    expect(result.content).toBe("pong from openrouter");
+    expect(result.usage.totalTokens).toBe(12);
+  });
+
+  it("sends openrouter-strong model when only OpenRouter key is present (chat source)", async () => {
+    setOnlyProvider("openrouter");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "openrouter/qwen/qwen3.6-plus-preview:free",
+        choices: [{ message: { content: "strong reply" } }],
+        usage: { prompt_tokens: 5, completion_tokens: 3, total_tokens: 8 },
+      }),
+    } as Response);
+
+    const result = await proxyCall({
+      source: "chat",
+      messages: [{ role: "user", content: "hello" }],
+    });
+
+    const body = JSON.parse(fetchSpy.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    expect(body["model"]).toBe("openrouter-strong");
+    expect(result.content).toBe("strong reply");
+  });
+
+  it("x-source header is preserved for OpenRouter path", async () => {
+    setOnlyProvider("openrouter");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "openrouter/qwen/qwen3.6-plus-preview:free",
+        choices: [{ message: { content: "ok" } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+    } as Response);
+
+    await proxyCall({ source: "sleep", messages: [{ role: "user", content: "hi" }] });
+
+    const headers = fetchSpy.mock.calls[0]![1]!.headers as Record<string, string>;
+    expect(headers["x-source"]).toBe("sleep");
+    expect(headers["Authorization"]).toBe("Bearer sk-test-master");
   });
 });

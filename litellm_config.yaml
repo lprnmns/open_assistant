@@ -5,8 +5,9 @@
 # See: src/config/secrets.ts, scripts/init-secrets.ts
 #
 # Available model aliases (caller selects by model_name):
-#   claude-sonnet / gpt-4o / gemini-pro    — strong models for chat
-#   claude-haiku / gpt-4o-mini / gemini-flash — cheap models for background tasks
+#   claude-sonnet / gpt-4o / gemini-pro         — strong models for chat
+#   claude-haiku / gpt-4o-mini / gemini-flash   — cheap models for background tasks
+#   openrouter-strong / openrouter-cheap        — OpenRouter fallback (4th priority)
 #
 # NOTE: Source-aware routing (chat vs consciousness vs extraction vs sleep)
 # will be implemented in Sub-Task 1.3 (LLM Proxy Integration Layer).
@@ -45,6 +46,20 @@ model_list:
     litellm_params:
       model: gemini/gemini-1.5-flash
       api_key: os.environ/GEMINI_API_KEY
+
+  # ── OpenRouter ──────────────────────────────────────────────────────────────
+  # Fourth-priority provider — only selected when Anthropic/OpenAI/Google keys
+  # are absent.  Key sourced from env; never stored plaintext here.
+  # Both tiers use the same underlying model for the initial smoke pass.
+  - model_name: openrouter-strong      # strong tier alias via OpenRouter
+    litellm_params:
+      model: openrouter/qwen/qwen3.6-plus-preview:free
+      api_key: os.environ/OPENROUTER_API_KEY
+
+  - model_name: openrouter-cheap       # cheap tier alias via OpenRouter
+    litellm_params:
+      model: openrouter/qwen/qwen3.6-plus-preview:free
+      api_key: os.environ/OPENROUTER_API_KEY
 
 # ── Router: Source-aware model selection ────────────────────────────────────
 # The gateway sets x-source header to route to appropriate model tier.

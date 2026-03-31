@@ -34,6 +34,7 @@ export const BYOK_KEY_NAMES = [
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
   "GEMINI_API_KEY",
+  "OPENROUTER_API_KEY",
 ] as const;
 
 export type ByokKeyName = (typeof BYOK_KEY_NAMES)[number];
@@ -48,9 +49,10 @@ export type ByokKeys = Partial<Record<ByokKeyName, string>>;
  * Used by redactLogLine to prevent key leakage in logs.
  */
 const REDACT_PATTERNS: RegExp[] = [
-  /sk-proj-[A-Za-z0-9_-]{20,}/g, // OpenAI project keys
-  /sk-[A-Za-z0-9]{20,}/g, // OpenAI legacy keys
+  /sk-or-v1-[A-Za-z0-9_-]{20,}/g, // OpenRouter keys (most-specific first)
   /sk-ant-[A-Za-z0-9_-]{20,}/g, // Anthropic keys
+  /sk-proj-[A-Za-z0-9_-]{20,}/g, // OpenAI project keys
+  /sk-[A-Za-z0-9]{20,}/g, // OpenAI legacy keys (broad — must come after more-specific sk- patterns)
   /AIza[A-Za-z0-9_-]{35}/g, // Google API keys (Gemini)
 ];
 

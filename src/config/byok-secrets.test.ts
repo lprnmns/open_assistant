@@ -201,4 +201,39 @@ describe("redactLogLine", () => {
     const redacted = redactLogLine(line);
     expect(redacted.match(/\[REDACTED\]/g)?.length).toBe(2);
   });
+
+  it("redacts OpenRouter key pattern (sk-or-v1-)", () => {
+    // Use a synthetic key of the same format — never a real credential
+    const syntheticKey = "sk-or-v1-" + "a".repeat(64);
+    const line = `openrouter key=${syntheticKey} used`;
+    const redacted = redactLogLine(line);
+    expect(redacted).toContain("[REDACTED]");
+    expect(redacted).not.toContain("sk-or-v1-");
+    expect(redacted).not.toContain("a".repeat(64));
+  });
+
+  it("OpenRouter key is not partially redacted by the broad sk- pattern (most-specific wins)", () => {
+    // sk-or-v1- must be caught by the OpenRouter pattern, not the broad sk- pattern,
+    // so the entire key is consumed as one [REDACTED] token.
+    const syntheticKey = "sk-or-v1-" + "b".repeat(64);
+    const line = `key=${syntheticKey}`;
+    const redacted = redactLogLine(line);
+    // Must be exactly one [REDACTED] — not split into two
+    expect(redacted.match(/\[REDACTED\]/g)?.length).toBe(1);
+  });
+
+  it("redact regression — line with all four provider key formats", () => {
+    const line = [
+      "or=sk-or-v1-" + "c".repeat(64),
+      "ant=sk-ant-api03-" + "d".repeat(40),
+      "oai=sk-proj-" + "e".repeat(30),
+      "goog=AIzaSy" + "f".repeat(35),
+    ].join(" ");
+    const redacted = redactLogLine(line);
+    expect(redacted).not.toMatch(/sk-or-v1-/);
+    expect(redacted).not.toMatch(/sk-ant-/);
+    expect(redacted).not.toMatch(/sk-proj-/);
+    expect(redacted).not.toMatch(/AIzaSy/);
+    expect(redacted.match(/\[REDACTED\]/g)?.length).toBe(4);
+  });
 });

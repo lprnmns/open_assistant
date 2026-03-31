@@ -64,5 +64,10 @@ export type ProxyCallResult = {
 /**
  * Ordered list of providers checked when auto-selecting a model.
  * First provider that has its API key in process.env wins.
+ * Priority: anthropic → openai → google → openrouter
+ *
+ * OpenRouter is last — it activates only when none of the first three are
+ * configured.  Existing production deployments with Anthropic/OpenAI/Google
+ * keys are completely unaffected.
  */
-export type ByokProvider = "anthropic" | "openai" | "google";
+export type ByokProvider = "anthropic" | "openai" | "google" | "openrouter";

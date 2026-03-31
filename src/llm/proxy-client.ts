@@ -100,6 +100,12 @@ const MODEL_ALIASES: Record<ByokProvider, Record<ProxyModelTier, string>> = {
     strong: "gemini-pro",
     cheap: "gemini-flash",
   },
+  openrouter: {
+    // Both tiers map to LiteLLM aliases defined in litellm_config.yaml.
+    // The underlying model is resolved there; no auth logic changes here.
+    strong: "openrouter-strong",
+    cheap: "openrouter-cheap",
+  },
 };
 
 /** ENV var that holds each provider's API key (used for availability check). */
@@ -107,10 +113,14 @@ const PROVIDER_ENV_KEYS: Record<ByokProvider, string> = {
   anthropic: "ANTHROPIC_API_KEY",
   openai: "OPENAI_API_KEY",
   google: "GEMINI_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
 };
 
-/** Priority order — first available provider wins. */
-const PROVIDER_PRIORITY: ByokProvider[] = ["anthropic", "openai", "google"];
+/**
+ * Priority order — first available provider wins.
+ * OpenRouter is last: existing Anthropic/OpenAI/Google deployments are unaffected.
+ */
+const PROVIDER_PRIORITY: ByokProvider[] = ["anthropic", "openai", "google", "openrouter"];
 
 // ── Source → tier mapping ─────────────────────────────────────────────────────
 
