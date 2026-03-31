@@ -46,6 +46,14 @@ import {
 } from "./types.js";
 import { runWatchdog } from "./watchdog.js";
 import { evaluateSleepWakeTransition } from "./sleep/wake.js";
+import {
+  type EventBuffer,
+  BUFFER_DEFAULTS,
+  buildEventPromptLines,
+  drainByIds,
+  listBySurface,
+  makeEventBuffer,
+} from "./events/buffer.js";
 
 // ── Memory recall context (optional, injected by scheduler) ───────────────────
 
@@ -101,6 +109,7 @@ function buildTickMessages(
   snap: WorldSnapshot,
   wakeResult: WatchdogResult & { wake: true },
   memory: MemoryRecallResult,
+  eventBuffer: EventBuffer,
 ): ProxyMessage[] {
   const system: ProxyMessage = {
     role: "system",
@@ -145,6 +154,13 @@ function buildTickMessages(
         contextLines.push(`    ${truncate(note.content, NOTE_CONTENT_MAX_CHARS)}`);
       }
     }
+  }
+
+  // ── Buffered events ───────────────────────────────────────────────────────
+  const eventLines = buildEventPromptLines(eventBuffer);
+  if (eventLines) {
+    contextLines.push(``);
+    contextLines.push(eventLines);
   }
 
   // ── Current world state ───────────────────────────────────────────────────
@@ -268,6 +284,20 @@ export type TickResult = {
   decision: TickDecision | undefined;
   /** How long to wait before the next tick (ms). */
   nextDelayMs: number;
+  /**
+   * Updated EventBuffer after this tick.
+   *
+   * Owner-channel events that were injected into the LLM prompt are drained
+   * here when the action is SEND_MESSAGE or TAKE_NOTE (the LLM has acted on them).
+   * For STAY_SILENT / ENTER_SLEEP the buffer is returned unchanged so events
+   * remain available on the next tick.
+   *
+   * Third-party contact events are never auto-drained — they require explicit
+   * owner approval via the human-in-the-loop path (DPE rule).
+   *
+   * The caller should pass this value as snap.eventBuffer on the next tick.
+   */
+  eventBuffer: EventBuffer;
 };
 
 /**
@@ -296,6 +326,10 @@ export async function tick(
   ctx?: TickContext,
 ): Promise<TickResult> {
   const config = state.config;
+
+  // Resolve the event buffer from the snapshot (undefined → empty buffer).
+  // Carried through all tick paths so the caller always gets an EventBuffer back.
+  const resolvedBuffer: EventBuffer = snap.eventBuffer ?? makeEventBuffer();
 
   // ── Step 0: SLEEPING phase — wake transition check ($0, pure) ────────────
   //
@@ -331,6 +365,7 @@ export async function tick(
         watchdogResult: { wake: false },
         decision: undefined,
         nextDelayMs: wakeDelay,
+        eventBuffer: resolvedBuffer,
       };
     }
 
@@ -353,6 +388,7 @@ export async function tick(
       watchdogResult: { wake: false },
       decision: undefined,
       nextDelayMs: sleepDelay,
+      eventBuffer: resolvedBuffer,
     };
   }
 
@@ -384,7 +420,7 @@ export async function tick(
       currentDelayMs: currentDelay,
     };
 
-    return { state: idleState, watchdogResult, decision: undefined, nextDelayMs: currentDelay };
+    return { state: idleState, watchdogResult, decision: undefined, nextDelayMs: currentDelay, eventBuffer: resolvedBuffer };
   }
 
   // ── Step 4: Delta found → call LLM ───────────────────────────────────────
@@ -398,7 +434,7 @@ export async function tick(
   try {
     // Recall memory BEFORE building the prompt — failure is fully swallowed by safeRecall
     const memory = await safeRecall(ctx?.recall, watchdogResult.context, ctx?.sessionKey);
-    const messages = buildTickMessages(snap, watchdogResult, memory);
+    const messages = buildTickMessages(snap, watchdogResult, memory, resolvedBuffer);
     const result = await proxyCall({ source: "consciousness", messages, maxTokens: 512 });
     decision = parseTickDecision(result.content);
   } catch (err) {
@@ -456,7 +492,27 @@ export async function tick(
     consolidation,
   };
 
-  return { state: finalState, watchdogResult, decision, nextDelayMs: nextDelay };
+  // ── Event buffer drain ────────────────────────────────────────────────────
+  // After SEND_MESSAGE or TAKE_NOTE the LLM has acted on the owner-channel
+  // events that were shown in the prompt.  Drain them so they are not
+  // re-injected on the next tick.
+  //
+  // Third-party contact events are NEVER auto-drained here — they require
+  // explicit owner approval via the human-in-the-loop path (DPE rule).
+  //
+  // For STAY_SILENT / ENTER_SLEEP the buffer is returned unchanged so events
+  // persist until the LLM acts on them.
+  const acted = decision.action === "SEND_MESSAGE" || decision.action === "TAKE_NOTE";
+  const finalBuffer = acted
+    ? drainByIds(
+        resolvedBuffer,
+        listBySurface(resolvedBuffer, "owner_active_channel", BUFFER_DEFAULTS.maxPerSurface).map(
+          (e) => ({ surface: e.surface, id: e.id }),
+        ),
+      )
+    : resolvedBuffer;
+
+  return { state: finalState, watchdogResult, decision, nextDelayMs: nextDelay, eventBuffer: finalBuffer };
 }
 
 // ── Public factory ────────────────────────────────────────────────────────────

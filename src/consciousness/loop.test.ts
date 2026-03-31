@@ -803,3 +803,278 @@ describe("tick() — SLEEPING phase — cross-cycle stale timestamp regression",
     expect(result.state.phase).toBe("SLEEPING");
   });
 });
+
+// ── tick() — EventBuffer integration (Sub-Task 6.2) ───────────────────────────
+//
+// Verifies that:
+//   1. event prompt lines are injected into the LLM user message
+//   2. owner_active_channel events are drained after SEND_MESSAGE / TAKE_NOTE
+//   3. owner events are NOT drained after STAY_SILENT / ENTER_SLEEP
+//   4. third_party_contact events are NEVER auto-drained
+//   5. snap.eventBuffer undefined → empty buffer passed through (backwards-compat)
+//   6. SLEEPING phase passes buffer through unchanged without LLM call
+
+import { addEvent, makeEventBuffer, listBySurface } from "./events/buffer.js";
+import type { BufferedEvent } from "./events/buffer.js";
+
+function makeOwnerEvent(id: string, receivedAt = NOW): BufferedEvent {
+  return { id, surface: "owner_active_channel", source: "web-chat", summary: `owner ${id}`, receivedAt };
+}
+
+function makeThirdEvent(id: string, receivedAt = NOW): BufferedEvent {
+  return { id, surface: "third_party_contact", source: "telegram:+1", summary: `third ${id}`, receivedAt };
+}
+
+function mockLlmResponse(action: string, extra: Record<string, string> = {}) {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      model: "claude-haiku",
+      choices: [{ message: { content: JSON.stringify({ action, ...extra }) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    }),
+  } as Response);
+}
+
+describe("tick() — EventBuffer — prompt injection", () => {
+  beforeEach(() => {
+    process.env.LITELLM_PROXY_URL = "http://litellm-test:4000";
+    process.env.LITELLM_MASTER_KEY = "sk-test-master";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.LITELLM_PROXY_URL;
+    delete process.env.LITELLM_MASTER_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("injects owner-channel event lines into the LLM user message", async () => {
+    let capturedBody: string | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBody = typeof init?.body === "string" ? init.body : undefined;
+      return {
+        ok: true,
+        json: async () => ({
+          model: "claude-haiku",
+          choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        }),
+      } as Response;
+    });
+
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeOwnerEvent("e1"));
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"], eventBuffer: buf });
+    await tick(snap, makeInitialConsciousnessState());
+
+    expect(capturedBody).toBeDefined();
+    expect(capturedBody).toContain("Buffered events:");
+    expect(capturedBody).toContain("Owner channel");
+    expect(capturedBody).toContain("owner e1");
+  });
+
+  it("injects third-party event lines with read-only label", async () => {
+    let capturedBody: string | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBody = typeof init?.body === "string" ? init.body : undefined;
+      return {
+        ok: true,
+        json: async () => ({
+          model: "claude-haiku",
+          choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        }),
+      } as Response;
+    });
+
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeThirdEvent("t1"));
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"], eventBuffer: buf });
+    await tick(snap, makeInitialConsciousnessState());
+
+    expect(capturedBody).toContain("Third-party contacts");
+    expect(capturedBody).toContain("read-only");
+    expect(capturedBody).toContain("owner approval");
+  });
+
+  it("no event section when buffer is empty", async () => {
+    let capturedBody: string | undefined;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBody = typeof init?.body === "string" ? init.body : undefined;
+      return {
+        ok: true,
+        json: async () => ({
+          model: "claude-haiku",
+          choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        }),
+      } as Response;
+    });
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"] }); // no eventBuffer
+    await tick(snap, makeInitialConsciousnessState());
+
+    expect(capturedBody).not.toContain("Buffered events:");
+  });
+});
+
+describe("tick() — EventBuffer — drain on action", () => {
+  beforeEach(() => {
+    process.env.LITELLM_PROXY_URL = "http://litellm-test:4000";
+    process.env.LITELLM_MASTER_KEY = "sk-test-master";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.LITELLM_PROXY_URL;
+    delete process.env.LITELLM_MASTER_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("drains shown owner events after SEND_MESSAGE", async () => {
+    mockLlmResponse("SEND_MESSAGE", { messageContent: "Hi!" });
+
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeOwnerEvent("o1"));
+    buf = addEvent(buf, makeOwnerEvent("o2"));
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"], eventBuffer: buf });
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    expect(result.decision?.action).toBe("SEND_MESSAGE");
+    // Both owner events should be drained
+    expect(listBySurface(result.eventBuffer, "owner_active_channel")).toHaveLength(0);
+  });
+
+  it("drains shown owner events after TAKE_NOTE", async () => {
+    mockLlmResponse("TAKE_NOTE", { noteContent: "Remember this." });
+
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeOwnerEvent("o1"));
+
+    const snap = makeSnap({ pendingNoteCount: 1, eventBuffer: buf });
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    expect(result.decision?.action).toBe("TAKE_NOTE");
+    expect(listBySurface(result.eventBuffer, "owner_active_channel")).toHaveLength(0);
+  });
+
+  it("does NOT drain owner events after STAY_SILENT", async () => {
+    mockLlmResponse("STAY_SILENT");
+
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeOwnerEvent("o1"));
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"], eventBuffer: buf });
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    expect(result.decision?.action).toBe("STAY_SILENT");
+    expect(listBySurface(result.eventBuffer, "owner_active_channel")).toHaveLength(1);
+  });
+
+  it("does NOT drain owner events after ENTER_SLEEP", async () => {
+    mockLlmResponse("ENTER_SLEEP");
+
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeOwnerEvent("o1"));
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"], eventBuffer: buf });
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    expect(result.decision?.action).toBe("ENTER_SLEEP");
+    expect(listBySurface(result.eventBuffer, "owner_active_channel")).toHaveLength(1);
+  });
+
+  it("third_party_contact events are NEVER auto-drained after SEND_MESSAGE", async () => {
+    mockLlmResponse("SEND_MESSAGE", { messageContent: "Reply!" });
+
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeThirdEvent("t1"));
+
+    const snap = makeSnap({ firedTriggerIds: ["trig"], eventBuffer: buf });
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    expect(result.decision?.action).toBe("SEND_MESSAGE");
+    // Third-party events must survive — DPE rule
+    expect(listBySurface(result.eventBuffer, "third_party_contact")).toHaveLength(1);
+    expect(result.eventBuffer.events[0]!.id).toBe("t1");
+  });
+
+  it("third_party_contact events are NEVER auto-drained after TAKE_NOTE", async () => {
+    mockLlmResponse("TAKE_NOTE", { noteContent: "Note it." });
+
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeThirdEvent("t1"));
+
+    const snap = makeSnap({ pendingNoteCount: 1, eventBuffer: buf });
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    expect(result.decision?.action).toBe("TAKE_NOTE");
+    expect(listBySurface(result.eventBuffer, "third_party_contact")).toHaveLength(1);
+  });
+
+  it("only drains the maxPerSurface shown events, leaving excess owner events", async () => {
+    // Add 6 owner events; maxPerSurface defaults to 5 → only 5 are shown and drained
+    mockLlmResponse("SEND_MESSAGE", { messageContent: "Done!" });
+
+    let buf = makeEventBuffer();
+    for (let i = 1; i <= 6; i++) {
+      buf = addEvent(buf, makeOwnerEvent(`o${i}`, NOW + i));
+    }
+
+    const snap = makeSnap({ firedTriggerIds: ["t1"], eventBuffer: buf });
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    // 5 shown and drained, 1 oldest remains
+    expect(listBySurface(result.eventBuffer, "owner_active_channel")).toHaveLength(1);
+  });
+});
+
+describe("tick() — EventBuffer — backwards compatibility and SLEEPING passthrough", () => {
+  it("returns empty eventBuffer when snap.eventBuffer is undefined", async () => {
+    const snap = makeSnap(); // no eventBuffer
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    expect(result.eventBuffer).toBeDefined();
+    expect(result.eventBuffer.events).toHaveLength(0);
+  });
+
+  it("SLEEPING tick passes eventBuffer through unchanged without draining", async () => {
+    const sleepEnteredAt = Date.UTC(2026, 2, 31, 22, 0, 0, 0);
+    const capturedAt = sleepEnteredAt + 60_000;
+
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeOwnerEvent("o1", sleepEnteredAt));
+    buf = addEvent(buf, makeThirdEvent("t1", sleepEnteredAt));
+
+    const sleepingState = {
+      ...makeInitialConsciousnessState(),
+      phase: "SLEEPING" as const,
+      consolidation: { sleepEnteredAt, consolidationCompletedAt: undefined },
+    };
+
+    const snap = makeSnap({ capturedAt, eventBuffer: buf });
+    const result = await tick(snap, sleepingState);
+
+    expect(result.state.phase).toBe("SLEEPING");
+    // Buffer must be returned intact — no drain during sleep
+    expect(listBySurface(result.eventBuffer, "owner_active_channel")).toHaveLength(1);
+    expect(listBySurface(result.eventBuffer, "third_party_contact")).toHaveLength(1);
+  });
+
+  it("wake:false tick (no LLM) passes eventBuffer through unchanged", async () => {
+    let buf = makeEventBuffer();
+    buf = addEvent(buf, makeOwnerEvent("o1"));
+
+    const snap = makeSnap({ eventBuffer: buf }); // no delta → watchdog wake:false
+    const result = await tick(snap, makeInitialConsciousnessState());
+
+    expect(result.watchdogResult.wake).toBe(false);
+    expect(listBySurface(result.eventBuffer, "owner_active_channel")).toHaveLength(1);
+  });
+});

@@ -154,6 +154,14 @@ export type WorldSnapshot = {
   activeChannelId: string | undefined;
 
   /**
+   * Buffered events from external surfaces (owner channel + third-party contacts).
+   * Injected into the LLM prompt via buildEventPromptLines().
+   * Owner-channel events shown to the LLM are drained after SEND_MESSAGE / TAKE_NOTE.
+   * undefined = no event buffer attached (pre-6.2 behaviour; treated as empty buffer).
+   */
+  eventBuffer?: EventBuffer;
+
+  /**
    * Unix ms of the last completed tick (THINKING → decision applied).
    * undefined = loop has never ticked.
    */
@@ -323,6 +331,7 @@ import {
   INITIAL_CONSOLIDATION_TRIGGER_STATE,
   type ConsolidationTriggerState,
 } from "./sleep/trigger.js";
+import type { EventBuffer } from "./events/buffer.js";
 
 export type { ConsolidationTriggerState };
 
