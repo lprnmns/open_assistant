@@ -6,6 +6,8 @@ import {
   type WorldSnapshot,
 } from "./types.js";
 import type { ConsolidationPipeline, ConsolidationResult } from "./sleep/consolidation.js";
+import { listBySurface } from "./events/buffer.js";
+import type { BufferedEvent } from "./events/buffer.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -698,5 +700,153 @@ describe("ConsciousnessScheduler — brain.recall thread-through to tick()", () 
 
     expect(recallFn).not.toHaveBeenCalled();
     scheduler.stop();
+  });
+});
+
+// ── ConsciousnessScheduler — EventBuffer lifecycle (Sub-Task 6.2 R1) ──────────
+//
+// Verifies that the scheduler correctly:
+//   1. injects the internal EventBuffer into each snapshot before calling tick()
+//   2. persists the post-drain buffer so drained events do not re-appear
+//   3. exposes pushEvent() for external adapters to add events
+
+describe("ConsciousnessScheduler — EventBuffer lifecycle", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    process.env.LITELLM_PROXY_URL = "http://litellm-test:4000";
+    process.env.LITELLM_MASTER_KEY = "sk-test-master";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.LITELLM_PROXY_URL;
+    delete process.env.LITELLM_MASTER_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  function makeOwnerEvent(id: string): BufferedEvent {
+    return {
+      id,
+      surface: "owner_active_channel",
+      source: "web-chat",
+      summary: `owner ${id}`,
+      receivedAt: NOW,
+    };
+  }
+
+  function mockLlm(action: string, extra: Record<string, string> = {}) {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: JSON.stringify({ action, ...extra }) } }],
+        usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+      }),
+    } as Response);
+  }
+
+  it("pushEvent() is reflected in the snapshot injected into tick()", async () => {
+    // Capture the snapshot seen by tick() via onTick
+    const seenSnapshots: WorldSnapshot[] = [];
+
+    mockLlm("STAY_SILENT");
+    const buildSnapshot = vi.fn().mockResolvedValue(makeSnap({ firedTriggerIds: ["t1"] }));
+
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot,
+      dispatch: makeDispatch(),
+      onTick: (r) => seenSnapshots.push(r.state.lastSnapshot!),
+    });
+
+    scheduler.pushEvent(makeOwnerEvent("e1"));
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+
+    expect(seenSnapshots).toHaveLength(1);
+    const injectedBuffer = seenSnapshots[0]?.eventBuffer;
+    expect(injectedBuffer).toBeDefined();
+    expect(listBySurface(injectedBuffer!, "owner_active_channel")).toHaveLength(1);
+    expect(injectedBuffer!.events[0]!.id).toBe("e1");
+    scheduler.stop();
+  });
+
+  it("owner event drained after SEND_MESSAGE is NOT re-injected on the next tick", async () => {
+    // Tick 1: SEND_MESSAGE (triggers wake via firedTriggerIds) → drains owner event
+    // Tick 2: STAY_SILENT — buffer should be empty after drain
+    const capturedBodies: string[] = [];
+
+    let callCount = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBodies.push(typeof init?.body === "string" ? init.body : "");
+      const action = callCount++ === 0 ? "SEND_MESSAGE" : "STAY_SILENT";
+      const content =
+        action === "SEND_MESSAGE"
+          ? JSON.stringify({ action, messageContent: "Hello!" })
+          : JSON.stringify({ action });
+      return {
+        ok: true,
+        json: async () => ({
+          model: "claude-haiku",
+          choices: [{ message: { content } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        }),
+      } as Response;
+    });
+
+    // Both ticks see a wake trigger so LLM is called each time
+    const buildSnapshot = vi
+      .fn()
+      .mockResolvedValue(makeSnap({ firedTriggerIds: ["t1"] }));
+
+    const scheduler = new ConsciousnessScheduler({ buildSnapshot, dispatch: makeDispatch() });
+    scheduler.pushEvent(makeOwnerEvent("drain-me"));
+    scheduler.start();
+
+    // Tick 1 — SEND_MESSAGE → drain
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    // Tick 2 — STAY_SILENT — buffer should be empty
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+
+    scheduler.stop();
+
+    // Tick 1 body must contain the event; tick 2 body must NOT
+    expect(capturedBodies[0]).toContain("drain-me");
+    expect(capturedBodies[1]).not.toContain("drain-me");
+  });
+
+  it("owner event NOT drained after STAY_SILENT — persists to next tick", async () => {
+    const capturedBodies: string[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBodies.push(typeof init?.body === "string" ? init.body : "");
+      return {
+        ok: true,
+        json: async () => ({
+          model: "claude-haiku",
+          choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+          usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+        }),
+      } as Response;
+    });
+
+    const buildSnapshot = vi
+      .fn()
+      .mockResolvedValue(makeSnap({ firedTriggerIds: ["t1"] }));
+
+    const scheduler = new ConsciousnessScheduler({ buildSnapshot, dispatch: makeDispatch() });
+    scheduler.pushEvent(makeOwnerEvent("persist-me"));
+    scheduler.start();
+
+    // Two ticks, both STAY_SILENT
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+
+    scheduler.stop();
+
+    // Event must appear in both ticks since it was never drained
+    expect(capturedBodies[0]).toContain("persist-me");
+    expect(capturedBodies[1]).toContain("persist-me");
   });
 });

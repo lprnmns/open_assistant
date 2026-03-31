@@ -5,9 +5,10 @@
  *
  *   ① Wait nextDelayMs
  *   ② Build fresh WorldSnapshot (caller-provided)
- *   ③ tick(snap, state) → TickResult
- *   ④ If decision present → dispatchDecision(decision, snap, ctx)
- *   ⑤ Reschedule after result.nextDelayMs  →  back to ①
+ *   ③ Inject internal EventBuffer into snapshot
+ *   ④ tick(snap, state) → TickResult; persist result.eventBuffer
+ *   ⑤ If decision present → dispatchDecision(decision, snap, ctx)
+ *   ⑥ Reschedule after result.nextDelayMs  →  back to ①
  *
  * Adaptive interval:
  *   wake:true  → next wait = minTickIntervalMs  (stay alert)
@@ -32,6 +33,7 @@ import {
   type ConsciousnessState,
   type WorldSnapshot,
 } from "./types.js";
+import { makeEventBuffer, type BufferedEvent, type EventBuffer, addEvent as bufferAddEvent } from "./events/buffer.js";
 
 // ── Scheduler options ─────────────────────────────────────────────────────────
 
@@ -121,6 +123,19 @@ export class ConsciousnessScheduler {
    * Always cleared in a finally block — never leaked after failure.
    */
   private consolidating = false;
+  /**
+   * The live EventBuffer owned by this scheduler instance.
+   *
+   * Lifecycle:
+   *   - External callers push events via pushEvent() between ticks.
+   *   - runTick() injects this.eventBuffer into the snapshot before calling
+   *     tick(), so the LLM always sees the current buffer.
+   *   - After each tick, this.eventBuffer is replaced with result.eventBuffer,
+   *     which has owner_active_channel events drained when the LLM acted on them.
+   *   - This ensures drain results persist across ticks — the same owner event
+   *     is never re-injected after it has been acted upon.
+   */
+  private eventBuffer: EventBuffer = makeEventBuffer();
   private readonly options: SchedulerOptions;
 
   constructor(options: SchedulerOptions) {
@@ -137,6 +152,20 @@ export class ConsciousnessScheduler {
   /** Read-only view of the current runtime state.  Useful for telemetry and tests. */
   getState(): Readonly<ConsciousnessState> {
     return this.state;
+  }
+
+  /**
+   * Push an incoming event into the scheduler's internal EventBuffer.
+   *
+   * Called by external adapters (e.g. Telegram gateway, email watcher) when a
+   * new event arrives on either surface.  The event is buffered and will be
+   * injected into the next tick's LLM prompt via snap.eventBuffer.
+   *
+   * Deduplication is handled by addEvent() — pushing the same (surface, id)
+   * pair twice is safe; the second call is a no-op.
+   */
+  pushEvent(event: BufferedEvent): void {
+    this.eventBuffer = bufferAddEvent(this.eventBuffer, event);
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -204,7 +233,12 @@ export class ConsciousnessScheduler {
       return;
     }
 
-    // ② Run one consciousness tick (with optional memory context)
+    // ② Inject the current internal EventBuffer into the snapshot so tick()
+    //    can include buffered events in the LLM prompt.  buildSnapshot() is
+    //    caller-supplied and unaware of the scheduler's buffer lifecycle.
+    snap = { ...snap, eventBuffer: this.eventBuffer };
+
+    // ③ Run one consciousness tick (with optional memory context)
     const tickCtx: TickContext | undefined = this.options.brain
       ? { recall: this.options.brain.recall, sessionKey: this.options.brain.sessionKey }
       : undefined;
@@ -213,18 +247,23 @@ export class ConsciousnessScheduler {
     // tick() always returns phase:"IDLE" and would otherwise overwrite it.
     this.state = this.paused ? { ...result.state, phase: "PAUSED" } : result.state;
 
-    // ③ Dispatch decision side-effects (errors caught inside dispatchDecision)
+    // Persist the post-drain EventBuffer.  tick() drains owner_active_channel
+    // events when the LLM acted (SEND_MESSAGE / TAKE_NOTE); preserves them for
+    // STAY_SILENT / ENTER_SLEEP so they remain available on the next tick.
+    this.eventBuffer = result.eventBuffer;
+
+    // ④ Dispatch decision side-effects (errors caught inside dispatchDecision)
     if (result.decision !== undefined) {
       await dispatchDecision(result.decision, snap, this.options.dispatch);
     }
 
-    // ④ Notify telemetry / test observers
+    // ⑤ Notify telemetry / test observers
     this.options.onTick?.(result);
 
-    // ⑤ Maybe consolidate (fire-and-forget — does not block tick reschedule)
+    // ⑥ Maybe consolidate (fire-and-forget — does not block tick reschedule)
     void this.maybeConsolidate();
 
-    // ⑥ Reschedule with adaptive delay
+    // ⑦ Reschedule with adaptive delay
     this.scheduleNext(result.nextDelayMs);
   }
 
