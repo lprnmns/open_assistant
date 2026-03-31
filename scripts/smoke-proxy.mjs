@@ -2,7 +2,7 @@
  * scripts/smoke-proxy.mjs — Minimal OpenRouter passthrough proxy for smoke testing
  *
  * Starts a local HTTP server on port 4000 that:
- *   - Accepts POST /v1/chat/completions with any Bearer token
+ *   - Accepts POST /v1/chat/completions with Bearer ${LITELLM_MASTER_KEY}
  *   - Maps model aliases (openrouter-strong, openrouter-cheap) → real OpenRouter model
  *   - Forwards to OpenRouter API with OPENROUTER_API_KEY from env
  *   - Returns the response verbatim
@@ -11,7 +11,7 @@
  * Never commit OPENROUTER_API_KEY into this file.
  *
  * Usage:
- *   OPENROUTER_API_KEY=sk-or-v1-... node scripts/smoke-proxy.mjs
+ *   OPENROUTER_API_KEY=sk-or-v1-... LITELLM_MASTER_KEY=sk-smoke-master node scripts/smoke-proxy.mjs
  */
 
 import http from "node:http";
@@ -32,8 +32,15 @@ if (!apiKey) {
   process.exit(1);
 }
 
-// Never log the key value
+const smokeMasterKey = process.env.LITELLM_MASTER_KEY;
+if (!smokeMasterKey) {
+  console.error("[smoke-proxy] LITELLM_MASTER_KEY is not set — exiting.");
+  process.exit(1);
+}
+
+// Never log key values
 console.log("[smoke-proxy] OPENROUTER_API_KEY present:", "YES (value masked)");
+console.log("[smoke-proxy] LITELLM_MASTER_KEY present:", "YES (value masked)");
 console.log(`[smoke-proxy] Listening on http://localhost:${PORT}`);
 
 const server = http.createServer(async (req, res) => {
@@ -46,6 +53,15 @@ const server = http.createServer(async (req, res) => {
   if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
     res.writeHead(404);
     res.end(JSON.stringify({ error: "not found" }));
+    return;
+  }
+
+  // Auth check — validates LITELLM_MASTER_KEY contract
+  const auth = req.headers.authorization;
+  if (auth !== `Bearer ${smokeMasterKey}`) {
+    console.warn("[smoke-proxy] 401 — Authorization header mismatch");
+    res.writeHead(401, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "unauthorized" }));
     return;
   }
 

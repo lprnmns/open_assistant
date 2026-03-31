@@ -207,16 +207,8 @@ describe("LIVE SMOKE 3 — scheduler tick chain via OpenRouter", () => {
       const TICK_INTERVAL = 500; // ms — keep smoke fast
 
       // Spy on fetch WITHOUT replacing implementation (pass-through, real calls)
-      const fetchSpy = globalThis.fetch;
       const capturedBodies: string[] = [];
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-        if (init?.body && typeof init.body === "string") {
-          // Redact before storing — guard against accidental key capture
-          capturedBodies.push(redactLogLine(init.body));
-        }
-        return originalFetch(input, init);
-      };
 
       const tickResults: { action: string | undefined; ownerCount: number }[] = [];
       let tickCount = 0;
@@ -232,45 +224,55 @@ describe("LIVE SMOKE 3 — scheduler tick chain via OpenRouter", () => {
         receivedAt: Date.now(),
       };
 
-      const scheduler = new ConsciousnessScheduler({
-        config: {
-          minTickIntervalMs: TICK_INTERVAL,
-          maxTickIntervalMs: TICK_INTERVAL * 2,
-          watchdogIntervalMs: TICK_INTERVAL / 2,
-          baseSilenceThresholdMs: DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs,
-          maxSilenceThresholdMs: DEFAULT_CONSCIOUSNESS_CONFIG.maxSilenceThresholdMs,
-          sleepStartHourUtc: DEFAULT_CONSCIOUSNESS_CONFIG.sleepStartHourUtc,
-          sleepEndHourUtc: DEFAULT_CONSCIOUSNESS_CONFIG.sleepEndHourUtc,
-          postConsolidationDelayMs: DEFAULT_CONSCIOUSNESS_CONFIG.postConsolidationDelayMs,
-          llmSource: "consciousness",
-        },
-        buildSnapshot: async () => makeWakeSnap({ capturedAt: Date.now() }),
-        dispatch: {
-          sendToChannel: async () => {},
-          appendNote: async () => {},
-        },
-        onTick: (result) => {
-          tickCount++;
-          const ownerCount = listBySurface(result.eventBuffer, "owner_active_channel").length;
-          tickResults.push({ action: result.decision?.action, ownerCount });
-          debugLog(`scheduler/tick${tickCount}/action`, result.decision?.action ?? "undefined");
-          debugLog(`scheduler/tick${tickCount}/ownerEventCount`, ownerCount);
-          debugLog(`scheduler/tick${tickCount}/phase`, result.state.phase);
-        },
-      });
+      let scheduler: ConsciousnessScheduler | undefined;
 
-      scheduler.pushEvent(ownerEvent);
-      scheduler.start();
+      try {
+        globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+          if (init?.body && typeof init.body === "string") {
+            // Redact before storing — guard against accidental key capture
+            capturedBodies.push(redactLogLine(init.body));
+          }
+          return originalFetch(input, init);
+        };
 
-      // Wait for 2 ticks + buffer
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, TICK_INTERVAL * 2 + 2000),
-      );
+        scheduler = new ConsciousnessScheduler({
+          config: {
+            minTickIntervalMs: TICK_INTERVAL,
+            maxTickIntervalMs: TICK_INTERVAL * 2,
+            watchdogIntervalMs: TICK_INTERVAL / 2,
+            baseSilenceThresholdMs: DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs,
+            maxSilenceThresholdMs: DEFAULT_CONSCIOUSNESS_CONFIG.maxSilenceThresholdMs,
+            sleepStartHourUtc: DEFAULT_CONSCIOUSNESS_CONFIG.sleepStartHourUtc,
+            sleepEndHourUtc: DEFAULT_CONSCIOUSNESS_CONFIG.sleepEndHourUtc,
+            postConsolidationDelayMs: DEFAULT_CONSCIOUSNESS_CONFIG.postConsolidationDelayMs,
+            llmSource: "consciousness",
+          },
+          buildSnapshot: async () => makeWakeSnap({ capturedAt: Date.now() }),
+          dispatch: {
+            sendToChannel: async () => {},
+            appendNote: async () => {},
+          },
+          onTick: (result) => {
+            tickCount++;
+            const ownerCount = listBySurface(result.eventBuffer, "owner_active_channel").length;
+            tickResults.push({ action: result.decision?.action, ownerCount });
+            debugLog(`scheduler/tick${tickCount}/action`, result.decision?.action ?? "undefined");
+            debugLog(`scheduler/tick${tickCount}/ownerEventCount`, ownerCount);
+            debugLog(`scheduler/tick${tickCount}/phase`, result.state.phase);
+          },
+        });
 
-      scheduler.stop();
+        scheduler.pushEvent(ownerEvent);
+        scheduler.start();
 
-      // Restore fetch
-      globalThis.fetch = fetchSpy;
+        // Wait for 2 ticks + buffer
+        await new Promise<void>((resolve) =>
+          setTimeout(resolve, TICK_INTERVAL * 2 + 2000),
+        );
+      } finally {
+        scheduler?.stop();
+        globalThis.fetch = originalFetch;
+      }
 
       debugLog("scheduler/totalTicks", tickCount);
       debugLog("scheduler/capturedBodyCount", capturedBodies.length);
