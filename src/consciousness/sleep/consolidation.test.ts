@@ -171,24 +171,25 @@ describe("DefaultConsolidationPipeline — happy path", () => {
     }
   });
 
-  it("applies CONSOLIDATION_DEFAULTS.batchSize when batchSize is omitted", async () => {
-    const { hippocampus, embedder, extractFacts } = makeDeps();
-    const p = createConsolidationPipeline({ hippocampus, embedder, extractFacts });
-    await p.run({ sessionKey: "s" });
-    const episodicCall = (hippocampus.listByType as ReturnType<typeof vi.fn>).mock.calls.find(
-      (c: unknown[]) => c[0] === "episodic",
+  it("applies CONSOLIDATION_DEFAULTS.batchSize cap to unconsolidated notes", async () => {
+    // Provide more unconsolidated notes than the default batchSize to verify the cap.
+    const manyNotes = Array.from({ length: CONSOLIDATION_DEFAULTS.batchSize + 5 }, (_, i) =>
+      episodic(`event ${i}`, `ep-${i}`),
     );
-    expect(episodicCall![1]).toMatchObject({ limit: CONSOLIDATION_DEFAULTS.batchSize });
+    const { hippocampus, embedder, extractFacts } = makeDeps({ episodicNotes: manyNotes });
+    const p = createConsolidationPipeline({ hippocampus, embedder, extractFacts });
+    const result = await p.run({ sessionKey: "s" });
+    expect(result.processed).toBe(CONSOLIDATION_DEFAULTS.batchSize);
+    expect(result.converted).toBe(CONSOLIDATION_DEFAULTS.batchSize);
   });
 
-  it("honours explicit batchSize override", async () => {
-    const { hippocampus, embedder, extractFacts } = makeDeps();
+  it("honours explicit batchSize override as cap on unconsolidated notes", async () => {
+    const manyNotes = Array.from({ length: 10 }, (_, i) => episodic(`event ${i}`, `ep-${i}`));
+    const { hippocampus, embedder, extractFacts } = makeDeps({ episodicNotes: manyNotes });
     const p = createConsolidationPipeline({ hippocampus, embedder, extractFacts });
-    await p.run({ sessionKey: "s", batchSize: 5 });
-    const episodicCall = (hippocampus.listByType as ReturnType<typeof vi.fn>).mock.calls.find(
-      (c: unknown[]) => c[0] === "episodic",
-    );
-    expect(episodicCall![1]).toMatchObject({ limit: 5 });
+    const result = await p.run({ sessionKey: "s", batchSize: 3 });
+    expect(result.processed).toBe(3);
+    expect(result.converted).toBe(3);
   });
 
   it("episodic source note is never passed to hippocampus.ingest (append-only)", async () => {
@@ -206,7 +207,9 @@ describe("DefaultConsolidationPipeline — happy path", () => {
 // ── idempotency ───────────────────────────────────────────────────────────────
 
 describe("DefaultConsolidationPipeline — idempotency", () => {
-  it("skips episodic notes that already have a semantic note", async () => {
+  it("does not process episodic notes that already have a semantic note", async () => {
+    // Already-consolidated notes are filtered out before the loop — they are
+    // never processed, so processed/skipped/converted are all 0.
     const ep = episodic("old event", "ep-1");
     const existing = semantic("ep-1", "already extracted");
     const { hippocampus, embedder, extractFacts } = makeDeps({
@@ -215,8 +218,9 @@ describe("DefaultConsolidationPipeline — idempotency", () => {
     });
     const p = createConsolidationPipeline({ hippocampus, embedder, extractFacts });
     const result = await p.run({ sessionKey: "sess" });
-    expect(result.skipped).toBe(1);
+    expect(result.processed).toBe(0);
     expect(result.converted).toBe(0);
+    expect(result.skipped).toBe(0);
     expect(extractFacts).not.toHaveBeenCalled();
   });
 
@@ -230,8 +234,10 @@ describe("DefaultConsolidationPipeline — idempotency", () => {
     });
     const p = createConsolidationPipeline({ hippocampus, embedder, extractFacts });
     const result = await p.run({ sessionKey: "sess" });
-    expect(result.skipped).toBe(1);
+    // ep-1 filtered before loop; only ep-2 is processed
+    expect(result.processed).toBe(1);
     expect(result.converted).toBe(1);
+    expect(result.skipped).toBe(0);
     expect(extractFacts).toHaveBeenCalledTimes(1);
     expect(extractFacts).toHaveBeenCalledWith(ep2.content);
   });
@@ -348,6 +354,50 @@ describe("DefaultConsolidationPipeline — fail-soft", () => {
     expect(result.converted).toBe(0);
     expect(result.failed).toBe(0);
     expect(hippocampus.ingest).not.toHaveBeenCalled();
+  });
+});
+
+// ── backlog starvation regression ─────────────────────────────────────────────
+
+describe("DefaultConsolidationPipeline — backlog starvation regression", () => {
+  it("reaches unconsolidated notes beyond the first batchSize when older notes are already consolidated", async () => {
+    // 25 episodic notes; first 20 are already consolidated; ep-21..ep-25 are new.
+    // With batchSize:20, the old (buggy) implementation would fetch oldest 20 via
+    // SQL LIMIT, find all 20 consolidated, and never process ep-21..ep-25.
+    // The fixed implementation builds consolidatedIds first, filters, then slices.
+    const allEpisodic = Array.from({ length: 25 }, (_, i) =>
+      episodic(`event ${i + 1}`, `ep-${i + 1}`),
+    );
+    const alreadyDone = Array.from({ length: 20 }, (_, i) => semantic(`ep-${i + 1}`));
+
+    const { hippocampus, embedder, extractFacts } = makeDeps({
+      episodicNotes: allEpisodic,
+      existingSemanticNotes: alreadyDone,
+    });
+    const p = createConsolidationPipeline({ hippocampus, embedder, extractFacts });
+    const result = await p.run({ sessionKey: "sess", batchSize: 20 });
+
+    // Must reach and convert the 5 unconsolidated notes, not return processed:20/converted:0.
+    expect(result.converted).toBe(5);
+    expect(result.skipped).toBe(0);
+    expect(result.processed).toBe(5);
+    expect(result.failed).toBe(0);
+  });
+
+  it("batchSize limits unconsolidated candidates, not total episodic pool", async () => {
+    // 10 episodic notes; first 8 consolidated; 2 new. batchSize:3 should process 2 (all available).
+    const allEpisodic = Array.from({ length: 10 }, (_, i) => episodic(`e${i}`, `ep-${i}`));
+    const alreadyDone = Array.from({ length: 8 }, (_, i) => semantic(`ep-${i}`));
+
+    const { hippocampus, embedder, extractFacts } = makeDeps({
+      episodicNotes: allEpisodic,
+      existingSemanticNotes: alreadyDone,
+    });
+    const p = createConsolidationPipeline({ hippocampus, embedder, extractFacts });
+    const result = await p.run({ sessionKey: "sess", batchSize: 3 });
+
+    expect(result.converted).toBe(2);
+    expect(result.processed).toBe(2);
   });
 });
 

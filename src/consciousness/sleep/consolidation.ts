@@ -130,22 +130,29 @@ export class DefaultConsolidationPipeline implements ConsolidationPipeline {
       const batchSize = input.batchSize ?? CONSOLIDATION_DEFAULTS.batchSize;
       const { sessionKey } = input;
 
-      // ── Step 1: Fetch episodic notes for this session (oldest-first, bounded) ─
-      const episodicNotes = await this.hippocampus.listByType("episodic", {
-        sessionKey,
-        limit: batchSize,
-      });
-
-      if (episodicNotes.length === 0) return result;
-
-      // ── Step 2: Build already-consolidated set from existing semantic notes ────
+      // ── Step 1: Build already-consolidated set from existing semantic notes ────
       // Idempotency guard — cross-restart safe because the marker is in the DB.
+      // Must run BEFORE fetching episodic notes so the batchSize limit applies
+      // only to unconsolidated candidates (prevents backlog starvation).
       const semanticNotes = await this.hippocampus.listByType("semantic", { sessionKey });
       const consolidatedIds = new Set<string>();
       for (const note of semanticNotes) {
         const sourceId = parseSourceId(note.content);
         if (sourceId) consolidatedIds.add(sourceId);
       }
+
+      // ── Step 2: Fetch unconsolidated episodic notes (oldest-first, bounded) ──
+      // Fetch ALL episodic notes for the session (no limit), filter to those not
+      // yet consolidated, then cap at batchSize.  This ensures the limit applies
+      // to unconsolidated candidates only — not to the total pool — so a large
+      // block of already-processed older notes cannot starve newer unconsolidated
+      // ones.
+      const allEpisodic = await this.hippocampus.listByType("episodic", { sessionKey });
+      const episodicNotes = allEpisodic
+        .filter((n) => !consolidatedIds.has(n.id))
+        .slice(0, batchSize);
+
+      if (episodicNotes.length === 0) return result;
 
       // ── Step 3: Process each episodic note ────────────────────────────────────
       for (const episodic of episodicNotes) {
