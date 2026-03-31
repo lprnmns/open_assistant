@@ -206,3 +206,40 @@ describe("evaluateSleepWakeTransition — shouldWake:false (neither condition me
     expect(result.shouldWake).toBe(false);
   });
 });
+
+// ── cross-cycle stale timestamp regression ────────────────────────────────────
+
+describe("evaluateSleepWakeTransition — cross-cycle stale timestamp (regression)", () => {
+  it("shouldWake:false when consolidationCompletedAt is from a previous cycle (before sleepEnteredAt)", () => {
+    // Previous cycle completed consolidation at T_prev.
+    // New cycle entered sleep at T_new > T_prev.
+    // Without the guard, capturedAt >= T_prev + delay would be trivially true.
+    const T_prev = Date.UTC(2026, 2, 31, 22, 35, 0); // previous cycle's completion
+    const T_new  = Date.UTC(2026, 3, 2, 22, 0, 0);   // new cycle entered two nights later
+    const capturedAt = T_new + 60_000;                // 1 minute into new sleep
+
+    const result = evaluateSleepWakeTransition({
+      capturedAt,
+      sleepEnteredAt: T_new,
+      consolidationCompletedAt: T_prev,              // stale — belongs to old cycle
+      sleepEndHourUtc: 7,
+      postConsolidationDelayMs: 300_000,
+    });
+    expect(result.shouldWake).toBe(false);
+  });
+
+  it("shouldWake:true for soft wake only when consolidationCompletedAt >= sleepEnteredAt (current cycle)", () => {
+    const sleepEnteredAt = Date.UTC(2026, 3, 2, 22, 0, 0);
+    const consolidationCompletedAt = sleepEnteredAt + 30 * 60_000; // 30 min in — same cycle
+    const delay = 300_000; // 5 min
+
+    const result = evaluateSleepWakeTransition({
+      capturedAt: consolidationCompletedAt + delay,
+      sleepEnteredAt,
+      consolidationCompletedAt,
+      sleepEndHourUtc: 7,
+      postConsolidationDelayMs: delay,
+    });
+    expect(result.shouldWake).toBe(true);
+  });
+});

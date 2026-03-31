@@ -438,8 +438,12 @@ export async function tick(
   const enteredSleepThisTick =
     decision.action === "ENTER_SLEEP" && state.phase !== "SLEEPING";
 
+  // When entering a NEW sleep cycle, reset consolidationCompletedAt to undefined.
+  // Preserving the previous cycle's completion timestamp would cause the soft-wake
+  // condition in evaluateSleepWakeTransition() to fire immediately on the next tick
+  // (capturedAt >= staleCompletedAt + delay is trivially true).
   const consolidation = enteredSleepThisTick
-    ? { ...state.consolidation, sleepEnteredAt: Date.now() }
+    ? { sleepEnteredAt: Date.now(), consolidationCompletedAt: undefined }
     : state.consolidation;
 
   const finalState: ConsciousnessState = {

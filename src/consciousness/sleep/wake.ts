@@ -125,8 +125,12 @@ export function evaluateSleepWakeTransition(input: SleepWakeInput): SleepWakeRes
   }
 
   // ── Soft early wake (consolidation-based) ──────────────────────────────────
+  // Guard: consolidationCompletedAt must be >= sleepEnteredAt to belong to the
+  // current sleep cycle.  A stale timestamp from a previous cycle (where
+  // completedAt < sleepEnteredAt) must never trigger an early wake.
   if (
     consolidationCompletedAt !== undefined &&
+    consolidationCompletedAt >= sleepEnteredAt &&
     capturedAt >= consolidationCompletedAt + postConsolidationDelayMs
   ) {
     return {

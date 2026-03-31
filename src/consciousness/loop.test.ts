@@ -735,3 +735,71 @@ describe("tick() — SLEEPING phase — soft early wake transition", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+// ── cross-cycle stale consolidationCompletedAt regression ─────────────────────
+
+describe("tick() — SLEEPING phase — cross-cycle stale timestamp regression", () => {
+  beforeEach(() => {
+    process.env.LITELLM_PROXY_URL = "http://litellm-test:4000";
+    process.env.LITELLM_MASTER_KEY = "sk-test-master";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete process.env.LITELLM_PROXY_URL;
+    delete process.env.LITELLM_MASTER_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("ENTER_SLEEP resets consolidationCompletedAt to undefined for the new cycle", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"ENTER_SLEEP"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    // State carries a stale consolidationCompletedAt from a previous cycle
+    const staleCompletedAt = NOW - 24 * 60 * 60 * 1000; // 24h ago
+    const stateWithStale = {
+      ...makeInitialConsciousnessState(),
+      consolidation: {
+        sleepEnteredAt: staleCompletedAt - 3_600_000,
+        consolidationCompletedAt: staleCompletedAt,
+      },
+    };
+
+    const snap = makeSnap({ firedTriggerIds: ["sleep-trigger"] });
+    const result = await tick(snap, stateWithStale);
+
+    expect(result.decision?.action).toBe("ENTER_SLEEP");
+    expect(result.state.phase).toBe("SLEEPING");
+    // New cycle must not carry the stale completion timestamp
+    expect(result.state.consolidation.consolidationCompletedAt).toBeUndefined();
+  });
+
+  it("stale consolidationCompletedAt from previous cycle does NOT trigger soft wake", async () => {
+    // Simulate: previous cycle completed consolidation; new cycle just entered sleep.
+    // capturedAt is only 1 minute into new sleep — must stay SLEEPING.
+    const prevCompletedAt = NOW - 48 * 60 * 60 * 1000; // 2 days ago
+    const newSleepEnteredAt = NOW - 60_000;             // 1 minute ago
+
+    const sleepingState = {
+      ...makeInitialConsciousnessState(),
+      phase: "SLEEPING" as const,
+      consolidation: {
+        sleepEnteredAt: newSleepEnteredAt,
+        consolidationCompletedAt: prevCompletedAt, // stale — from prior cycle
+      },
+    };
+
+    const snap = makeSnap({ capturedAt: NOW });
+    const result = await tick(snap, sleepingState);
+
+    // Must stay asleep — stale completion must not fire soft wake
+    expect(result.state.phase).toBe("SLEEPING");
+  });
+});
