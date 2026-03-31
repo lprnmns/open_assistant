@@ -573,3 +573,165 @@ describe("tick() — memory recall context (TickContext)", () => {
     expect(result.state.phase).toBe("IDLE");
   });
 });
+
+// ── tick() — SLEEPING phase ────────────────────────────────────────────────────
+//
+// While SLEEPING the Watchdog and LLM are bypassed entirely.
+// Only the wake-transition condition is evaluated.
+
+describe("tick() — SLEEPING phase — stays asleep", () => {
+  // sleep entered at 22:00 UTC; scheduledWakeAt = next day 07:00 UTC (9 hours away)
+  const sleepEnteredAt = Date.UTC(2026, 2, 31, 22, 0, 0, 0);
+  const capturedAt = sleepEnteredAt + 60_000; // 1 minute later — far from wakeAt
+
+  function makeSleepingState(overrides: {
+    consolidationCompletedAt?: number;
+    postConsolidationDelayMs?: number;
+  } = {}): ReturnType<typeof makeInitialConsciousnessState> {
+    const base = makeInitialConsciousnessState({
+      ...cfg,
+      postConsolidationDelayMs: overrides.postConsolidationDelayMs ?? 300_000,
+    });
+    return {
+      ...base,
+      phase: "SLEEPING",
+      consolidation: {
+        sleepEnteredAt,
+        consolidationCompletedAt: overrides.consolidationCompletedAt,
+      },
+    };
+  }
+
+  it("returns SLEEPING phase (not IDLE) when neither wake condition is met", async () => {
+    const snap = makeSnap({ capturedAt });
+    const result = await tick(snap, makeSleepingState());
+    expect(result.state.phase).toBe("SLEEPING");
+  });
+
+  it("does NOT call the LLM (fetch) while sleeping", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const snap = makeSnap({ capturedAt });
+    await tick(snap, makeSleepingState());
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns decision:undefined while sleeping", async () => {
+    const snap = makeSnap({ capturedAt });
+    const result = await tick(snap, makeSleepingState());
+    expect(result.decision).toBeUndefined();
+  });
+
+  it("increments tickCount while sleeping", async () => {
+    const snap = makeSnap({ capturedAt });
+    const state = makeSleepingState();
+    const result = await tick(snap, state);
+    expect(result.state.tickCount).toBe(state.tickCount + 1);
+  });
+
+  it("relaxes interval while sleeping (grows toward maxTickIntervalMs)", async () => {
+    const snap = makeSnap({ capturedAt });
+    const state = makeSleepingState();
+    const result = await tick(snap, state);
+    expect(result.nextDelayMs).toBeGreaterThanOrEqual(cfg.minTickIntervalMs);
+  });
+
+  it("soft wake not triggered when postConsolidationDelay not elapsed", async () => {
+    const consolidationCompletedAt = sleepEnteredAt + 30_000; // 30s into sleep
+    const capturedTooSoon = consolidationCompletedAt + 60_000; // only 1 min after, delay=5 min
+    const state = makeSleepingState({ consolidationCompletedAt, postConsolidationDelayMs: 300_000 });
+    const snap = makeSnap({ capturedAt: capturedTooSoon });
+    const result = await tick(snap, state);
+    expect(result.state.phase).toBe("SLEEPING");
+  });
+});
+
+describe("tick() — SLEEPING phase — hard wake transition", () => {
+  const sleepEnteredAt = Date.UTC(2026, 2, 31, 22, 0, 0, 0);
+  // scheduledWakeAt = April 1 07:00 UTC
+  const scheduledWakeAt = Date.UTC(2026, 3, 1, 7, 0, 0, 0);
+
+  function makeSleepingState(): ReturnType<typeof makeInitialConsciousnessState> {
+    const base = makeInitialConsciousnessState(cfg);
+    return {
+      ...base,
+      phase: "SLEEPING",
+      consolidation: { sleepEnteredAt, consolidationCompletedAt: undefined },
+    };
+  }
+
+  it("transitions SLEEPING → IDLE when capturedAt >= scheduledWakeAt", async () => {
+    const snap = makeSnap({ capturedAt: scheduledWakeAt });
+    const result = await tick(snap, makeSleepingState());
+    expect(result.state.phase).toBe("IDLE");
+  });
+
+  it("does NOT call the LLM on hard wake (pure $0 transition)", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const snap = makeSnap({ capturedAt: scheduledWakeAt });
+    await tick(snap, makeSleepingState());
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns decision:undefined on hard wake", async () => {
+    const snap = makeSnap({ capturedAt: scheduledWakeAt });
+    const result = await tick(snap, makeSleepingState());
+    expect(result.decision).toBeUndefined();
+  });
+
+  it("next delay is minTickIntervalMs after wake (wake up promptly)", async () => {
+    const snap = makeSnap({ capturedAt: scheduledWakeAt });
+    const result = await tick(snap, makeSleepingState());
+    expect(result.nextDelayMs).toBe(cfg.minTickIntervalMs);
+  });
+
+  it("does NOT wake when sleep entered AFTER sleepEndHourUtc — waits for next day", async () => {
+    // Sleep entered at 14:00 UTC with endHour=7; naïve check would wake immediately.
+    const lateEntry = Date.UTC(2026, 2, 31, 14, 0, 0);
+    const justAfter = lateEntry + 60_000; // 1 min later, same day — must NOT wake
+    const base = makeInitialConsciousnessState(cfg);
+    const state: ReturnType<typeof makeInitialConsciousnessState> = {
+      ...base,
+      phase: "SLEEPING",
+      consolidation: { sleepEnteredAt: lateEntry, consolidationCompletedAt: undefined },
+    };
+    const snap = makeSnap({ capturedAt: justAfter });
+    const result = await tick(snap, state);
+    expect(result.state.phase).toBe("SLEEPING"); // must stay asleep
+  });
+});
+
+describe("tick() — SLEEPING phase — soft early wake transition", () => {
+  const sleepEnteredAt = Date.UTC(2026, 2, 31, 22, 0, 0, 0);
+  const consolidationCompletedAt = Date.UTC(2026, 2, 31, 22, 30, 0, 0); // 30 min in
+  const delay = 300_000; // 5 min
+
+  function makeSleepingState(): ReturnType<typeof makeInitialConsciousnessState> {
+    const base = makeInitialConsciousnessState({ ...cfg, postConsolidationDelayMs: delay });
+    return {
+      ...base,
+      phase: "SLEEPING",
+      consolidation: { sleepEnteredAt, consolidationCompletedAt },
+    };
+  }
+
+  it("transitions SLEEPING → IDLE when consolidation + delay elapsed (before hard wake)", async () => {
+    const softWakeAt = consolidationCompletedAt + delay;
+    const snap = makeSnap({ capturedAt: softWakeAt });
+    const result = await tick(snap, makeSleepingState());
+    expect(result.state.phase).toBe("IDLE");
+  });
+
+  it("stays SLEEPING when delay not yet elapsed", async () => {
+    const snap = makeSnap({ capturedAt: consolidationCompletedAt + delay - 1 });
+    const result = await tick(snap, makeSleepingState());
+    expect(result.state.phase).toBe("SLEEPING");
+  });
+
+  it("soft wake is $0 — no LLM call", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const softWakeAt = consolidationCompletedAt + delay;
+    const snap = makeSnap({ capturedAt: softWakeAt });
+    await tick(snap, makeSleepingState());
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});

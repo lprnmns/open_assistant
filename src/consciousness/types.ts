@@ -283,6 +283,18 @@ export type ConsciousnessConfig = {
   sleepEndHourUtc: number;
 
   /**
+   * How long to wait after consolidation completes before allowing a soft
+   * early wake from the Sleep Phase (milliseconds).
+   *
+   * The soft early wake fires when:
+   *   capturedAt >= consolidationCompletedAt + postConsolidationDelayMs
+   *
+   * Set to 0 to wake immediately after consolidation.
+   * Default: 300_000 (5 min)
+   */
+  postConsolidationDelayMs: number;
+
+  /**
    * LLM source tag used for all Loop Engine calls.
    * Always "consciousness" — exposed here so the cost store records it.
    */
@@ -301,6 +313,7 @@ export const DEFAULT_CONSCIOUSNESS_CONFIG: ConsciousnessConfig = {
   maxSilenceThresholdMs: 14_400_000,
   sleepStartHourUtc: 0,
   sleepEndHourUtc: 7,
+  postConsolidationDelayMs: 300_000,
   llmSource: "consciousness",
 };
 

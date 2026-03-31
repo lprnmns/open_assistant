@@ -45,6 +45,7 @@ import {
   makeInitialConsciousnessState,
 } from "./types.js";
 import { runWatchdog } from "./watchdog.js";
+import { evaluateSleepWakeTransition } from "./sleep/wake.js";
 
 // ── Memory recall context (optional, injected by scheduler) ───────────────────
 
@@ -295,6 +296,65 @@ export async function tick(
   ctx?: TickContext,
 ): Promise<TickResult> {
   const config = state.config;
+
+  // ── Step 0: SLEEPING phase — wake transition check ($0, pure) ────────────
+  //
+  // While SLEEPING the normal Watchdog and LLM path are skipped entirely.
+  // Only the wake-transition condition is evaluated each tick:
+  //   - Hard wake:  capturedAt >= nextOccurrenceOfHourUtc(sleepEnteredAt, sleepEndHourUtc)
+  //   - Soft wake:  consolidationCompletedAt + postConsolidationDelayMs elapsed
+  //
+  // "Still sleeping" returns SLEEPING phase (not IDLE) — this prevents the
+  // watchdog's wake:false path from accidentally clearing the phase.
+  if (state.phase === "SLEEPING") {
+    const nextTickCount = state.tickCount + 1;
+    const wakeEval = evaluateSleepWakeTransition({
+      capturedAt: snap.capturedAt,
+      sleepEnteredAt: state.consolidation.sleepEnteredAt,
+      consolidationCompletedAt: state.consolidation.consolidationCompletedAt,
+      sleepEndHourUtc: config.sleepEndHourUtc,
+      postConsolidationDelayMs: config.postConsolidationDelayMs,
+    });
+
+    if (wakeEval.shouldWake) {
+      // SLEEPING → IDLE: $0, no LLM call, wake promptly
+      const wakeDelay = config.minTickIntervalMs;
+      const awakenedState: ConsciousnessState = {
+        ...state,
+        phase: "IDLE",
+        tickCount: nextTickCount,
+        lastSnapshot: snap,
+        currentDelayMs: wakeDelay,
+      };
+      return {
+        state: awakenedState,
+        watchdogResult: { wake: false },
+        decision: undefined,
+        nextDelayMs: wakeDelay,
+      };
+    }
+
+    // Still sleeping — preserve SLEEPING phase and relax the interval
+    const sleepDelay = computeNextTickDelayMs({
+      woke: false,
+      decision: undefined,
+      currentDelayMs: state.currentDelayMs,
+      config,
+    });
+    const stillSleepingState: ConsciousnessState = {
+      ...state,
+      phase: "SLEEPING",
+      tickCount: nextTickCount,
+      lastSnapshot: snap,
+      currentDelayMs: sleepDelay,
+    };
+    return {
+      state: stillSleepingState,
+      watchdogResult: { wake: false },
+      decision: undefined,
+      nextDelayMs: sleepDelay,
+    };
+  }
 
   // ── Step 1: begin tick ────────────────────────────────────────────────────
   const nextTickCount = state.tickCount + 1;
