@@ -95,7 +95,12 @@ export type ConsolidationResult = {
   processed: number;
   /** New semantic notes successfully written. */
   converted: number;
-  /** Episodic notes skipped because a semantic note already existed. */
+  /**
+   * Episodic notes skipped due to in-run duplicate detection.
+   * Cross-run idempotency is handled by pre-loop filtering (already-consolidated
+   * notes never enter the loop), so this counter is non-zero only when the same
+   * note id appears more than once in the fetched episodic list.
+   */
   skipped: number;
   /** Individual note failures that were swallowed (fail-soft). */
   failed: number;
