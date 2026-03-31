@@ -23,6 +23,8 @@
 import { tick, type TickContext, type TickResult } from "./loop.js";
 import { dispatchDecision, type DispatchContext } from "./integration.js";
 import type { MemoryRecallPipeline } from "./brain/types.js";
+import { evaluateConsolidationTrigger } from "./sleep/trigger.js";
+import type { ConsolidationPipeline } from "./sleep/consolidation.js";
 import {
   DEFAULT_CONSCIOUSNESS_CONFIG,
   makeInitialConsciousnessState,
@@ -71,6 +73,32 @@ export type SchedulerOptions = {
     /** Session key forwarded to Hippocampus for session-scoped recall. */
     sessionKey: string;
   };
+
+  /**
+   * Optional Sleep-Phase consolidation pipeline.
+   * When provided, the scheduler evaluates the consolidation trigger after each
+   * tick and, when appropriate, runs the pipeline to convert episodic notes into
+   * semantic notes.
+   *
+   * Omitting this field is safe — the scheduler runs without consolidation.
+   *
+   * ── Guarantees ──────────────────────────────────────────────────────────────
+   *
+   *   1. Trigger evaluation is $0 (pure function; called every tick).
+   *   2. Pipeline is never entered when shouldConsolidate is false (hard gate).
+   *   3. At most one consolidation run is active at a time (in-progress guard).
+   *      The guard is cleared in a finally block — never leaked after failure.
+   *   4. consolidationCompletedAt is written only after a successful (non-throwing)
+   *      pipeline.run() completion.  A pipeline that violates its fail-soft
+   *      contract leaves consolidationCompletedAt unset, allowing a retry.
+   *   5. Consolidation runs fire-and-forget — the tick reschedule is not blocked.
+   */
+  consolidation?: {
+    /** Pipeline that converts episodic notes into semantic notes. */
+    pipeline: ConsolidationPipeline;
+    /** Session key passed to pipeline.run(). */
+    sessionKey: string;
+  };
 };
 
 // ── Scheduler ─────────────────────────────────────────────────────────────────
@@ -87,6 +115,12 @@ export class ConsciousnessScheduler {
    * A dedicated boolean is immune to that overwrite.
    */
   private paused = false;
+  /**
+   * True while a consolidation pipeline run is in flight.
+   * Prevents concurrent consolidation runs within the same sleep cycle.
+   * Always cleared in a finally block — never leaked after failure.
+   */
+  private consolidating = false;
   private readonly options: SchedulerOptions;
 
   constructor(options: SchedulerOptions) {
@@ -96,6 +130,13 @@ export class ConsciousnessScheduler {
     };
     this.state = makeInitialConsciousnessState(config);
     this.options = options;
+  }
+
+  // ── Observability ───────────────────────────────────────────────────────────
+
+  /** Read-only view of the current runtime state.  Useful for telemetry and tests. */
+  getState(): Readonly<ConsciousnessState> {
+    return this.state;
   }
 
   // ── Lifecycle ───────────────────────────────────────────────────────────────
@@ -180,7 +221,64 @@ export class ConsciousnessScheduler {
     // ④ Notify telemetry / test observers
     this.options.onTick?.(result);
 
-    // ⑤ Reschedule with adaptive delay
+    // ⑤ Maybe consolidate (fire-and-forget — does not block tick reschedule)
+    void this.maybeConsolidate();
+
+    // ⑥ Reschedule with adaptive delay
     this.scheduleNext(result.nextDelayMs);
+  }
+
+  // ── Consolidation ────────────────────────────────────────────────────────────
+
+  /**
+   * Evaluate the consolidation trigger and, when appropriate, run the pipeline.
+   *
+   * Called fire-and-forget after each tick so the tick reschedule is not blocked.
+   *
+   * Guarantees:
+   *   - evaluateConsolidationTrigger() is called every invocation ($0, pure).
+   *   - When shouldConsolidate is false the method returns before entering the pipeline.
+   *   - The in-progress guard (this.consolidating) prevents concurrent runs.
+   *     It is cleared in a finally block so it cannot leak after pipeline failure.
+   *   - consolidationCompletedAt is written only after a successful (non-throwing)
+   *     pipeline.run() completion.  If pipeline violates its fail-soft contract
+   *     the timestamp is NOT written — the cycle may retry on the next tick.
+   */
+  private async maybeConsolidate(): Promise<void> {
+    if (!this.options.consolidation) return;
+
+    // $0 pure gate — safe to call every tick, no pipeline entry when false
+    const trigger = evaluateConsolidationTrigger(
+      this.state.phase,
+      this.state.consolidation,
+    );
+    if (!trigger.shouldConsolidate) return;
+
+    // In-progress guard — at most one active run per scheduler instance
+    if (this.consolidating) return;
+    this.consolidating = true;
+
+    try {
+      await this.options.consolidation.pipeline.run({
+        sessionKey: this.options.consolidation.sessionKey,
+      });
+
+      // Write consolidationCompletedAt only after a non-throwing run completion.
+      // Spread the CURRENT this.state (not a captured snapshot) so this merge
+      // survives any concurrent ticks that may have overwritten this.state.
+      this.state = {
+        ...this.state,
+        consolidation: {
+          ...this.state.consolidation,
+          consolidationCompletedAt: Date.now(),
+        },
+      };
+    } catch {
+      // pipeline.run() violated its fail-soft contract.
+      // consolidationCompletedAt is intentionally NOT written — the cycle may retry.
+    } finally {
+      // Always clear the flag, even when pipeline threw.
+      this.consolidating = false;
+    }
   }
 }

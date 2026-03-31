@@ -5,6 +5,7 @@ import {
   DEFAULT_CONSCIOUSNESS_CONFIG,
   type WorldSnapshot,
 } from "./types.js";
+import type { ConsolidationPipeline, ConsolidationResult } from "./sleep/consolidation.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -311,6 +312,324 @@ describe("ConsciousnessScheduler — dispatch gate", () => {
     expect(dispatch.sendToChannel).not.toHaveBeenCalled();
     expect(dispatch.appendNote).not.toHaveBeenCalled();
 
+    scheduler.stop();
+  });
+});
+
+// ── consolidation integration ─────────────────────────────────────────────────
+
+/**
+ * Helpers shared across consolidation tests.
+ *
+ * The consolidation path requires:
+ *   1. Watchdog wakes (firedTriggerIds forces wake:true).
+ *   2. LLM returns ENTER_SLEEP → tick() sets phase:SLEEPING + sleepEnteredAt.
+ *   3. maybeConsolidate() fires (fire-and-forget) → pipeline.run() is called.
+ *
+ * fetch is mocked to simulate the LiteLLM proxy response.
+ */
+
+function makeConsolidationPipeline(overrides: {
+  run?: () => Promise<ConsolidationResult>;
+} = {}): ConsolidationPipeline {
+  const defaultResult: ConsolidationResult = { processed: 1, converted: 1, skipped: 0, failed: 0 };
+  return {
+    run: vi.fn(overrides.run ?? (() => Promise.resolve(defaultResult))),
+  };
+}
+
+/** Snapshot that forces Watchdog to wake (trigger fired). */
+function makeSleepSnap(): WorldSnapshot {
+  return makeSnap({ firedTriggerIds: ["sleep-trigger"] });
+}
+
+/** Mock fetch so the LLM returns the given action. */
+function mockLlmAction(action: string, extra: Record<string, unknown> = {}) {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      model: "claude-haiku",
+      choices: [{ message: { content: JSON.stringify({ action, ...extra }) } }],
+      usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+    }),
+  } as Response);
+}
+
+describe("ConsciousnessScheduler — consolidation integration", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    process.env.LITELLM_PROXY_URL = "http://litellm-test:4000";
+    process.env.LITELLM_MASTER_KEY = "sk-test-master";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.LITELLM_PROXY_URL;
+    delete process.env.LITELLM_MASTER_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  // ── hard gate: shouldConsolidate:false ───────────────────────────────────────
+
+  it("pipeline.run is NOT called when consolidation option is omitted", async () => {
+    // No consolidation option at all — scheduler must not crash.
+    mockLlmAction("ENTER_SLEEP");
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+    });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    // No assertion needed; the test passes if the scheduler doesn't crash.
+    scheduler.stop();
+  });
+
+  it("pipeline.run is NOT called when phase is IDLE (shouldConsolidate:false — hard gate)", async () => {
+    // Watchdog does NOT wake → phase stays IDLE → no pipeline entry.
+    const pipeline = makeConsolidationPipeline();
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSnap()), // no delta → wake:false
+      dispatch: makeDispatch(),
+      consolidation: { pipeline, sessionKey: "s" },
+    });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+
+    expect(pipeline.run).not.toHaveBeenCalled();
+    scheduler.stop();
+  });
+
+  it("pipeline.run is NOT called when LLM returns STAY_SILENT (phase never reaches SLEEPING)", async () => {
+    mockLlmAction("STAY_SILENT");
+    const pipeline = makeConsolidationPipeline();
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+      consolidation: { pipeline, sessionKey: "s" },
+    });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    // Flush maybeConsolidate microtask
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(pipeline.run).not.toHaveBeenCalled();
+    scheduler.stop();
+  });
+
+  // ── happy path ───────────────────────────────────────────────────────────────
+
+  it("pipeline.run is called once when ENTER_SLEEP fires and consolidation is configured", async () => {
+    mockLlmAction("ENTER_SLEEP");
+    const pipeline = makeConsolidationPipeline();
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+      consolidation: { pipeline, sessionKey: "sess-1" },
+    });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(pipeline.run).toHaveBeenCalledOnce();
+    scheduler.stop();
+  });
+
+  it("pipeline.run receives the configured sessionKey", async () => {
+    mockLlmAction("ENTER_SLEEP");
+    const pipeline = makeConsolidationPipeline();
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+      consolidation: { pipeline, sessionKey: "my-session" },
+    });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(pipeline.run).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: "my-session" }),
+    );
+    scheduler.stop();
+  });
+
+  it("consolidationCompletedAt is written to state after successful pipeline.run()", async () => {
+    mockLlmAction("ENTER_SLEEP");
+    const pipeline = makeConsolidationPipeline();
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+      consolidation: { pipeline, sessionKey: "s" },
+    });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const { consolidationCompletedAt } = scheduler.getState().consolidation;
+    expect(consolidationCompletedAt).toBeDefined();
+    expect(typeof consolidationCompletedAt).toBe("number");
+    scheduler.stop();
+  });
+
+  // ── in-progress guard ────────────────────────────────────────────────────────
+
+  it("in-progress guard prevents a second concurrent pipeline.run when first is still running", async () => {
+    mockLlmAction("ENTER_SLEEP");
+
+    // A pipeline that suspends until we manually resolve it.
+    let resolvePipeline!: () => void;
+    const slowPipeline: ConsolidationPipeline = {
+      run: vi.fn(
+        () =>
+          new Promise<ConsolidationResult>((resolve) => {
+            resolvePipeline = () =>
+              resolve({ processed: 1, converted: 1, skipped: 0, failed: 0 });
+          }),
+      ),
+    };
+
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+      consolidation: { pipeline: slowPipeline, sessionKey: "s" },
+    });
+    scheduler.start();
+
+    // First tick → ENTER_SLEEP → maybeConsolidate starts → pipeline.run suspended
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(slowPipeline.run).toHaveBeenCalledOnce();
+
+    // Second tick fires while first consolidation is still in-flight
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Must still be only one call — in-progress guard blocked the second
+    expect(slowPipeline.run).toHaveBeenCalledOnce();
+
+    resolvePipeline(); // clean up
+    scheduler.stop();
+  });
+
+  it("in-progress flag is cleared after pipeline.run completes (next eligible cycle can run)", async () => {
+    // First cycle: ENTER_SLEEP → pipeline runs → consolidationCompletedAt set
+    mockLlmAction("ENTER_SLEEP");
+    const pipeline = makeConsolidationPipeline();
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+      consolidation: { pipeline, sessionKey: "s" },
+    });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(pipeline.run).toHaveBeenCalledOnce();
+    // consolidationCompletedAt is now set — subsequent ticks in same cycle skip
+    // but the flag itself is not leaked.
+    const state = scheduler.getState();
+    expect(state.consolidation.consolidationCompletedAt).toBeDefined();
+
+    scheduler.stop();
+  });
+
+  // ── fail-soft / exception handling ──────────────────────────────────────────
+
+  it("in-progress flag is cleared even when pipeline.run throws (no leak)", async () => {
+    mockLlmAction("ENTER_SLEEP");
+
+    let callCount = 0;
+    const throwingPipeline: ConsolidationPipeline = {
+      // First call throws; second call succeeds (proves flag was cleared)
+      run: vi.fn(async () => {
+        callCount++;
+        if (callCount === 1) throw new Error("pipeline error");
+        return { processed: 0, converted: 0, skipped: 0, failed: 0 };
+      }),
+    };
+
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+      consolidation: { pipeline: throwingPipeline, sessionKey: "s" },
+    });
+    scheduler.start();
+
+    // First tick → pipeline throws → flag cleared (NOT leaked)
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(throwingPipeline.run).toHaveBeenCalledOnce();
+
+    // Manually reset sleepEnteredAt to simulate a new sleep cycle so the trigger fires again.
+    // We do this by forcibly setting state via an internal workaround:
+    // The second tick will call maybeConsolidate; since consolidationCompletedAt is still
+    // undefined (throw prevented write) and sleepEnteredAt is still set, shouldConsolidate:true.
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Second call succeeds — proves consolidating flag was not leaked
+    expect(throwingPipeline.run).toHaveBeenCalledTimes(2);
+
+    scheduler.stop();
+  });
+
+  it("consolidationCompletedAt is NOT written when pipeline.run throws", async () => {
+    mockLlmAction("ENTER_SLEEP");
+
+    const throwingPipeline: ConsolidationPipeline = {
+      run: vi.fn(async () => {
+        throw new Error("pipeline down");
+      }),
+    };
+
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+      consolidation: { pipeline: throwingPipeline, sessionKey: "s" },
+    });
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(scheduler.getState().consolidation.consolidationCompletedAt).toBeUndefined();
+    scheduler.stop();
+  });
+
+  // ── same sleep cycle dedup ────────────────────────────────────────────────────
+
+  it("pipeline.run not called a second time within the same sleep cycle", async () => {
+    mockLlmAction("ENTER_SLEEP");
+    const pipeline = makeConsolidationPipeline();
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSleepSnap()),
+      dispatch: makeDispatch(),
+      consolidation: { pipeline, sessionKey: "s" },
+    });
+    scheduler.start();
+
+    // First tick: ENTER_SLEEP → consolidation runs → consolidationCompletedAt set
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pipeline.run).toHaveBeenCalledOnce();
+
+    // Second tick: still SLEEPING / same sleepEnteredAt → shouldConsolidate:false → no second run
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(pipeline.run).toHaveBeenCalledOnce(); // still only once
     scheduler.stop();
   });
 });
