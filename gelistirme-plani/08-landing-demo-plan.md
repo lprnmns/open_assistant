@@ -335,11 +335,20 @@ S4-S6 (runtime davranisi, yalnizca OA tarafinda dogrulanmis):
 
 **Icerik:** Demo recording + landing page'e embed + CTA formu
 
-**Kabul kriterleri:**
-- [ ] Demo 6 sahneyi takip eden 2-4 dakikalik video veya terminal GIF
-- [ ] CTA: "Request early access" formu (email toplama)
-- [ ] Ikincil CTA'lar: "See the benchmark", "Watch the demo"
-- [ ] SaaS / enterprise vaadi YAPILMAMIS
+**Durum: PARTIAL / PENDING** — CTA dürüst pending state'e getirildi, ama aşağıdaki iki kabul kriteri henüz karşılanmadı:
+
+**Tamamlananlar:**
+- [x] İkincil CTA'lar yapılandırıldı: "See the Benchmark" (#benchmark anchor), "Terminal Demo" disabled/Coming Soon
+- [x] SaaS / enterprise vaadi yok
+- [x] "Watch the Demo" butonu demo asset olmadan yanıltıcı olmaktan çıkarıldı
+
+**Bekleyenler (açık):**
+- [ ] Demo 6 sahneyi takip eden 2-4 dakikalik video veya terminal GIF — çalışan sistem üzerinde kayıt gerektirir
+- [ ] CTA: Gerçek "Request early access" formu (email toplama) — backend endpoint veya dış form servisi gerektirir (Formspree vb.)
+
+**Ön koşullar:**
+- Demo kaydı için `pnpm dev` + scheduler canlı çalışmalı
+- Email formu için tercih edilecek servis kararlaştırılmalı (self-hosted, Formspree, ConvertKit, vb.)
 
 ### Sub-Task 8.7 — Claim Audit + QA Review
 
