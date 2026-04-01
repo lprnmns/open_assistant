@@ -624,6 +624,93 @@ section:last-of-type {
   background-color: var(--bg-secondary);
 }
 
+.byok-content {
+  display: grid;
+  gap: var(--spacing-xl);
+  margin: var(--spacing-lg) 0;
+}
+
+.byok-providers h3 {
+  font-size: var(--font-size-h3);
+  margin-bottom: var(--spacing-lg);
+  color: var(--text-primary);
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-xl);
+}
+
+.provider-card {
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: var(--spacing-lg);
+  text-align: center;
+  transition: var(--transition);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+}
+
+.provider-card:hover {
+  border-color: var(--accent);
+  background-color: rgba(79, 70, 229, 0.05);
+  transform: translateY(-2px);
+}
+
+.provider-icon {
+  font-size: 40px;
+  display: block;
+  margin-bottom: var(--spacing-md);
+}
+
+.provider-card p {
+  font-size: var(--font-size-h3);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.compatibility-proof {
+  background-color: rgba(79, 70, 229, 0.05);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: var(--spacing-lg);
+}
+
+.compatibility-proof h3 {
+  font-size: var(--font-size-h3);
+  margin-bottom: var(--spacing-md);
+  color: var(--text-primary);
+}
+
+.compatibility-proof p {
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-sm);
+}
+
+.compatibility-proof code {
+  background-color: rgba(0, 0, 0, 0.3);
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+}
+
+.proof-note {
+  font-size: var(--font-size-small);
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: var(--spacing-md);
+}
+
 /* CTA Section */
 .cta-section {
   background-color: var(--bg-tertiary);
@@ -730,6 +817,10 @@ section:last-of-type {
   .spotlight-response {
     grid-template-columns: 1fr 1fr;
   }
+
+  .provider-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 /* Responsive Design — Desktop (1024px and up) */
@@ -769,6 +860,14 @@ section:last-of-type {
 
   .spotlight-response {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .provider-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .byok-content {
+    grid-template-columns: 1fr;
   }
 }
 
