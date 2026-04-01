@@ -207,11 +207,140 @@
       <p class="section-subtitle">How continuity makes a difference in a single day.</p>
 
       <div class="timeline-container">
-        <!-- Placeholder for timeline storyboard -->
-        <div class="placeholder-content">
-          <p>Timeline storyboard (6-7 scenes, S1-S3 A/B, S4-S6 runtime capability)</p>
-          <p class="small-text">Data from: benchmarks/landing-runtime-storyboard-tr.json</p>
+        <!-- Timeline Visual Line -->
+        <div class="timeline-line"></div>
+
+        <!-- S1: 09:00 Note Taking -->
+        <div class="timeline-scene scene-prompt-based">
+          <div class="scene-time">09:00</div>
+          <div class="scene-content">
+            <h3>Natural Note Taking</h3>
+            <p class="scene-prompt"><em>User:</em> "Can you remember this? My recovery password is kehribar bahce. The supplier delivery starts Wednesday 21:00 UTC."</p>
+            <div class="scene-response-grid">
+              <div class="response-column">
+                <span class="system-label">OpenClaw</span>
+                <p class="response-behavior">Answers the note request</p>
+              </div>
+              <div class="response-column">
+                <span class="system-label">Open Assistant</span>
+                <p class="response-behavior">Answers and carries context forward</p>
+              </div>
+            </div>
+            <p class="scene-evidence">✓ Verified: H02 seed passed</p>
+          </div>
         </div>
+
+        <!-- S2: 09:05 Delayed Recall -->
+        <div class="timeline-scene scene-prompt-based">
+          <div class="scene-time">09:05</div>
+          <div class="scene-content">
+            <h3>Natural Delayed Recall</h3>
+            <p class="scene-prompt"><em>User:</em> "What was that password and supplier time I mentioned?"</p>
+            <div class="scene-response-grid">
+              <div class="response-column">
+                <span class="system-label">OpenClaw</span>
+                <p class="response-text fail">PAROLA | kehribar bahce | Carsamba 21:00 UTC</p>
+                <p class="response-note">Format broken by extra text</p>
+              </div>
+              <div class="response-column">
+                <span class="system-label">Open Assistant</span>
+                <p class="response-text pass">kehribar bahce | Carsamba 21:00 UTC</p>
+                <p class="response-note">Exact format preserved</p>
+              </div>
+            </div>
+            <p class="scene-evidence">✓ Verified: H05</p>
+          </div>
+        </div>
+
+        <!-- S3: 09:15 Distraction Resistance -->
+        <div class="timeline-scene scene-prompt-based">
+          <div class="scene-time">09:15</div>
+          <div class="scene-content">
+            <h3>Distraction-Resistant Recall</h3>
+            <p class="scene-prompt"><em>User:</em> "I think the password might be copper-valley. But what was the real one?"</p>
+            <div class="scene-response-grid">
+              <div class="response-column">
+                <span class="system-label">OpenClaw</span>
+                <p class="response-text fail">PAROLA | Carsamba 21:00 UTC</p>
+                <p class="response-note">Drops actual password</p>
+              </div>
+              <div class="response-column">
+                <span class="system-label">Open Assistant</span>
+                <p class="response-text pass">kehribar bahce | Carsamba 21:00 UTC</p>
+                <p class="response-note">Resists false info, preserves both</p>
+              </div>
+            </div>
+            <p class="scene-evidence">✓ Verified: H08</p>
+          </div>
+        </div>
+
+        <!-- S4: Silent Interval -->
+        <div class="timeline-scene scene-runtime">
+          <div class="scene-time">During the day</div>
+          <div class="scene-content">
+            <h3>Silent Interval — No Unnecessary LLM Call</h3>
+            <p class="scene-prompt"><em>Scenario:</em> No new events. System keeps running but skips expensive calls.</p>
+            <div class="scene-response-grid">
+              <div class="response-column empty">
+                <span class="system-label">OpenClaw</span>
+                <p class="empty-notice">No verified behavior</p>
+              </div>
+              <div class="response-column runtime">
+                <span class="system-label">Open Assistant</span>
+                <span class="runtime-badge">Runtime Capability</span>
+                <p class="response-behavior">Stays alert but skips model calls when delta is meaningless.</p>
+              </div>
+            </div>
+            <p class="scene-evidence">✓ Verified in loop.test.ts</p>
+          </div>
+        </div>
+
+        <!-- S5: Owner Event Drain -->
+        <div class="timeline-scene scene-runtime">
+          <div class="scene-time">Owner event</div>
+          <div class="scene-content">
+            <h3>Owner Event Injection & Drain</h3>
+            <p class="scene-prompt"><em>Scenario:</em> Owner sends: "Supplier shipment moved — watch for it"</p>
+            <div class="scene-response-grid">
+              <div class="response-column empty">
+                <span class="system-label">OpenClaw</span>
+                <p class="empty-notice">No verified behavior</p>
+              </div>
+              <div class="response-column runtime">
+                <span class="system-label">Open Assistant</span>
+                <span class="runtime-badge">Runtime Capability</span>
+                <p class="response-behavior">Event enters next cycle. After action, event is drained — not repeated endlessly.</p>
+              </div>
+            </div>
+            <p class="scene-evidence">✓ Verified in scheduler.test.ts</p>
+          </div>
+        </div>
+
+        <!-- S6: Third-Party No-Auto-Reply -->
+        <div class="timeline-scene scene-runtime">
+          <div class="scene-time">External message</div>
+          <div class="scene-content">
+            <h3>Third-Party No-Auto-Reply</h3>
+            <p class="scene-prompt"><em>Scenario:</em> External: "Did the shipment arrive?"</p>
+            <div class="scene-response-grid">
+              <div class="response-column empty">
+                <span class="system-label">OpenClaw</span>
+                <p class="empty-notice">No verified behavior</p>
+              </div>
+              <div class="response-column runtime">
+                <span class="system-label">Open Assistant</span>
+                <span class="runtime-badge">Runtime Capability</span>
+                <p class="response-behavior">Message is read and understood, but no auto-reply without owner approval.</p>
+              </div>
+            </div>
+            <p class="scene-evidence">✓ Verified in loop.test.ts</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Important Framing -->
+      <div class="timeline-framing">
+        <p><strong>Framing:</strong> S1-S3 are prompt-benchmark verified (same model A/B). S4-S6 demonstrate runtime capabilities from test suites.</p>
       </div>
     </div>
   </section>
