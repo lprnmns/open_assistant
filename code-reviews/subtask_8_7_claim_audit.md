@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-31
 **Reviewer:** Claude
-**Status:** IN PROGRESS
+**Status:** REVISED — pending 8.6 demo asset
 
 ---
 
@@ -121,9 +121,10 @@
 
 ### Section 6: BYOK / OpenRouter Compatibility
 
-**Header:** "Run Open Assistant with your own API keys. No vendor lock-in."
+**Header (original):** "Run Open Assistant with your own API keys. No vendor lock-in."
+**Header (corrected in landing):** "Run Open Assistant with your own API keys. Bring your own keys across four providers."
 
-**Provider Grid:** Anthropic, OpenAI, Google, OpenRouter
+**Provider Grid:** Anthropic, Google, OpenAI, OpenRouter (alphabetical)
 
 **Compatibility Proof:**
 - "Open Assistant completed end-to-end testing on OpenRouter using openrouter/qwen/qwen3.6-plus-preview:free."
@@ -132,13 +133,13 @@
 
 **Claim Check:**
 - ✅ S5 proof: "OA yeni OpenRouter BYOK lane'inde uc uca calisiyor" — supported by smoke tests
-- ✅ "No vendor lock-in" is fair (4 providers listed, code uses abstraction)
+- ⚠️ **"No vendor lock-in"** — TOO ABSOLUTE. Our evidence is 4 provider support + OpenRouter compatibility proof. This is not a guarantee-level "no lock-in" claim. Narrowed to "Bring your own keys across four providers." in landing copy.
 - ✅ **CRITICAL:** Disclaimer present — explicitly NOT quality benchmark
 - ✅ OpenRouter explicitly framed as "compatibility proof" not "quality proof"
 - ✅ No claim that OpenRouter is faster, cheaper, or better quality than baseline
 - ✅ No implication that OpenClaw cannot use OpenRouter
 
-**Status:** PASS ✅ (Claim discipline strictly maintained)
+**Status:** CONDITIONAL PASS — "No vendor lock-in" narrowed in landing copy to "Bring your own keys across four providers."
 
 ---
 
@@ -201,7 +202,7 @@
 - [x] S1-S3 and S4-S6 separation explicit and visual
 - [x] No SaaS deployment claim
 - [x] No token cost claim
-- [x] No vendor lock-in claim beyond documented 4-provider support
+- [x] BYOK copy narrowed from "No vendor lock-in" to "Bring your own keys across four providers" (was too absolute)
 - [x] No "OpenClaw cannot" claim without basis
 - [x] Test file citations specific (not suite-level count)
 - [x] Architecture claims are feature-list facts, not performance claims
@@ -211,7 +212,7 @@
 
 ## QA Sign-Off
 
-**Claim Discipline Status:** ✅ PASSED
+**Claim Discipline Status:** ✅ PASSED (for completed sections)
 
 **Summary:**
 - All safe claims (S1-S6) are present and well-supported
@@ -219,8 +220,9 @@
 - Two-layer narrative (prompt benchmark vs runtime) is explicit
 - OpenRouter lane claim discipline strictly maintained
 - No hidden failures or overclaimed capabilities
+- "No vendor lock-in" narrowed to "Bring your own keys across four providers" — more accurate to evidence
 
-**Approval:** READY FOR PUBLICATION
+**Approval:** Claim discipline passed for completed sections. Final publication pending 8.6 demo asset.
 
 **Reviewer:** Claude
 **Date:** 2026-03-31
