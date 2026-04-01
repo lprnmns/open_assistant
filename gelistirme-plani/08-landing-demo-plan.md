@@ -338,17 +338,22 @@ S4-S6 (runtime davranisi, yalnizca OA tarafinda dogrulanmis):
 **Durum: PARTIAL / PENDING** — CTA dürüst pending state'e getirildi, ama aşağıdaki iki kabul kriteri henüz karşılanmadı:
 
 **Tamamlananlar:**
-- [x] İkincil CTA'lar yapılandırıldı: "See the Benchmark" (#benchmark anchor), "Terminal Demo" disabled/Coming Soon
+- [x] İkincil CTA'lar yapılandırıldı: "See the Benchmark" (#benchmark anchor), "Terminal Demo" disabled/Recording Pending
 - [x] SaaS / enterprise vaadi yok
 - [x] "Watch the Demo" butonu demo asset olmadan yanıltıcı olmaktan çıkarıldı
+- [x] `scripts/capture-demo.sh` — asciinema + agg capture workflow hazır
 
-**Bekleyenler (açık):**
-- [ ] Demo 6 sahneyi takip eden 2-4 dakikalik video veya terminal GIF — çalışan sistem üzerinde kayıt gerektirir
-- [ ] CTA: Gerçek "Request early access" formu (email toplama) — backend endpoint veya dış form servisi gerektirir (Formspree vb.)
+**8.6a — Demo Asset (PENDING: user recording required):**
+- [ ] `landing/demo.cast` ve `landing/demo.gif` mevcut değil — çalışan sistem + asciinema gerektirir
+- Capture script: `bash scripts/capture-demo.sh`
+- Önkoşullar: `asciinema` + `agg` kurulu, `pnpm dev` + scheduler ayakta
+- Demo kapsamı (5 sahne): note recall · distraction resistance · owner drain · third-party guard · quiet tick
+- Asset path: `landing/demo.gif` (embed: `<img src="demo.gif" alt="...">`)
 
-**Ön koşullar:**
-- Demo kaydı için `pnpm dev` + scheduler canlı çalışmalı
-- Email formu için tercih edilecek servis kararlaştırılmalı (self-hosted, Formspree, ConvertKit, vb.)
+**8.6b — Email Form (PENDING: Formspree endpoint gerekiyor):**
+- [ ] Formspree hesabı + endpoint URL kullanıcıdan gelecek
+- Form HTML hazır değil — endpoint olmadan kırık form göndermek yasak
+- Mevcut CTA `mailto:` link olarak duruyor (dürüst fallback)
 
 ### Sub-Task 8.7 — Claim Audit + QA Review
 
