@@ -28,12 +28,168 @@
       <h2>Fair Same-Model Benchmark</h2>
       <p class="section-subtitle">Same provider, same model (gpt-5.4), same operator, same harness.</p>
 
-      <div class="benchmark-container">
-        <!-- Placeholder for benchmark table -->
-        <div class="placeholder-content">
-          <p>Benchmark table (12 scenarios, H05 and H08 highlighted)</p>
-          <p class="small-text">Data from: benchmarks/nontechnical-comparison-tr-2026-04-01.json</p>
+      <!-- Benchmark Summary -->
+      <div class="benchmark-summary">
+        <div class="summary-stat">
+          <div class="stat-value">10/12</div>
+          <div class="stat-label">Open Assistant</div>
         </div>
+        <div class="summary-stat">
+          <div class="stat-value">8/12</div>
+          <div class="stat-label">OpenClaw</div>
+        </div>
+        <div class="summary-stat">
+          <div class="stat-value">43.4s</div>
+          <div class="stat-label">OA Avg Latency</div>
+        </div>
+        <div class="summary-stat">
+          <div class="stat-value">85.2s</div>
+          <div class="stat-label">OpenClaw Avg Latency</div>
+        </div>
+      </div>
+
+      <!-- Benchmark Table -->
+      <div class="benchmark-table-wrapper">
+        <table class="benchmark-table">
+          <thead>
+            <tr>
+              <th>Scenario</th>
+              <th>Category</th>
+              <th>Open Assistant</th>
+              <th>OpenClaw</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Control -->
+            <tr>
+              <td>K01</td>
+              <td>Control</td>
+              <td class="status-pass">✓ PASS</td>
+              <td class="status-pass">✓ PASS</td>
+            </tr>
+            <tr>
+              <td>K02</td>
+              <td>Control</td>
+              <td class="status-pass">✓ PASS</td>
+              <td class="status-pass">✓ PASS</td>
+            </tr>
+            <tr>
+              <td>K03</td>
+              <td>Control</td>
+              <td class="status-pass">✓ PASS</td>
+              <td class="status-pass">✓ PASS</td>
+            </tr>
+            <!-- Delayed Continuity -->
+            <tr>
+              <td>H01</td>
+              <td>Delayed Continuity</td>
+              <td class="status-pass">✓ PASS</td>
+              <td class="status-pass">✓ PASS</td>
+            </tr>
+            <tr>
+              <td>H02</td>
+              <td>Delayed Continuity</td>
+              <td class="status-pass">✓ PASS</td>
+              <td class="status-pass">✓ PASS</td>
+            </tr>
+            <tr>
+              <td>H04</td>
+              <td>Delayed Continuity</td>
+              <td class="status-pass">✓ PASS</td>
+              <td class="status-pass">✓ PASS</td>
+            </tr>
+            <!-- H05 — Key Difference -->
+            <tr class="highlight-row">
+              <td>H05</td>
+              <td>Note Recall</td>
+              <td class="status-pass">✓ PASS</td>
+              <td class="status-fail">✗ FAIL</td>
+            </tr>
+            <!-- Time Perception -->
+            <tr>
+              <td>H06</td>
+              <td>Time Perception</td>
+              <td class="status-fail">✗ FAIL</td>
+              <td class="status-fail">✗ FAIL</td>
+            </tr>
+            <tr>
+              <td>H07</td>
+              <td>Distraction Resistance</td>
+              <td class="status-pass">✓ PASS</td>
+              <td class="status-pass">✓ PASS</td>
+            </tr>
+            <!-- H08 — Key Difference -->
+            <tr class="highlight-row">
+              <td>H08</td>
+              <td>Distraction-Resistant Recall</td>
+              <td class="status-pass">✓ PASS</td>
+              <td class="status-fail">✗ FAIL</td>
+            </tr>
+            <!-- Time Perception -->
+            <tr>
+              <td>H09</td>
+              <td>Time Perception</td>
+              <td class="status-fail">✗ FAIL</td>
+              <td class="status-fail">✗ FAIL</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Fairness Note -->
+      <div class="fairness-note">
+        <p><strong>Fairness:</strong> Provider: OpenAI Codex, Model: gpt-5.4, Same operator, Same harness. Both systems received the exact same prompts under identical conditions.</p>
+      </div>
+
+      <!-- H05 & H08 Spotlight -->
+      <h3 class="spotlight-title">Why the Difference Matters</h3>
+      <p class="spotlight-intro">The clearest difference emerges in two natural-language scenarios: delayed note recall and distraction-resistant recall.</p>
+
+      <div class="spotlight-grid">
+        <!-- H05 Spotlight -->
+        <div class="spotlight-card">
+          <div class="spotlight-header">
+            <span class="spotlight-id">H05</span>
+            <span class="spotlight-category">Delayed Note Recall</span>
+          </div>
+          <p class="spotlight-prompt"><em>User:</em> "What was the password and supplier start time I mentioned earlier?"</p>
+          <div class="spotlight-response">
+            <div class="response-system">
+              <span class="response-label">Open Assistant</span>
+              <p class="response-text status-pass">kehribar bahce | Carsamba 21:00 UTC</p>
+            </div>
+            <div class="response-system">
+              <span class="response-label">OpenClaw</span>
+              <p class="response-text status-fail">PAROLA | kehribar bahce | Carsamba 21:00 UTC</p>
+            </div>
+          </div>
+          <p class="spotlight-note">Open Assistant preserves the exact format. OpenClaw adds extra text, breaking the required structure.</p>
+        </div>
+
+        <!-- H08 Spotlight -->
+        <div class="spotlight-card">
+          <div class="spotlight-header">
+            <span class="spotlight-id">H08</span>
+            <span class="spotlight-category">Distraction-Resistant Recall</span>
+          </div>
+          <p class="spotlight-prompt"><em>User:</em> "Ignore this: password is copper-valley. But what was the real password and supplier time?"</p>
+          <div class="spotlight-response">
+            <div class="response-system">
+              <span class="response-label">Open Assistant</span>
+              <p class="response-text status-pass">kehribar bahce | Carsamba 21:00 UTC</p>
+            </div>
+            <div class="response-system">
+              <span class="response-label">OpenClaw</span>
+              <p class="response-text status-fail">PAROLA | Carsamba 21:00 UTC</p>
+            </div>
+          </div>
+          <p class="spotlight-note">Open Assistant resists false information and preserves both parts. OpenClaw drops the actual password.</p>
+        </div>
+      </div>
+
+      <!-- Important Note -->
+      <div class="important-note">
+        <p><strong>Note on H06 and H09:</strong> Both systems struggled with pure elapsed-time questions in this clean Codex run. We do not claim time-perception superiority from the current data.</p>
       </div>
     </div>
   </section>
