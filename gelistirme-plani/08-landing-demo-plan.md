@@ -156,15 +156,24 @@ CTA
 - S1-S3: H02, H05, H08 benchmark verileri (verified)
 - S4-S6: loop.test.ts, scheduler.test.ts (verified runtime)
 
-**Gorsel yaklasim:**
+**Gorsel yaklasim — iki farkli sahne tipi:**
+
+S1-S3 (prompt-based, dogrudan benchmark verisi):
 - Dikey zaman cizelgesi, sol: OpenClaw, sag: Open Assistant
-- Her sahnede kullanici promptu ortada, iki cevap yanlarda
-- S4-S6 icin benchmark degil, sistem davranisi animasyonu/ikonu
-- S4-S6'da "Runtime davranisi — prompt benchmark'tan bagimsiz dogrulanmis" etiketi
+- Her sahnede kullanici promptu ortada, iki gercek cevap yanlarda
+- Veri benchmark run'larindan birebir alinir
+
+S4-S6 (runtime davranisi, yalnizca OA tarafinda dogrulanmis):
+- Ayni timeline'da devam eder AMA format degisir
+- Sol taraf (OpenClaw sutunu) tamamen bos veya gri — karsilastirma YAPILMAZ
+- Sag taraf (OA): davranis aciklamasi + "Verified in loop.test.ts" etiketi
+- Uzerinde acik etiket: "Runtime capability — yalnizca Open Assistant'ta dogrulanmis"
+- OpenClaw hakkinda ima, cikarim veya uydurma davranis YAZILMAZ
 
 **Dikkat:**
-- S4 (sessizlik) ve S6 (3rd party) icin OpenClaw tarafinda "bu lane'de esit dogrulanmis davranis yok" notu duracak
-- Bu sahneler "OA bunu yapabiliyor" olarak sunulacak, "OpenClaw bunu yapamiyor" olarak degil
+- S4-S6 "OA bunu yapabiliyor" olarak sunulacak; "OpenClaw bunu yapamiyor" YAZILMAYACAK
+- Runtime sahneleri prompt benchmark sonucu gibi CERCEVELENMEYECEK
+- OpenClaw sutunu bos birakilarak gorsel olarak "bu karsilastirma degil, urun ozelligi tanitimi" mesaji verilecek
 
 ---
 
@@ -183,7 +192,12 @@ CTA
 
 **Gorsel yaklasim:**
 - 3 kart veya ikon grubu
-- Her kartta: baslik + bir cumlelik aciklama + test badge ("59/59 passed")
+- Her kartta: baslik + bir cumlelik aciklama + dogrulama notu
+- Badge dili spesifik olmali, file-level suite sayisi degil:
+  - Owner event drain: "Verified in scheduler.test.ts"
+  - Third-party no-auto-reply: "Verified in loop.test.ts"
+  - Quiet no-op ticks: "Verified in loop.test.ts + scheduler.test.ts"
+- "59/59 passed" gibi genis suite sayilari KULLANILMAZ (o sayi tum loop testlerini kapsar, tek guardrail'e esit degildir)
 - Teknik olmayan mesaj: "Proaktif ama kontrolsuz degil."
 
 ---
@@ -291,9 +305,10 @@ CTA
 **Icerik:** Dikey akan zaman cizelgesi, 6-7 sahne, sol/sag karsilastirma
 
 **Kabul kriterleri:**
-- [ ] S1-S3 prompt-based sahneler: kullanici promptu + iki cevap yan yana
-- [ ] S4-S6 runtime sahneler: davranis aciklamasi + "runtime verified" etiketi
-- [ ] OpenClaw tarafinda runtime sahneler icin "esit dogrulanmis davranis yok" notu
+- [ ] S1-S3 prompt-based sahneler: kullanici promptu + iki gercek cevap yan yana (benchmark verisinden)
+- [ ] S4-S6 runtime sahneler: yalnizca OA tarafi gosterilir; OpenClaw sutunu bos/gri
+- [ ] S4-S6'da gorsel etiket: "Runtime capability — yalnizca Open Assistant'ta dogrulanmis"
+- [ ] OpenClaw hakkinda runtime sahnelerinde ima veya uydurma davranis YOK
 - [ ] Gorsel olarak akan timeline hissi (dikey cizgi + zaman etiketleri)
 - [ ] Veri `benchmarks/landing-runtime-storyboard-tr.json` ile tutarli
 
@@ -302,8 +317,8 @@ CTA
 **Icerik:** 3 kart: owner drain, 3rd party guard, quiet tick
 
 **Kabul kriterleri:**
-- [ ] 3 guardrail'in her biri icin baslik + bir curmlelik aciklama + ikon
-- [ ] Her kartta test coverage badge (ornek: "59/59 passed")
+- [ ] 3 guardrail'in her biri icin baslik + bir cumlelik aciklama + ikon
+- [ ] Her kartta spesifik dogrulama notu (ornek: "Verified in scheduler.test.ts") — file-level suite sayisi degil
 - [ ] Teknik olmayan alt mesaj: "Proaktif ama kontrolsuz degil."
 - [ ] Kartlar responsive grid'de 3 sutun (desktop) → 1 sutun (mobile)
 
