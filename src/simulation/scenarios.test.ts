@@ -8,10 +8,10 @@ import {
 } from "./scenarios.js";
 
 describe("runtime smoke scenarios", () => {
-  it("captures the silence wake semantics and its current limitation", () => {
-    const result = simulateSilenceScenario();
+  it("proves full silence chain: wake → tick → decision → dispatch", async () => {
+    const result = await simulateSilenceScenario();
 
-    expect(result.status).toBe("partial");
+    expect(result.status).toBe("pass");
     expect(result.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -23,8 +23,12 @@ describe("runtime smoke scenarios", () => {
           passed: true,
         }),
         expect.objectContaining({
-          label: "exact-proactive-copy",
-          passed: false,
+          label: "tick-decision-is-send-message",
+          passed: true,
+        }),
+        expect.objectContaining({
+          label: "dispatch-routes-to-active-channel",
+          passed: true,
         }),
       ]),
     );

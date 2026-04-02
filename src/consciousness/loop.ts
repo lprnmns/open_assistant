@@ -32,8 +32,8 @@
  * gateway reply path.
  */
 
-import { proxyCall } from "../llm/proxy-client.js";
-import type { ProxyMessage } from "../llm/types.js";
+import { proxyCall as defaultProxyCall } from "../llm/proxy-client.js";
+import type { ProxyCallOptions, ProxyCallResult, ProxyMessage } from "../llm/types.js";
 import type { MemoryRecallPipeline, MemoryRecallResult } from "./brain/types.js";
 import {
   type ConsciousnessConfig,
@@ -67,6 +67,12 @@ export type TickContext = {
   recall?: MemoryRecallPipeline;
   /** Session key forwarded to Hippocampus for session-scoped recall. */
   sessionKey?: string;
+  /**
+   * Override the LLM call used by tick() to produce a TickDecision.
+   * Defaults to the production proxyCall.  Inject a fake for deterministic
+   * testing without hitting a live LLM endpoint.
+   */
+  llmCall?: (options: ProxyCallOptions) => Promise<ProxyCallResult>;
 };
 
 /**
@@ -435,7 +441,8 @@ export async function tick(
     // Recall memory BEFORE building the prompt — failure is fully swallowed by safeRecall
     const memory = await safeRecall(ctx?.recall, watchdogResult.context, ctx?.sessionKey);
     const messages = buildTickMessages(snap, watchdogResult, memory, resolvedBuffer);
-    const result = await proxyCall({ source: "consciousness", messages, maxTokens: 512 });
+    const callFn = ctx?.llmCall ?? defaultProxyCall;
+    const result = await callFn({ source: "consciousness", messages, maxTokens: 512 });
     decision = parseTickDecision(result.content);
   } catch (err) {
     // LLM call failed — stay silent, don't crash the loop
