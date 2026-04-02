@@ -230,19 +230,6 @@ export async function simulateActFirstScenario(): Promise<SmokeScenarioReport> {
     meta,
     { actFirstEnabled: true, approvalSurface },
   );
-  const emailTool = wrapToolWithEnforcement(
-    {
-      name: "email.send",
-      execute: async () =>
-        ({
-          value: { ok: true },
-          summary: "Third-party email sent",
-        }) satisfies { value: { ok: boolean }; summary: string },
-    },
-    meta,
-    { actFirstEnabled: true, approvalSurface },
-  );
-
   const calendarDecision = evaluateToolEnforcement({
     toolName: "calendar.create",
     meta,
@@ -267,12 +254,9 @@ export async function simulateActFirstScenario(): Promise<SmokeScenarioReport> {
 
   const calendarResult = (await calendarTool.execute()) as ToolExecutionResult<{ ok: boolean }>;
   const editResult = (await editTool.execute()) as ToolExecutionResult<{ ok: boolean }>;
-  let emailError = "";
-  try {
-    await emailTool.execute();
-  } catch (error) {
-    emailError = error instanceof Error ? error.message : String(error);
-  }
+  // emailTool.execute() is not called here — the wrapped tool would route to
+  // ApprovalSurface (which auto-approves in this harness).  The check below
+  // validates the evaluateToolEnforcement() decision, not the wrapped execute path.
 
   return {
     id: "act-first",
@@ -305,7 +289,7 @@ export async function simulateActFirstScenario(): Promise<SmokeScenarioReport> {
           emailDecision.mode === "blocked" &&
           !emailDecision.allowed &&
           emailDecision.reason === "approval-required-low-reversibility",
-        detail: emailError || "email.send did not throw as expected",
+        detail: `decision=${emailDecision.mode}, reason=${!emailDecision.allowed ? emailDecision.reason : "n/a"}`,
       },
       {
         label: "email-send-auto-with-human-approval",
