@@ -218,11 +218,18 @@ export async function dispatchReplyFromConfig(params: {
     return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
   }
 
+  const originatingChannel = normalizeMessageChannel(ctx.OriginatingChannel);
+  const originatingTo = ctx.OriginatingTo;
+  const providerChannel = normalizeMessageChannel(ctx.Provider);
+  const surfaceChannel = normalizeMessageChannel(ctx.Surface);
+  // Prefer provider channel because surface may carry origin metadata in relayed flows.
+  const currentSurface = providerChannel ?? surfaceChannel;
+
   // Track the owner's latest reply route at the shared inbound reply entry point
   // so built-in channels and extensions update consciousness consistently.
   const activeChannelId = resolveActiveChannelIdFromInteraction(ctx);
   if (activeChannelId) {
-    recordUserInteraction(activeChannelId);
+    recordUserInteraction(activeChannelId, originatingChannel ?? currentSurface);
   }
 
   const sessionStoreEntry = resolveSessionStoreLookup(ctx, cfg);
@@ -258,12 +265,6 @@ export async function dispatchReplyFromConfig(params: {
   // flow when the provider handles its own messages.
   //
   // Debug: `pnpm test src/auto-reply/reply/dispatch-from-config.test.ts`
-  const originatingChannel = normalizeMessageChannel(ctx.OriginatingChannel);
-  const originatingTo = ctx.OriginatingTo;
-  const providerChannel = normalizeMessageChannel(ctx.Provider);
-  const surfaceChannel = normalizeMessageChannel(ctx.Surface);
-  // Prefer provider channel because surface may carry origin metadata in relayed flows.
-  const currentSurface = providerChannel ?? surfaceChannel;
   const isInternalWebchatTurn =
     currentSurface === INTERNAL_MESSAGE_CHANNEL &&
     (surfaceChannel === INTERNAL_MESSAGE_CHANNEL || !surfaceChannel) &&

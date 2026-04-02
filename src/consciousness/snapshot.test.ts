@@ -14,6 +14,7 @@ function makeAdapters(overrides: Partial<SnapshotAdapters> = {}): SnapshotAdapte
     getPendingNoteCount: () => 0,
     getFiredTriggerIds: () => [],
     getActiveChannelId: () => "test-channel",
+    getActiveChannelType: () => "telegram",
     getLastTickAt: () => undefined,
     ...overrides,
   };
@@ -29,6 +30,7 @@ describe("buildRealWorldSnapshot", () => {
       getPendingNoteCount: () => 3,
       getFiredTriggerIds: () => ["trigger-abc"],
       getActiveChannelId: () => "channel-1",
+      getActiveChannelType: () => "slack",
       getLastTickAt: () => now - 5_000,
       getEffectiveSilenceThresholdMs: () => 120_000,
     }));
@@ -38,6 +40,7 @@ describe("buildRealWorldSnapshot", () => {
     expect(snap.pendingNoteCount).toBe(3);
     expect(snap.firedTriggerIds).toEqual(["trigger-abc"]);
     expect(snap.activeChannelId).toBe("channel-1");
+    expect(snap.activeChannelType).toBe("slack");
     expect(snap.lastTickAt).toBe(now - 5_000);
     expect(snap.effectiveSilenceThresholdMs).toBe(120_000);
     expect(snap.dueCronExpressions).toEqual([]);
@@ -49,10 +52,12 @@ describe("buildRealWorldSnapshot", () => {
       getLastUserInteractionAt: async () => 9999,
       getFiredTriggerIds: async () => ["async-trigger"],
       getActiveChannelId: async () => "async-channel",
+      getActiveChannelType: async () => "telegram",
     }));
     expect(snap.lastUserInteractionAt).toBe(9999);
     expect(snap.firedTriggerIds).toEqual(["async-trigger"]);
     expect(snap.activeChannelId).toBe("async-channel");
+    expect(snap.activeChannelType).toBe("telegram");
   });
 
   it("includes optional adapters when provided", async () => {
@@ -87,18 +92,24 @@ describe("buildRealWorldSnapshot", () => {
   it("handles undefined activeChannelId safely", async () => {
     const snap = await buildRealWorldSnapshot(makeAdapters({
       getActiveChannelId: () => undefined,
+      getActiveChannelType: () => undefined,
     }));
     expect(snap.activeChannelId).toBeUndefined();
+    expect(snap.activeChannelType).toBeUndefined();
   });
 
   it("substitutes safe defaults when an async adapter throws", async () => {
     const snap = await buildRealWorldSnapshot(makeAdapters({
       getFiredTriggerIds: async () => { throw new Error("Redis down"); },
       getActiveChannelId: async () => { throw new Error("session store unavailable"); },
+      getActiveChannelType: async () => {
+        throw new Error("channel type unavailable");
+      },
     }));
     // Should fall back to empty array and undefined, not crash
     expect(snap.firedTriggerIds).toEqual([]);
     expect(snap.activeChannelId).toBeUndefined();
+    expect(snap.activeChannelType).toBeUndefined();
     // Other fields still populated from working adapters
     expect(typeof snap.capturedAt).toBe("number");
   });

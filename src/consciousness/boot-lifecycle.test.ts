@@ -52,6 +52,7 @@ describe("maybeStartConsciousnessLoop", () => {
     expect(typeof lc?.stop).toBe("function");
     expect(lc?.scheduler).toBeDefined();
     expect(lc?.reflectionQueue).toBeDefined();
+    expect(lc?.auditLog).toBeDefined();
     lc?.stop();
   });
 

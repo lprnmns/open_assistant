@@ -35,6 +35,7 @@
 
 import type { WorldSnapshot } from "./types.js";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
+import type { OriginatingChannelType } from "../auto-reply/templating.js";
 
 // ── Adapters ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,15 @@ export type SnapshotAdapters = {
   getActiveChannelId: () => Promise<string | undefined> | string | undefined;
 
   /**
+   * Provider/channel type for the owner's active route.
+   * Returns undefined when the route is unknown or not yet tracked.
+   */
+  getActiveChannelType?: () =>
+    | Promise<OriginatingChannelType | undefined>
+    | OriginatingChannelType
+    | undefined;
+
+  /**
    * Unix ms of the last completed consciousness tick.
    * Returns undefined if the loop has never ticked.
    */
@@ -119,6 +129,7 @@ export async function buildRealWorldSnapshot(
     dueCronExpressions,
     externalWorldEvents,
     activeChannelId,
+    activeChannelType,
   ] = await Promise.all([
     safeFetch(() => adapters.getLastUserInteractionAt(), undefined as number | undefined),
     safeFetch(() => adapters.getFiredTriggerIds(), [] as string[]),
@@ -129,6 +140,12 @@ export async function buildRealWorldSnapshot(
       ? safeFetch(() => adapters.getExternalWorldEvents!(), [] as string[])
       : ([] as string[]),
     safeFetch(() => adapters.getActiveChannelId(), undefined as string | undefined),
+    adapters.getActiveChannelType
+      ? safeFetch(
+          () => adapters.getActiveChannelType!(),
+          undefined as OriginatingChannelType | undefined,
+        )
+      : (undefined as OriginatingChannelType | undefined),
   ]);
 
   // Synchronous fields — not in Promise.all to preserve error isolation.
@@ -146,6 +163,7 @@ export async function buildRealWorldSnapshot(
     dueCronExpressions,
     externalWorldEvents,
     activeChannelId,
+    activeChannelType,
     lastTickAt,
     effectiveSilenceThresholdMs,
     // eventBuffer is injected by the scheduler — not built here

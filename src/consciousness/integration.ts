@@ -16,7 +16,9 @@
  * Inbound messages must be handled by the gateway reply path only.
  */
 
-import type { TickDecision, WorldSnapshot } from "./types.js";
+import { createDispatchAuditEntry, type DispatchAuditLog } from "./audit.js";
+import type { ConsciousnessConfig, TickDecision, WorldSnapshot } from "./types.js";
+import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 
 // ── Dispatch context (injected by caller) ─────────────────────────────────────
 
@@ -31,7 +33,11 @@ export type DispatchContext = {
    * Never called with a fallback channel — if activeChannelId is absent the
    * message is silently dropped to avoid unintended broadcast.
    */
-  sendToChannel: (channelId: string, content: string) => Promise<void>;
+  sendToChannel: (
+    channelId: string,
+    content: string,
+    channelType?: WorldSnapshot["activeChannelType"],
+  ) => Promise<void>;
 
   /**
    * Persist a note / memory entry.
@@ -40,6 +46,18 @@ export type DispatchContext = {
    * remain running.
    */
   appendNote: (content: string) => Promise<void>;
+
+  /**
+   * Mutable proactive dispatch state that persists across ticks.
+   */
+  proactiveState?: {
+    lastSentAt?: number;
+  };
+
+  /**
+   * Optional audit sink for proactive send attempts.
+   */
+  auditLog?: DispatchAuditLog;
 };
 
 // ── Dispatch result ───────────────────────────────────────────────────────────
@@ -73,6 +91,7 @@ export async function dispatchDecision(
   decision: TickDecision,
   snap: WorldSnapshot,
   ctx: DispatchContext,
+  config: ConsciousnessConfig = DEFAULT_CONSCIOUSNESS_CONFIG,
 ): Promise<DispatchResult> {
   switch (decision.action) {
     case "SEND_MESSAGE": {
@@ -80,10 +99,55 @@ export async function dispatchDecision(
         // No active channel — drop silently, never broadcast to an unknown surface
         return { dispatched: false };
       }
+      const now = Date.now();
+      const lastSentAt = ctx.proactiveState?.lastSentAt;
+      const minIntervalMs = Math.max(0, config.proactiveMessageMinIntervalMs);
+      if (
+        lastSentAt !== undefined &&
+        minIntervalMs > 0 &&
+        now - lastSentAt < minIntervalMs
+      ) {
+        ctx.auditLog?.append(
+          createDispatchAuditEntry({
+            timestamp: now,
+            channelId: snap.activeChannelId,
+            channelType: snap.activeChannelType,
+            content: decision.messageContent,
+            decision: "rate_limited",
+          }),
+        );
+        return { dispatched: false };
+      }
+
+      const content = capProactiveContent(
+        decision.messageContent,
+        config.proactiveMessageMaxContentChars,
+      );
       try {
-        await ctx.sendToChannel(snap.activeChannelId, decision.messageContent);
+        await ctx.sendToChannel(snap.activeChannelId, content, snap.activeChannelType);
+        if (ctx.proactiveState) {
+          ctx.proactiveState.lastSentAt = now;
+        }
+        ctx.auditLog?.append(
+          createDispatchAuditEntry({
+            timestamp: now,
+            channelId: snap.activeChannelId,
+            channelType: snap.activeChannelType,
+            content,
+            decision: "sent",
+          }),
+        );
         return { dispatched: true };
       } catch (err) {
+        ctx.auditLog?.append(
+          createDispatchAuditEntry({
+            timestamp: now,
+            channelId: snap.activeChannelId,
+            channelType: snap.activeChannelType,
+            content,
+            decision: "send_error",
+          }),
+        );
         return {
           dispatched: false,
           error: err instanceof Error ? err : new Error(String(err)),
@@ -109,4 +173,17 @@ export async function dispatchDecision(
       // No side-effect; phase transition is handled by the Loop Engine
       return { dispatched: false };
   }
+}
+
+function capProactiveContent(content: string, maxChars: number): string {
+  if (!Number.isFinite(maxChars) || maxChars <= 0) {
+    return "";
+  }
+  if (content.length <= maxChars) {
+    return content;
+  }
+  if (maxChars <= 3) {
+    return content.slice(0, maxChars);
+  }
+  return `${content.slice(0, maxChars - 3).trimEnd()}...`;
 }

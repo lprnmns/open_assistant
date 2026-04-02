@@ -174,7 +174,7 @@ export class ConsciousnessScheduler {
 
     // ③ Dispatch decision side-effects (errors caught inside dispatchDecision)
     if (result.decision !== undefined) {
-      await dispatchDecision(result.decision, snap, this.options.dispatch);
+      await dispatchDecision(result.decision, snap, this.options.dispatch, this.state.config);
     }
 
     // ④ Notify telemetry / test observers
