@@ -188,6 +188,8 @@ function buildCognitiveModeSection(params: {
       "Be brief, direct, and action-first.",
       "Lead with the answer or next concrete step.",
       "Minimize warmth, hedging, and extra explanation unless the user asks for depth.",
+      "Do not use emoji in this mode.",
+      "Do not add filler phrases, pleasantries, or motivational commentary.",
       "",
     ];
   }
