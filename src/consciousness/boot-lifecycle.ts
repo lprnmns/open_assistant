@@ -31,6 +31,7 @@
 import process from "node:process";
 import { startConsciousnessLoop } from "./boot.js";
 import type { ConsciousnessScheduler } from "./boot.js";
+import { getActiveChannelId, getLastUserInteractionAt } from "./interaction-tracker.js";
 import { PendingReflectionQueue } from "./reflection-queue.js";
 import { buildRealWorldSnapshot } from "./snapshot.js";
 
@@ -67,12 +68,12 @@ export function maybeStartConsciousnessLoop(
   const scheduler = startConsciousnessLoop({
     buildSnapshot: () =>
       buildRealWorldSnapshot({
-        // Sub-Task 9.1: minimal wiring — no external sources yet.
-        // Real adapters (Redis / session store / trigger registry) are wired in 9.2.
-        getLastUserInteractionAt: () => undefined,
+        // Real in-process sources — updated by the inbound message pipeline.
+        // Persisted (Redis) sources are wired in Sub-Task 9.2.
+        getLastUserInteractionAt: () => getLastUserInteractionAt(),
         getPendingNoteCount: () => reflectionQueue.count(),
         getFiredTriggerIds: () => [],
-        getActiveChannelId: () => undefined,
+        getActiveChannelId: () => getActiveChannelId(),
         getLastTickAt: () => undefined,
       }),
     dispatch: {

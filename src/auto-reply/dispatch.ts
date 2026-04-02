@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../config/config.js";
+import { recordUserInteraction } from "../consciousness/interaction-tracker.js";
 import type { DispatchFromConfigResult } from "./reply/dispatch-from-config.js";
 import { dispatchReplyFromConfig } from "./reply/dispatch-from-config.js";
 import { finalizeInboundContext } from "./reply/inbound-context.js";
@@ -39,6 +40,10 @@ export async function dispatchInboundMessage(params: {
   replyOptions?: Omit<GetReplyOptions, "onToolResult" | "onBlockReply">;
   replyResolver?: typeof import("./reply.js").getReplyFromConfig;
 }): Promise<DispatchInboundResult> {
+  // Track the owner's last interaction so the consciousness snapshot
+  // can populate lastUserInteractionAt and activeChannelId from a real source.
+  const channel = String((params.ctx.Surface ?? params.ctx.Provider) ?? "unknown").toLowerCase();
+  recordUserInteraction(channel);
   const finalized = finalizeInboundContext(params.ctx);
   return await withReplyDispatcher({
     dispatcher: params.dispatcher,
