@@ -98,6 +98,66 @@ export type ToolPolicyPipelineResult = {
   meta: ResolvedToolPolicyMeta;
 };
 
+const ACT_FIRST_AUTO_PATTERNS = [
+  /^read$/,
+  /^grep$/,
+  /^glob$/,
+  /^find$/,
+  /^ls$/,
+  /^status$/,
+  /^search$/,
+  /^show$/,
+  /^view$/,
+] as const;
+
+const ACT_FIRST_BLOCK_PATTERNS = [
+  /email/,
+  /mail/,
+  /message/,
+  /send/,
+  /tweet/,
+  /post/,
+  /publish/,
+  /^exec$/,
+  /^process$/,
+  /delete/,
+  /remove/,
+  /drop/,
+] as const;
+
+const ACT_FIRST_CONFIRM_PATTERNS = [/write/, /edit/, /patch/, /update/, /create/] as const;
+
+function resolveDefaultActFirstScore(toolName: string): number | undefined {
+  const key = normalizeToolName(toolName);
+  if (!key) return undefined;
+  if (/^calendar(?:[_.-](add|create|update))?$/.test(key)) {
+    return 0.8;
+  }
+  if (ACT_FIRST_BLOCK_PATTERNS.some((pattern) => pattern.test(key))) {
+    return 0.2;
+  }
+  if (ACT_FIRST_AUTO_PATTERNS.some((pattern) => pattern.test(key))) {
+    return 1.0;
+  }
+  if (ACT_FIRST_CONFIRM_PATTERNS.some((pattern) => pattern.test(key))) {
+    return 0.5;
+  }
+  return undefined;
+}
+
+export function buildDefaultActFirstToolPolicyMeta(
+  tools: ReadonlyArray<Pick<AnyAgentTool, "name">>,
+): ToolPolicyMeta | undefined {
+  const reversibilityScore: Record<string, number> = {};
+  for (const tool of tools) {
+    const key = normalizeToolName(tool.name);
+    const score = resolveDefaultActFirstScore(tool.name);
+    if (!key || score === undefined) continue;
+    reversibilityScore[key] = score;
+  }
+  return Object.keys(reversibilityScore).length > 0 ? { reversibilityScore } : undefined;
+}
+
 // ── Default step builder ──────────────────────────────────────────────────────
 
 export function buildDefaultToolPolicyPipelineSteps(params: {

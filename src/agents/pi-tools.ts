@@ -7,6 +7,7 @@ import { logWarn } from "../logger.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
+import type { ApprovalSurface } from "./approval-surface.js";
 import { resolveAgentConfig } from "./agent-scope.js";
 import { createApplyPatchTool } from "./apply-patch.js";
 import {
@@ -51,6 +52,7 @@ import { wrapToolWithEnforcement } from "./tool-policy-enforce.js";
 import { getSessionRateLimitStore, InMemoryRateLimitStore } from "./tool-policy-rate-limit-store.js";
 import {
   applyToolPolicyPipeline,
+  buildDefaultActFirstToolPolicyMeta,
   buildDefaultToolPolicyPipelineSteps,
 } from "./tool-policy-pipeline.js";
 import {
@@ -75,6 +77,13 @@ const MEMORY_FLUSH_ALLOWED_TOOL_NAMES = new Set(["read", "write"]);
 function normalizeMessageProvider(messageProvider?: string): string | undefined {
   const normalized = messageProvider?.trim().toLowerCase();
   return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+function isActFirstEnabled(explicit?: boolean): boolean {
+  if (typeof explicit === "boolean") {
+    return explicit;
+  }
+  return process.env.OPENCLAW_ACT_FIRST?.trim() === "1";
 }
 
 function applyMessageProviderToolPolicy(
@@ -277,6 +286,10 @@ export function createOpenClawCodingTools(options?: {
   senderIsOwner?: boolean;
   /** Callback invoked when sessions_yield tool is called. */
   onYield?: (message: string) => Promise<void> | void;
+  /** Opt-in feature flag for act-first tool execution policy. */
+  actFirstEnabled?: boolean;
+  /** Optional approval callback for mid-risk tool confirmations. */
+  approvalSurface?: ApprovalSurface;
 }): AnyAgentTool[] {
   const execToolName = "exec";
   const sandbox = options?.sandbox?.enabled ? options.sandbox : undefined;
@@ -324,6 +337,7 @@ export function createOpenClawCodingTools(options?: {
     providerProfilePolicy,
     providerProfileAlsoAllow,
   );
+  const actFirstEnabled = isActFirstEnabled(options?.actFirstEnabled);
   // Prefer sessionKey for process isolation scope to prevent cross-session process visibility/killing.
   // Fallback to agentId if no sessionKey is available (e.g. legacy or global contexts).
   const scopeKey =
@@ -596,6 +610,15 @@ export function createOpenClawCodingTools(options?: {
         groupPolicy,
         agentId,
       }),
+      ...(actFirstEnabled
+        ? [
+            {
+              policy: undefined,
+              label: "act-first defaults",
+              meta: buildDefaultActFirstToolPolicyMeta(toolsByAuthorization),
+            },
+          ]
+        : []),
       { policy: sandbox?.tools, label: "sandbox tools.allow" },
       { policy: subagentPolicy, label: "subagent tools.allow" },
     ],
@@ -618,7 +641,11 @@ export function createOpenClawCodingTools(options?: {
     : new InMemoryRateLimitStore();
   // Wrap each tool with policy enforcement (requiresHuman fail-closed, rate-limit).
   const withEnforcement = normalized.map((tool) =>
-    wrapToolWithEnforcement(tool, subagentFiltered.meta, rateLimitStore),
+    wrapToolWithEnforcement(tool, subagentFiltered.meta, {
+      store: rateLimitStore,
+      actFirstEnabled,
+      approvalSurface: options?.approvalSurface,
+    }),
   );
   const withHooks = withEnforcement.map((tool) =>
     wrapToolWithBeforeToolCallHook(tool, {
