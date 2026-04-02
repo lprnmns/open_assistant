@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   _resetInteractionTrackerForTest,
   getActiveChannelId,
+  getActiveChannelType,
   getLastUserInteractionAt,
   recordUserInteraction,
   resolveActiveChannelIdFromInteraction,
@@ -19,11 +20,12 @@ describe("InteractionTracker", () => {
   it("starts with undefined state", () => {
     expect(getLastUserInteractionAt()).toBeUndefined();
     expect(getActiveChannelId()).toBeUndefined();
+    expect(getActiveChannelType()).toBeUndefined();
   });
 
   it("recordUserInteraction sets lastUserInteractionAt to approximately now", () => {
     const before = Date.now();
-    recordUserInteraction("telegram");
+    recordUserInteraction("telegram", "telegram");
     const after = Date.now();
     const ts = getLastUserInteractionAt();
     expect(ts).toBeGreaterThanOrEqual(before);
@@ -31,27 +33,40 @@ describe("InteractionTracker", () => {
   });
 
   it("recordUserInteraction sets activeChannelId", () => {
-    recordUserInteraction("discord");
-    expect(getActiveChannelId()).toBe("discord");
+    recordUserInteraction("discord:channel:123", "discord");
+    expect(getActiveChannelId()).toBe("discord:channel:123");
+  });
+
+  it("recordUserInteraction stores activeChannelType when provided", () => {
+    recordUserInteraction("telegram:123", "telegram");
+    expect(getActiveChannelType()).toBe("telegram");
+  });
+
+  it("recordUserInteraction leaves activeChannelType undefined when absent", () => {
+    recordUserInteraction("route-only");
+    expect(getActiveChannelId()).toBe("route-only");
+    expect(getActiveChannelType()).toBeUndefined();
   });
 
   it("subsequent interactions update both values", () => {
-    recordUserInteraction("telegram");
-    recordUserInteraction("whatsapp");
-    expect(getActiveChannelId()).toBe("whatsapp");
+    recordUserInteraction("telegram:123", "telegram");
+    recordUserInteraction("whatsapp:+15550001111", "whatsapp");
+    expect(getActiveChannelId()).toBe("whatsapp:+15550001111");
+    expect(getActiveChannelType()).toBe("whatsapp");
   });
 
   it("reset clears both values", () => {
-    recordUserInteraction("telegram");
+    recordUserInteraction("telegram:123", "telegram");
     _resetInteractionTrackerForTest();
     expect(getLastUserInteractionAt()).toBeUndefined();
     expect(getActiveChannelId()).toBeUndefined();
+    expect(getActiveChannelType()).toBeUndefined();
   });
 
   it("each call updates the timestamp monotonically", () => {
-    recordUserInteraction("telegram");
+    recordUserInteraction("telegram:123", "telegram");
     const t1 = getLastUserInteractionAt()!;
-    recordUserInteraction("telegram");
+    recordUserInteraction("telegram:123", "telegram");
     const t2 = getLastUserInteractionAt()!;
     expect(t2).toBeGreaterThanOrEqual(t1);
   });

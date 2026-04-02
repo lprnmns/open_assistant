@@ -1,3 +1,5 @@
+import type { OriginatingChannelType } from "../auto-reply/templating.js";
+
 /**
  * src/consciousness/types.ts — Consciousness Loop shared type definitions
  *
@@ -147,11 +149,17 @@ export type WorldSnapshot = {
   externalWorldEvents: string[];
 
   /**
-   * Human-readable label for the owner's currently active channel.
-   * Used when SEND_MESSAGE is decided.
-   * undefined = no channel is active; SEND_MESSAGE should fall back to default.
+   * Stable route key for the owner's currently active channel.
+   * Examples: "telegram:123", "channel:C123", "signal:+1555".
+   * undefined = no channel is active; SEND_MESSAGE is dropped silently.
    */
   activeChannelId: string | undefined;
+
+  /**
+   * Channel/provider type associated with activeChannelId.
+   * Needed for provider-aware transport routing of proactive messages.
+   */
+  activeChannelType?: OriginatingChannelType | undefined;
 
   /**
    * Buffered events from external surfaces (owner channel + third-party contacts).
@@ -307,6 +315,20 @@ export type ConsciousnessConfig = {
    * Always "consciousness" — exposed here so the cost store records it.
    */
   readonly llmSource: "consciousness";
+
+  /**
+   * Minimum interval between proactive SEND_MESSAGE dispatches.
+   * Rate-limits the background loop so repeated wake reasons do not spam.
+   * Default: 3_600_000 (1 h)
+   */
+  proactiveMessageMinIntervalMs: number;
+
+  /**
+   * Maximum number of characters allowed in a proactive SEND_MESSAGE payload.
+   * Longer messages are truncated before transport delivery.
+   * Default: 280
+   */
+  proactiveMessageMaxContentChars: number;
 };
 
 /**
@@ -323,6 +345,8 @@ export const DEFAULT_CONSCIOUSNESS_CONFIG: ConsciousnessConfig = {
   sleepEndHourUtc: 7,
   postConsolidationDelayMs: 300_000,
   llmSource: "consciousness",
+  proactiveMessageMinIntervalMs: 3_600_000,
+  proactiveMessageMaxContentChars: 280,
 };
 
 // ── Consciousness runtime state ───────────────────────────────────────────────

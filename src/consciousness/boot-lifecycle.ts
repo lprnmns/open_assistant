@@ -9,29 +9,29 @@
  *
  * When enabled, this module:
  *   1. Creates a PendingReflectionQueue instance
- *   2. Constructs SnapshotAdapters (minimal wiring for Sub-Task 9.1;
- *      real DB/Redis adapters are added incrementally in 9.2+)
+ *   2. Constructs SnapshotAdapters from real in-process interaction sources
  *   3. Calls startConsciousnessLoop() with the wired adapters
  *   4. Registers SIGTERM / SIGINT handlers for graceful shutdown
  *   5. Returns a cleanup function for the call-site finally block
  *
- * Sub-Task 9.1 scope (minimal wiring):
+ * Sub-Task 9.2 scope:
  *   - pendingNoteCount → PendingReflectionQueue.count()
  *   - lastUserInteractionAt → in-process InteractionTracker
- *   - activeChannelId → in-process InteractionTracker route key
+ *   - activeChannelId / activeChannelType → in-process InteractionTracker route
  *   - firedTriggerIds → [] (no trigger registry yet)
- *   - sendToChannel → no-op (real transport wired in 9.2)
- *   - appendNote → no-op (brain ingestion wired in 9.2)
- *
- * These no-op defaults mean the scheduler runs but does not produce
- * visible output. The loop's existence in the process is the acceptance
- * criterion for Sub-Task 9.1; real dispatching is scoped to 9.2.
+ *   - sendToChannel → routeReply() for routable channels
+ *   - appendNote → no-op (brain ingestion wired in a later sub-task)
  */
 
 import process from "node:process";
 import { startConsciousnessLoop } from "./boot.js";
 import type { ConsciousnessScheduler } from "./boot.js";
-import { getActiveChannelId, getLastUserInteractionAt } from "./interaction-tracker.js";
+import { DispatchAuditLog } from "./audit.js";
+import {
+  getActiveChannelId,
+  getActiveChannelType,
+  getLastUserInteractionAt,
+} from "./interaction-tracker.js";
 import { PendingReflectionQueue } from "./reflection-queue.js";
 import { buildRealWorldSnapshot } from "./snapshot.js";
 
@@ -44,6 +44,8 @@ export type ConsciousnessLifecycle = {
   scheduler: ConsciousnessScheduler;
   /** The reflection queue that feeds pendingNoteCount. */
   reflectionQueue: PendingReflectionQueue;
+  /** In-memory audit trail for proactive send attempts. */
+  auditLog: DispatchAuditLog;
 };
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -64,6 +66,8 @@ export function maybeStartConsciousnessLoop(
   }
 
   const reflectionQueue = new PendingReflectionQueue();
+  const auditLog = new DispatchAuditLog();
+  const proactiveState: { lastSentAt?: number } = {};
 
   const scheduler = startConsciousnessLoop({
     buildSnapshot: () =>
@@ -74,13 +78,36 @@ export function maybeStartConsciousnessLoop(
         getPendingNoteCount: () => reflectionQueue.count(),
         getFiredTriggerIds: () => [],
         getActiveChannelId: () => getActiveChannelId(),
+        getActiveChannelType: () => getActiveChannelType(),
         getLastTickAt: () => undefined,
       }),
     dispatch: {
-      // No-op dispatch for 9.1: scheduler runs but produces no visible output.
-      // Real transport (gateway sendToChannel) is wired in Sub-Task 9.2.
-      sendToChannel: async (_channelId: string, _content: string) => {},
+      sendToChannel: async (channelId: string, content: string, channelType?: string) => {
+        const { loadConfig } = await import("../config/config.js");
+        const { isRoutableChannel, routeReply } = await import(
+          "../auto-reply/reply/route-reply.js"
+        );
+
+        if (!channelType || !isRoutableChannel(channelType)) {
+          throw new Error(
+            `Active channel is not routable for consciousness dispatch: ${String(channelType ?? "(unknown)")}`,
+          );
+        }
+
+        const result = await routeReply({
+          payload: { text: content },
+          channel: channelType,
+          to: channelId,
+          cfg: loadConfig(),
+          mirror: false,
+        });
+        if (!result.ok) {
+          throw new Error(result.error ?? `Failed to route proactive message to ${channelType}`);
+        }
+      },
       appendNote: async (_content: string) => {},
+      proactiveState,
+      auditLog,
     },
   });
 
@@ -99,7 +126,7 @@ export function maybeStartConsciousnessLoop(
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
 
-  return { stop, scheduler, reflectionQueue };
+  return { stop, scheduler, reflectionQueue, auditLog };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

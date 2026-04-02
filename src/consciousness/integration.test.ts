@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DispatchAuditLog } from "./audit.js";
 import { dispatchDecision, type DispatchContext } from "./integration.js";
 import {
   DEFAULT_CONSCIOUSNESS_CONFIG,
@@ -19,6 +20,7 @@ function makeSnap(overrides: Partial<WorldSnapshot> = {}): WorldSnapshot {
     dueCronExpressions: [],
     externalWorldEvents: [],
     activeChannelId: "web-chat",
+    activeChannelType: "webchat",
     lastTickAt: undefined,
     effectiveSilenceThresholdMs: DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs,
     ...overrides,
@@ -29,23 +31,28 @@ function makeCtx(overrides: Partial<DispatchContext> = {}): DispatchContext {
   return {
     sendToChannel: vi.fn().mockResolvedValue(undefined),
     appendNote: vi.fn().mockResolvedValue(undefined),
+    proactiveState: {},
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 // ── SEND_MESSAGE ──────────────────────────────────────────────────────────────
 
 describe("dispatchDecision — SEND_MESSAGE", () => {
   it("calls sendToChannel with the snap's activeChannelId and messageContent", async () => {
     const ctx = makeCtx();
-    const snap = makeSnap({ activeChannelId: "telegram-123" });
+    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
     const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello!" };
 
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(true);
     expect(ctx.sendToChannel).toHaveBeenCalledOnce();
-    expect(ctx.sendToChannel).toHaveBeenCalledWith("telegram-123", "Hello!");
+    expect(ctx.sendToChannel).toHaveBeenCalledWith("telegram-123", "Hello!", "telegram");
     expect(ctx.appendNote).not.toHaveBeenCalled();
   });
 
@@ -72,9 +79,65 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     expect(calls.every(([ch]) => ch === "channel-A")).toBe(true);
   });
 
+  it("enforces proactive rate limits and records an audit entry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+
+    const auditLog = new DispatchAuditLog();
+    const ctx = makeCtx({
+      proactiveState: { lastSentAt: NOW - 10_000 },
+      auditLog,
+    });
+    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
+    const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello again" };
+
+    const result = await dispatchDecision(decision, snap, ctx, {
+      ...DEFAULT_CONSCIOUSNESS_CONFIG,
+      proactiveMessageMinIntervalMs: 60_000,
+    });
+
+    expect(result.dispatched).toBe(false);
+    expect(ctx.sendToChannel).not.toHaveBeenCalled();
+    expect(auditLog.list()).toEqual([
+      expect.objectContaining({
+        channelId: "telegram-123",
+        channelType: "telegram",
+        contentPreview: "Hello again",
+        decision: "rate_limited",
+      }),
+    ]);
+  });
+
+  it("caps proactive content before sending and auditing", async () => {
+    const auditLog = new DispatchAuditLog();
+    const ctx = makeCtx({ auditLog });
+    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
+    const decision: TickDecision = {
+      action: "SEND_MESSAGE",
+      messageContent: "This proactive message is intentionally too long.",
+    };
+
+    const result = await dispatchDecision(decision, snap, ctx, {
+      ...DEFAULT_CONSCIOUSNESS_CONFIG,
+      proactiveMessageMaxContentChars: 12,
+    });
+
+    expect(result.dispatched).toBe(true);
+    expect(ctx.sendToChannel).toHaveBeenCalledWith("telegram-123", "This proa...", "telegram");
+    expect(auditLog.list()).toEqual([
+      expect.objectContaining({
+        channelId: "telegram-123",
+        contentPreview: "This proa...",
+        decision: "sent",
+      }),
+    ]);
+  });
+
   it("returns dispatched:false with error when sendToChannel throws — does not rethrow", async () => {
+    const auditLog = new DispatchAuditLog();
     const ctx = makeCtx({
       sendToChannel: vi.fn().mockRejectedValue(new Error("network error")),
+      auditLog,
     });
     const snap = makeSnap();
     const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hi" };
@@ -83,6 +146,12 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
 
     expect(result.dispatched).toBe(false);
     expect(result.error?.message).toBe("network error");
+    expect(auditLog.list()).toEqual([
+      expect.objectContaining({
+        channelId: "web-chat",
+        decision: "send_error",
+      }),
+    ]);
   });
 });
 

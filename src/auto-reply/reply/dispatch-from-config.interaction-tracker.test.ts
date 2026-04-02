@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../../config/config.js";
 import {
   _resetInteractionTrackerForTest,
   getActiveChannelId,
+  getActiveChannelType,
   getLastUserInteractionAt,
 } from "../../consciousness/interaction-tracker.js";
 import type { ReplyDispatcher } from "./reply-dispatcher.js";
@@ -39,6 +40,7 @@ describe("dispatchReplyFromConfig interaction tracking", () => {
     });
 
     expect(getActiveChannelId()).toBe("telegram:123456789");
+    expect(getActiveChannelType()).toBe("telegram");
     expect(getLastUserInteractionAt()).toBeTypeOf("number");
   });
 
@@ -56,5 +58,6 @@ describe("dispatchReplyFromConfig interaction tracking", () => {
     });
 
     expect(getActiveChannelId()).toBe("channel:C123");
+    expect(getActiveChannelType()).toBe("whatsapp");
   });
 });
