@@ -14,7 +14,13 @@ import { createMemoryRecallPipeline } from "../consciousness/brain/recall.js";
 import { resolveTemporalRange } from "../consciousness/brain/temporal-resolver.js";
 import { makeMemoryNote, type Embedder, type Hippocampus } from "../consciousness/brain/types.js";
 import { detectCognitiveMode } from "../consciousness/cognitive-load.js";
-import { DEFAULT_CONSCIOUSNESS_CONFIG, type WorldSnapshot } from "../consciousness/types.js";
+import { dispatchDecision } from "../consciousness/integration.js";
+import { tick } from "../consciousness/loop.js";
+import {
+  DEFAULT_CONSCIOUSNESS_CONFIG,
+  makeInitialConsciousnessState,
+  type WorldSnapshot,
+} from "../consciousness/types.js";
 import { runWatchdog } from "../consciousness/watchdog.js";
 
 export type SmokeStatus = "pass" | "partial" | "fail";
@@ -64,7 +70,13 @@ function buildWorldSnapshot(
   };
 }
 
-export function simulateSilenceScenario(now = Date.UTC(2026, 3, 2, 9, 0, 0, 0)): SmokeScenarioReport {
+const DETERMINISTIC_PROACTIVE_MESSAGE =
+  "Uzun süredir sessizsin — her şey yolunda mı? Yardımcı olabileceğim bir şey varsa buradayım.";
+
+export async function simulateSilenceScenario(
+  now = Date.UTC(2026, 3, 2, 9, 0, 0, 0),
+): Promise<SmokeScenarioReport> {
+  // ── Watchdog wake checks (pure, $0) ────────────────────────────────────────
   const silenceOnlySnapshot = buildWorldSnapshot({
     capturedAt: now,
     lastUserInteractionAt: now - 3 * DAY_MS,
@@ -81,17 +93,58 @@ export function simulateSilenceScenario(now = Date.UTC(2026, 3, 2, 9, 0, 0, 0)):
     DEFAULT_CONSCIOUSNESS_CONFIG,
   );
 
+  // ── Full chain: wake → tick (fake LLM) → decision → dispatch ──────────────
+  const fakeLlmCall = async () => ({
+    content: JSON.stringify({
+      action: "SEND_MESSAGE",
+      messageContent: DETERMINISTIC_PROACTIVE_MESSAGE,
+    }),
+    model: "fake-deterministic",
+    usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+  });
+
+  const state = makeInitialConsciousnessState(DEFAULT_CONSCIOUSNESS_CONFIG);
+  const tickResult = await tick(silenceOnlySnapshot, state, { llmCall: fakeLlmCall });
+
+  // Track what dispatch sends
+  let dispatchedChannelId: string | undefined;
+  let dispatchedContent: string | undefined;
+  const dispatchCtx = {
+    sendToChannel: async (channelId: string, content: string) => {
+      dispatchedChannelId = channelId;
+      dispatchedContent = content;
+    },
+    appendNote: async () => {},
+  };
+
+  const dispatchResult = tickResult.decision
+    ? await dispatchDecision(tickResult.decision, silenceOnlySnapshot, dispatchCtx)
+    : undefined;
+
+  const decisionIsSend = tickResult.decision?.action === "SEND_MESSAGE";
+  const decisionContent =
+    tickResult.decision?.action === "SEND_MESSAGE"
+      ? tickResult.decision.messageContent
+      : undefined;
+  const fullChainPassed =
+    decisionIsSend &&
+    decisionContent === DETERMINISTIC_PROACTIVE_MESSAGE &&
+    dispatchResult?.dispatched === true &&
+    dispatchedChannelId === "telegram:owner-chat" &&
+    dispatchedContent === DETERMINISTIC_PROACTIVE_MESSAGE;
+
   return {
     id: "silence",
     status:
       silenceOnlyResult.wake &&
       silenceOnlyResult.reason === "SILENCE_THRESHOLD" &&
       silenceWithCalendarResult.wake &&
-      silenceWithCalendarResult.reason === "EXTERNAL_WORLD_DELTA"
-        ? "partial"
+      silenceWithCalendarResult.reason === "EXTERNAL_WORLD_DELTA" &&
+      fullChainPassed
+        ? "pass"
         : "fail",
     summary:
-      "The watchdog definitely wakes on long silence, and the same snapshot model also wakes on calendar/external deltas. Exact proactive copy is still live-LLM dependent, so the empathy/tone of the first message is not deterministically proven here.",
+      "Full deterministic chain proven: watchdog wakes on 3-day silence, tick() produces SEND_MESSAGE via injected LLM, dispatchDecision() routes content to the correct channel.",
     checks: [
       {
         label: "pure-3-day-silence",
@@ -111,15 +164,30 @@ export function simulateSilenceScenario(now = Date.UTC(2026, 3, 2, 9, 0, 0, 0)):
           : "Watchdog stayed asleep when an external event was present.",
       },
       {
-        label: "exact-proactive-copy",
-        passed: false,
-        detail:
-          "The loop still generates the actual user-facing text through live proxyCall() in tick(); this harness proves wake semantics, not the final natural-language wording.",
+        label: "tick-decision-is-send-message",
+        passed: decisionIsSend && decisionContent === DETERMINISTIC_PROACTIVE_MESSAGE,
+        detail: decisionIsSend
+          ? `action=SEND_MESSAGE, content="${decisionContent}"`
+          : `action=${tickResult.decision?.action ?? "none"}`,
+      },
+      {
+        label: "dispatch-routes-to-active-channel",
+        passed:
+          dispatchResult?.dispatched === true &&
+          dispatchedChannelId === "telegram:owner-chat" &&
+          dispatchedContent === DETERMINISTIC_PROACTIVE_MESSAGE,
+        detail: dispatchResult?.dispatched
+          ? `channelId=${dispatchedChannelId}, content="${dispatchedContent}"`
+          : `dispatched=false, error=${dispatchResult?.error?.message ?? "none"}`,
       },
     ],
     artifacts: {
       silenceOnlyResult,
       silenceWithCalendarResult,
+      tickDecision: tickResult.decision,
+      dispatchResult,
+      dispatchedChannelId,
+      dispatchedContent,
     },
   };
 }
@@ -423,7 +491,7 @@ export function simulateCognitiveLoadScenario(): SmokeScenarioReport {
 
 export async function runAllRuntimeSmokeScenarios(): Promise<readonly SmokeScenarioReport[]> {
   return [
-    simulateSilenceScenario(),
+    await simulateSilenceScenario(),
     await simulateActFirstScenario(),
     await simulateChronoSpatialScenario(),
     simulateCognitiveLoadScenario(),
