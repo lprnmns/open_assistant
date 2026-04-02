@@ -211,11 +211,12 @@ export async function simulateActFirstScenario(): Promise<SmokeScenarioReport> {
     status:
       calendarDecision.mode === "auto" &&
       editDecision.mode === "confirm" &&
-      emailDecision.mode === "blocked"
-        ? "partial"
+      emailDecision.mode === "blocked" &&
+      emailApprovedDecision.mode === "auto"
+        ? "pass"
         : "fail",
     summary:
-      "Act-first is real: low-risk reversible work auto-executes, mid-band work asks approval, and third-party send paths are fail-closed. The gap versus the original product story is that email.send is blocked outright instead of becoming an approval-confirm action after human approval.",
+      "Act-first covers the full spectrum: high-reversibility auto-executes, mid-band asks confirmation, low-reversibility blocks but unlocks on explicit human approval.",
     checks: [
       {
         label: "calendar-add-auto",
@@ -231,9 +232,17 @@ export async function simulateActFirstScenario(): Promise<SmokeScenarioReport> {
         detail: `decision=${editDecision.mode}, approvalRequests=${approvalRequests.length}`,
       },
       {
-        label: "email-send-is-not-confirm",
-        passed: emailDecision.mode === "blocked" && emailApprovedDecision.mode === "blocked",
+        label: "email-send-blocked-without-approval",
+        passed:
+          emailDecision.mode === "blocked" &&
+          !emailDecision.allowed &&
+          emailDecision.reason === "approval-required-low-reversibility",
         detail: emailError || "email.send did not throw as expected",
+      },
+      {
+        label: "email-send-auto-with-human-approval",
+        passed: emailApprovedDecision.mode === "auto" && emailApprovedDecision.allowed === true,
+        detail: `decision=${emailApprovedDecision.mode}, allowed=${emailApprovedDecision.allowed}`,
       },
     ],
     artifacts: {

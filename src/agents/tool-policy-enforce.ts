@@ -36,7 +36,7 @@ export type ToolEnforcementDecision =
         | "requires-human"
         | "rate-limit-exceeded"
         | "missing-reversibility-score"
-        | "low-reversibility-score";
+        | "approval-required-low-reversibility";
       message: string;
     };
 
@@ -202,11 +202,17 @@ export function evaluateToolEnforcement(params: {
   }
   const score = rawScore;
   if (score < 0.3) {
+    // Low-reversibility tools can be unlocked by explicit human approval.
+    // Unlike missing-reversibility-score (which is always fail-closed), this
+    // path allows the human to accept the risk after reviewing the call.
+    if (params.humanApproved === true) {
+      return { mode: "auto", allowed: true };
+    }
     return {
       mode: "blocked",
       allowed: false,
-      reason: "low-reversibility-score",
-      message: `Tool '${params.toolName}' is too risky to auto-run (reversibilityScore=${score.toFixed(2)})`,
+      reason: "approval-required-low-reversibility",
+      message: `Tool '${params.toolName}' requires explicit approval before execution (reversibilityScore=${score.toFixed(2)})`,
     };
   }
   if (score < 0.7) {
@@ -246,6 +252,37 @@ export function wrapToolWithEnforcement<T extends { name: string }>(
         callCounts: options.store,
         actFirstEnabled: options.actFirstEnabled,
       });
+      if (!decision.allowed && decision.reason === "approval-required-low-reversibility") {
+        // Low-reversibility tools get the same interactive approval path as
+        // mid-band confirm tools — the human can still approve them.
+        if (!options.approvalSurface) {
+          throw new Error(
+            `Tool '${tool.name}' needs interactive approval, but no approval surface is available`,
+          );
+        }
+        return (async () => {
+          const approved = await requestToolApproval({
+            surface: options.approvalSurface!,
+            toolName: tool.name,
+            args,
+            confirmPrompt: decision.message,
+            timeoutMs: options.approvalTimeoutMs,
+          });
+          if (!approved) {
+            throw new Error(`Tool '${tool.name}' approval denied or timed out`);
+          }
+          options.store?.record(tool.name);
+          const result = await original(...args);
+          if (!options.actFirstEnabled) {
+            return result;
+          }
+          return buildExecutionResult({
+            toolName: tool.name,
+            rawResult: result,
+            options,
+          });
+        })();
+      }
       if (!decision.allowed) {
         throw new Error(decision.message);
       }
