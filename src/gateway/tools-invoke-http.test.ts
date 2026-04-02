@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { runBeforeToolCallHook as runBeforeToolCallHookType } from "../agents/pi-tools.before-tool-call.js";
 
 type RunBeforeToolCallHook = typeof runBeforeToolCallHookType;
@@ -156,6 +156,27 @@ vi.mock("../agents/openclaw-tools.js", () => {
           observedFileFormat: input.fileFormat,
         };
       },
+    },
+    // Act-first test tools (auto / confirm / blocked spectrum)
+    {
+      name: "read",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ ok: true, data: "file contents" }),
+    },
+    {
+      name: "write",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ ok: true }),
+    },
+    {
+      name: "calendar.create",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ ok: true }),
+    },
+    {
+      name: "email.send",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ ok: true }),
     },
   ];
 
@@ -670,6 +691,73 @@ describe("POST /tools/invoke", () => {
     expect(crashBody.ok).toBe(false);
     expect(crashBody.error?.type).toBe("tool_error");
     expect(crashBody.error?.message).toBe("tool execution failed");
+  });
+
+  describe("act-first enforcement over HTTP", () => {
+    beforeEach(() => {
+      process.env.OPENCLAW_ACT_FIRST = "1";
+    });
+    afterEach(() => {
+      delete process.env.OPENCLAW_ACT_FIRST;
+    });
+
+    it("auto-allows high-reversibility tool (read)", async () => {
+      setMainAllowedTools({ allow: ["read"] });
+      const res = await invokeToolAuthed({ tool: "read", sessionKey: "main" });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+    });
+
+    it("returns 409 approval_required for mid-score tool (write)", async () => {
+      setMainAllowedTools({ allow: ["write"] });
+      const res = await invokeToolAuthed({ tool: "write", sessionKey: "main" });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.ok).toBe(false);
+      expect(body.error?.type).toBe("approval_required");
+    });
+
+    it("allows mid-score tool when humanApproved is true", async () => {
+      setMainAllowedTools({ allow: ["write"] });
+      const res = await postToolsInvoke({
+        port: sharedPort,
+        headers: gatewayAuthHeaders(),
+        body: { tool: "write", args: {}, sessionKey: "main", humanApproved: true },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+    });
+
+    it("auto-allows high-score calendar.create", async () => {
+      setMainAllowedTools({ allow: ["calendar.create"] });
+      const res = await invokeToolAuthed({ tool: "calendar.create", sessionKey: "main" });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+    });
+
+    it("returns 409 approval_required for low-score email.send", async () => {
+      setMainAllowedTools({ allow: ["email.send"] });
+      const res = await invokeToolAuthed({ tool: "email.send", sessionKey: "main" });
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.ok).toBe(false);
+      expect(body.error?.type).toBe("approval_required");
+    });
+
+    it("allows email.send when humanApproved is true", async () => {
+      setMainAllowedTools({ allow: ["email.send"] });
+      const res = await postToolsInvoke({
+        port: sharedPort,
+        headers: gatewayAuthHeaders(),
+        body: { tool: "email.send", args: {}, sessionKey: "main", humanApproved: true },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+    });
   });
 
   it("passes deprecated format alias through invoke payloads even when schema omits it", async () => {
