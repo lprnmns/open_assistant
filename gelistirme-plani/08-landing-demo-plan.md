@@ -335,25 +335,18 @@ S4-S6 (runtime davranisi, yalnizca OA tarafinda dogrulanmis):
 
 **Icerik:** Demo recording + landing page'e embed + CTA formu
 
-**Durum: PARTIAL / PENDING** — CTA dürüst pending state'e getirildi, ama aşağıdaki iki kabul kriteri henüz karşılanmadı:
+**Durum: COMPLETE (static delivery)** — terminal GIF asset ve zero-backend early access formu eklendi.
 
 **Tamamlananlar:**
-- [x] İkincil CTA'lar yapılandırıldı: "See the Benchmark" (#benchmark anchor), "Terminal Demo" disabled/Recording Pending
+- [x] Ikincil CTA'lar yapilandirildi: "See the Benchmark" (#benchmark anchor), "Watch the Demo GIF" (`landing/demo.gif`)
 - [x] SaaS / enterprise vaadi yok
-- [x] "Watch the Demo" butonu demo asset olmadan yanıltıcı olmaktan çıkarıldı
-- [x] `scripts/capture-demo.sh` — asciinema + agg capture workflow hazır
+- [x] Terminal proof-tour GIF asset mevcut: `landing/demo.gif`
+- [x] GIF repo icindeki benchmark/runtime kanitlarindan render ediliyor: `scripts/render-landing-demo.py`
+- [x] Demo kapsami (5 sahne): note recall / distraction resistance / owner drain / third-party guard / quiet tick
+- [x] CTA artik gercek bir HTML form iceriyor (`FormSubmit` action ile static email collection)
 
-**8.6a — Demo Asset (PENDING: user recording required):**
-- [ ] `landing/demo.cast` ve `landing/demo.gif` mevcut değil — çalışan sistem + asciinema gerektirir
-- Capture script: `bash scripts/capture-demo.sh`
-- Önkoşullar: `asciinema` + `agg` kurulu, `pnpm dev` + scheduler ayakta
-- Demo kapsamı (5 sahne): note recall · distraction resistance · owner drain · third-party guard · quiet tick
-- Asset path: `landing/demo.gif` (embed: `<img src="demo.gif" alt="...">`)
-
-**8.6b — Email Form (PENDING: Formspree endpoint gerekiyor):**
-- [ ] Formspree hesabı + endpoint URL kullanıcıdan gelecek
-- Form HTML hazır değil — endpoint olmadan kırık form göndermek yasak
-- Mevcut CTA `mailto:` link olarak duruyor (dürüst fallback)
+**Operasyonel not:**
+- `FormSubmit` delivery zincirinin ilk canli gonderimde inbox dogrulamasi gerektirmesi mumkundur; bu deploy-time operasyondur, landing kod eksikligi degildir.
 
 ### Sub-Task 8.7 — Claim Audit + QA Review
 

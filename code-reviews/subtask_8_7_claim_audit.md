@@ -2,7 +2,7 @@
 
 **Date:** 2026-03-31
 **Reviewer:** Claude
-**Status:** REVISED — pending 8.6 demo asset
+**Status:** REVISED — static CTA delivery added
 
 ---
 
@@ -146,17 +146,19 @@
 ### Section 7: CTA
 
 **Headline:** "Ready to explore?"
-**Subhead:** "Open Assistant is in early access."
+**Subhead:** "Watch the terminal proof tour, then request early access with your own evaluation goals."
 
-**Buttons:**
-- "Request Early Access"
+**Primary Form / Actions:**
+- "Request Early Access" form (static POST via FormSubmit)
 - "See the Benchmark"
-- "Watch the Demo"
+- "Watch the Demo GIF"
 
 **Claim Check:**
 - ✅ "Early access" is accurate (product in beta)
+- ✅ Demo asset exists (`landing/demo.gif`) and is linked directly
+- ✅ Early access input is now a real HTML form, not a fake button
 - ✅ No SaaS promise, no production guarantee, no uptime claim
-- ✅ Buttons point to external actions (not making claims in themselves)
+- ✅ CTA actions map to real destinations (form submit / anchor / GIF asset)
 - ✅ No "try free" or "no credit card" claim
 
 **Status:** PASS
@@ -212,7 +214,7 @@
 
 ## QA Sign-Off
 
-**Claim Discipline Status:** ✅ PASSED (for completed sections)
+**Claim Discipline Status:** ✅ PASSED
 
 **Summary:**
 - All safe claims (S1-S6) are present and well-supported
@@ -221,8 +223,9 @@
 - OpenRouter lane claim discipline strictly maintained
 - No hidden failures or overclaimed capabilities
 - "No vendor lock-in" narrowed to "Bring your own keys across four providers" — more accurate to evidence
+- CTA now points to a real GIF asset and a real static form instead of pending placeholders
 
-**Approval:** Claim discipline passed for completed sections. Final publication pending 8.6 demo asset.
+**Approval:** Landing copy and CTA claim discipline are ready for publication. On the first live submission, FormSubmit may require one-time inbox confirmation.
 
 **Reviewer:** Claude
 **Date:** 2026-03-31

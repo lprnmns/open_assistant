@@ -463,18 +463,66 @@
   <section class="cta-section" id="cta">
     <div class="container">
       <h2>Ready to explore?</h2>
-      <p class="section-subtitle">Open Assistant is in early access. The benchmark and test suites are public.</p>
+      <p class="section-subtitle">Watch the terminal proof tour, then request early access with your own evaluation goals.</p>
 
-      <div class="cta-buttons">
-        <a class="btn btn-primary" href="mailto:early-access@open-assistant.dev">Request Early Access</a>
-        <a class="btn btn-secondary" href="#benchmark">See the Benchmark</a>
-        <span class="btn btn-ghost" aria-disabled="true">
-          Terminal Demo
-          <span class="coming-soon-badge">Recording Pending</span>
-        </span>
+      <div class="cta-layout">
+        <div class="demo-card">
+          <div class="demo-card-header">
+            <div>
+              <h3>Terminal Proof Tour</h3>
+              <p>Five verified scenes: continuity first, guarded runtime second.</p>
+            </div>
+            <span class="coming-soon-badge live-badge">GIF Ready</span>
+          </div>
+
+          <a class="demo-link" href="demo.gif" target="_blank" rel="noopener">
+            <img
+              class="demo-preview"
+              src="demo.gif"
+              alt="Terminal proof tour showing delayed note recall, distraction resistance, owner event drain, third-party guard, and quiet no-op ticks."
+              loading="lazy"
+            >
+          </a>
+
+          <p class="cta-note">Covers: note recall / distraction resistance / owner event drain / third-party guard / quiet ticks</p>
+
+          <div class="cta-buttons">
+            <a class="btn btn-secondary" href="#benchmark">See the Benchmark</a>
+            <a class="btn btn-ghost-link" href="demo.gif" target="_blank" rel="noopener">Watch the Demo GIF</a>
+          </div>
+        </div>
+
+        <form
+          class="early-access-form"
+          action="https://formsubmit.co/early-access@open-assistant.dev"
+          method="POST"
+        >
+          <h3>Request Early Access</h3>
+          <p class="form-intro">Send your email and what you want to compare first. No SaaS promise, no fake waitlist.</p>
+
+          <input type="hidden" name="_subject" value="Open Assistant early access request">
+          <input type="hidden" name="_template" value="table">
+          <input type="hidden" name="_captcha" value="false">
+
+          <label class="form-field">
+            <span>Work email</span>
+            <input type="email" name="email" placeholder="you@company.com" required>
+          </label>
+
+          <label class="form-field">
+            <span>What are you comparing against?</span>
+            <input type="text" name="comparison" placeholder="OpenClaw, ChatGPT, internal tooling">
+          </label>
+
+          <label class="form-field">
+            <span>What do you want to test first?</span>
+            <textarea name="goal" rows="4" placeholder="Example: delayed note recall, owner event drain, or quiet no-op ticks."></textarea>
+          </label>
+
+          <button class="btn btn-primary" type="submit">Request Early Access</button>
+          <p class="form-note">Form submits to <code>early-access@open-assistant.dev</code> through FormSubmit so the page stays static.</p>
+        </form>
       </div>
-
-      <p class="cta-note">Demo covers: note recall · distraction resistance · owner event drain · third-party guard · quiet ticks</p>
     </div>
   </section>
 
