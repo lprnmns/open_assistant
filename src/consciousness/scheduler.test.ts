@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ConsciousnessAuditLog } from "./audit.js";
 import { ConsciousnessScheduler } from "./scheduler.js";
 import { type DispatchContext } from "./integration.js";
 import {
@@ -848,5 +849,77 @@ describe("ConsciousnessScheduler — EventBuffer lifecycle", () => {
     // Event must appear in both ticks since it was never drained
     expect(capturedBodies[0]).toContain("persist-me");
     expect(capturedBodies[1]).toContain("persist-me");
+  });
+});
+
+describe("ConsciousnessScheduler — audit trail", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    process.env.LITELLM_PROXY_URL = "http://litellm-test:4000";
+    process.env.LITELLM_MASTER_KEY = "sk-test-master";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    delete process.env.LITELLM_PROXY_URL;
+    delete process.env.LITELLM_MASTER_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  it("writes a tick audit entry for wake=false ticks", async () => {
+    const auditLog = new ConsciousnessAuditLog();
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSnap()),
+      dispatch: makeDispatch(),
+      auditLog,
+    });
+
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    scheduler.stop();
+
+    expect(auditLog.list()).toEqual([
+      expect.objectContaining({
+        kind: "tick",
+        wake: false,
+        decision: undefined,
+        phase: "IDLE",
+        llmCallCount: 0,
+      }),
+    ]);
+  });
+
+  it("writes a tick audit entry for wake=true ticks", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        model: "claude-haiku",
+        choices: [{ message: { content: '{"action":"STAY_SILENT"}' } }],
+        usage: { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 },
+      }),
+    } as Response);
+
+    const auditLog = new ConsciousnessAuditLog();
+    const scheduler = new ConsciousnessScheduler({
+      buildSnapshot: vi.fn().mockResolvedValue(makeSnap({ firedTriggerIds: ["t1"] })),
+      dispatch: makeDispatch(),
+      auditLog,
+    });
+
+    scheduler.start();
+    await vi.advanceTimersByTimeAsync(cfg.minTickIntervalMs);
+    scheduler.stop();
+
+    expect(auditLog.list()).toEqual([
+      expect.objectContaining({
+        kind: "tick",
+        wake: true,
+        decision: "STAY_SILENT",
+        phase: "IDLE",
+        llmCallCount: 1,
+      }),
+    ]);
   });
 });

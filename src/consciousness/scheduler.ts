@@ -23,6 +23,7 @@
 
 import { tick, type TickContext, type TickResult } from "./loop.js";
 import { dispatchDecision, type DispatchContext } from "./integration.js";
+import { createTickAuditEntry, type ConsciousnessAuditLog } from "./audit.js";
 import type { MemoryRecallPipeline } from "./brain/types.js";
 import { evaluateConsolidationTrigger } from "./sleep/trigger.js";
 import type { ConsolidationPipeline } from "./sleep/consolidation.js";
@@ -56,6 +57,12 @@ export type SchedulerOptions = {
    * Useful for logging, telemetry, and test assertions.
    */
   onTick?: (result: TickResult) => void;
+
+  /**
+   * Optional passive audit sink for tick-level observability.
+   * This never affects scheduler behavior; write failures are swallowed by the sink.
+   */
+  auditLog?: ConsciousnessAuditLog;
 
   /**
    * Optional Living Brain components wired at boot.
@@ -256,6 +263,8 @@ export class ConsciousnessScheduler {
     if (result.decision !== undefined) {
       await dispatchDecision(result.decision, snap, this.options.dispatch, this.state.config);
     }
+
+    this.options.auditLog?.append(createTickAuditEntry({ result }));
 
     // ⑤ Notify telemetry / test observers
     this.options.onTick?.(result);

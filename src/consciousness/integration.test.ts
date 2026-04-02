@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DispatchAuditLog } from "./audit.js";
+import { ConsciousnessAuditLog } from "./audit.js";
 import { dispatchDecision, type DispatchContext } from "./integration.js";
 import {
   DEFAULT_CONSCIOUSNESS_CONFIG,
@@ -83,7 +83,7 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(NOW));
 
-    const auditLog = new DispatchAuditLog();
+    const auditLog = new ConsciousnessAuditLog();
     const ctx = makeCtx({
       proactiveState: { lastSentAt: NOW - 10_000 },
       auditLog,
@@ -100,16 +100,18 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     expect(ctx.sendToChannel).not.toHaveBeenCalled();
     expect(auditLog.list()).toEqual([
       expect.objectContaining({
+        kind: "dispatch",
         channelId: "telegram-123",
         channelType: "telegram",
-        contentPreview: "Hello again",
+        contentLength: "Hello again".length,
         decision: "rate_limited",
+        success: false,
       }),
     ]);
   });
 
   it("caps proactive content before sending and auditing", async () => {
-    const auditLog = new DispatchAuditLog();
+    const auditLog = new ConsciousnessAuditLog();
     const ctx = makeCtx({ auditLog });
     const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
     const decision: TickDecision = {
@@ -126,15 +128,18 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     expect(ctx.sendToChannel).toHaveBeenCalledWith("telegram-123", "This proa...", "telegram");
     expect(auditLog.list()).toEqual([
       expect.objectContaining({
+        kind: "dispatch",
         channelId: "telegram-123",
+        contentLength: "This proa...".length,
         contentPreview: "This proa...",
         decision: "sent",
+        success: true,
       }),
     ]);
   });
 
   it("returns dispatched:false with error when sendToChannel throws — does not rethrow", async () => {
-    const auditLog = new DispatchAuditLog();
+    const auditLog = new ConsciousnessAuditLog();
     const ctx = makeCtx({
       sendToChannel: vi.fn().mockRejectedValue(new Error("network error")),
       auditLog,
@@ -148,8 +153,11 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     expect(result.error?.message).toBe("network error");
     expect(auditLog.list()).toEqual([
       expect.objectContaining({
+        kind: "dispatch",
         channelId: "web-chat",
+        contentLength: 2,
         decision: "send_error",
+        success: false,
       }),
     ]);
   });
