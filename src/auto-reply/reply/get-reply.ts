@@ -11,6 +11,7 @@ import { resolveChannelModelOverride } from "../../channels/model-overrides.js";
 import { type OpenClawConfig, loadConfig } from "../../config/config.js";
 import { applyMergePatch } from "../../config/merge-patch.js";
 import { detectCognitiveMode } from "../../consciousness/cognitive-load.js";
+import { recordCognitiveModeTransition } from "../../consciousness/audit.js";
 import { defaultRuntime } from "../../runtime.js";
 import { normalizeStringEntries } from "../../shared/string-normalization.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
@@ -409,9 +410,15 @@ export async function getReplyFromConfig(
     workspaceDir,
   });
 
-  const cognitiveMode = detectCognitiveMode(
+  const cognitiveAssessment = detectCognitiveMode(
     ctx.BodyForAgent ?? ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "",
-  ).mode;
+  );
+  recordCognitiveModeTransition({
+    sessionKey,
+    mode: cognitiveAssessment.mode,
+    signals: cognitiveAssessment.signals,
+  });
+  const cognitiveMode = cognitiveAssessment.mode;
 
   return runPreparedReply({
     ctx,

@@ -16,7 +16,7 @@
  * Inbound messages must be handled by the gateway reply path only.
  */
 
-import { createDispatchAuditEntry, type DispatchAuditLog } from "./audit.js";
+import { createDispatchAuditEntry, type ConsciousnessAuditLog } from "./audit.js";
 import type { ConsciousnessConfig, TickDecision, WorldSnapshot } from "./types.js";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 
@@ -57,7 +57,7 @@ export type DispatchContext = {
   /**
    * Optional audit sink for proactive send attempts.
    */
-  auditLog?: DispatchAuditLog;
+  auditLog?: ConsciousnessAuditLog;
 };
 
 // ── Dispatch result ───────────────────────────────────────────────────────────

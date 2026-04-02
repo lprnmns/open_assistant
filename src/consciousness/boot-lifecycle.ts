@@ -26,7 +26,11 @@
 import process from "node:process";
 import { startConsciousnessLoop } from "./boot.js";
 import type { ConsciousnessScheduler } from "./boot.js";
-import { DispatchAuditLog } from "./audit.js";
+import {
+  clearGlobalConsciousnessAuditLog,
+  ConsciousnessAuditLog,
+  setGlobalConsciousnessAuditLog,
+} from "./audit.js";
 import {
   getActiveChannelId,
   getActiveChannelType,
@@ -44,8 +48,8 @@ export type ConsciousnessLifecycle = {
   scheduler: ConsciousnessScheduler;
   /** The reflection queue that feeds pendingNoteCount. */
   reflectionQueue: PendingReflectionQueue;
-  /** In-memory audit trail for proactive send attempts. */
-  auditLog: DispatchAuditLog;
+  /** Structured audit trail for proactive sends, ticks, and mode transitions. */
+  auditLog: ConsciousnessAuditLog;
 };
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -66,7 +70,10 @@ export function maybeStartConsciousnessLoop(
   }
 
   const reflectionQueue = new PendingReflectionQueue();
-  const auditLog = new DispatchAuditLog();
+  const auditLog = new ConsciousnessAuditLog({
+    filePath: resolveAuditLogPath(env),
+  });
+  setGlobalConsciousnessAuditLog(auditLog);
   const proactiveState: { lastSentAt?: number } = {};
 
   const scheduler = startConsciousnessLoop({
@@ -109,6 +116,7 @@ export function maybeStartConsciousnessLoop(
       proactiveState,
       auditLog,
     },
+    auditLog,
   });
 
   // ── Graceful shutdown ─────────────────────────────────────────────────────
@@ -119,6 +127,7 @@ export function maybeStartConsciousnessLoop(
     if (stopped) return;
     stopped = true;
     scheduler.stop();
+    clearGlobalConsciousnessAuditLog(auditLog);
   };
 
   // SIGTERM is sent by process managers (Docker, systemd, k8s).
@@ -133,4 +142,9 @@ export function maybeStartConsciousnessLoop(
 
 function isTruthy(value: string | undefined): boolean {
   return value === "1" || value?.toLowerCase() === "true";
+}
+
+function resolveAuditLogPath(env: NodeJS.ProcessEnv): string | undefined {
+  const filePath = env.CONSCIOUSNESS_AUDIT_LOG_PATH?.trim();
+  return filePath ? filePath : undefined;
 }

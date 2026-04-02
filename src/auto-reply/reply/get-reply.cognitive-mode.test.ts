@@ -33,12 +33,15 @@ vi.mock("./session.js", () => ({
 let getReplyFromConfig: typeof import("./get-reply.js").getReplyFromConfig;
 let loadConfigMock: typeof import("../../config/config.js").loadConfig;
 let runPreparedReplyMock: typeof import("./get-reply-run.js").runPreparedReply;
+let auditModule: typeof import("../../consciousness/audit.js");
+let auditLog: import("../../consciousness/audit.js").ConsciousnessAuditLog;
 
 async function loadFreshGetReplyModuleForTest() {
   vi.resetModules();
   ({ getReplyFromConfig } = await import("./get-reply.js"));
   ({ loadConfig: loadConfigMock } = await import("../../config/config.js"));
   ({ runPreparedReply: runPreparedReplyMock } = await import("./get-reply-run.js"));
+  auditModule = await import("../../consciousness/audit.js");
 }
 
 function buildCtx(body: string): MsgContext {
@@ -110,6 +113,9 @@ describe("getReplyFromConfig cognitive mode integration", () => {
     mocks.initSessionState.mockReset();
     vi.mocked(runPreparedReplyMock).mockReset();
     vi.mocked(loadConfigMock).mockReset();
+    auditModule._resetConsciousnessAuditStateForTest();
+    auditLog = new auditModule.ConsciousnessAuditLog();
+    auditModule.setGlobalConsciousnessAuditLog(auditLog);
 
     vi.mocked(loadConfigMock).mockReturnValue({} as OpenClawConfig);
     mocks.resolveReplyDirectives.mockResolvedValue(buildDirectiveResult());
@@ -157,5 +163,47 @@ describe("getReplyFromConfig cognitive mode integration", () => {
       | { cognitiveMode?: string }
       | undefined;
     expect(call?.cognitiveMode).toBe("companion");
+  });
+
+  it("records the first cognitive mode and skips duplicate modes", async () => {
+    await getReplyFromConfig(buildCtx("kod patladi loglara bak acil"));
+    await getReplyFromConfig(buildCtx("bak loglara bak acil"));
+
+    const entries = auditLog
+      .list()
+      .filter((entry) => entry.kind === "cognitive_mode");
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: "cognitive_mode",
+      sessionKey: "agent:main:telegram:123",
+      mode: "executive",
+      previousMode: undefined,
+    });
+  });
+
+  it("records mode transitions when the detected mode changes", async () => {
+    await getReplyFromConfig(buildCtx("kod patladi loglara bak acil"));
+    await getReplyFromConfig(
+      buildCtx("Bunu birlikte dusunelim, sence neden boyle oldu ve sonraki adim ne olmali?"),
+    );
+
+    const entries = auditLog
+      .list()
+      .filter((entry) => entry.kind === "cognitive_mode");
+
+    expect(entries).toHaveLength(2);
+    expect(entries).toEqual([
+      expect.objectContaining({
+        kind: "cognitive_mode",
+        mode: "executive",
+        previousMode: undefined,
+      }),
+      expect.objectContaining({
+        kind: "cognitive_mode",
+        mode: "companion",
+        previousMode: "executive",
+      }),
+    ]);
   });
 });

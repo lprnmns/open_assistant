@@ -3,25 +3,26 @@
  *
  * Drives the adaptive tick loop using a self-rescheduling setTimeout chain:
  *
- *   ① Wait nextDelayMs
- *   ② Build fresh WorldSnapshot (caller-provided)
- *   ③ tick(snap, state) → TickResult
- *   ④ If decision present → dispatchDecision(decision, snap, ctx)
- *   ⑤ Reschedule after result.nextDelayMs  →  back to ①
+ *   1. Wait nextDelayMs
+ *   2. Build fresh WorldSnapshot (caller-provided)
+ *   3. tick(snap, state) -> TickResult
+ *   4. If decision present -> dispatchDecision(decision, snap, ctx)
+ *   5. Reschedule after result.nextDelayMs -> back to 1
  *
  * Adaptive interval:
- *   wake:true  → next wait = minTickIntervalMs  (stay alert)
- *   wake:false → next wait grows toward maxTickIntervalMs (relax)
- *   LLM suggests delay → honoured, clamped to [min, max]
+ *   wake:true  -> next wait = minTickIntervalMs  (stay alert)
+ *   wake:false -> next wait grows toward maxTickIntervalMs (relax)
+ *   LLM suggests delay -> honoured, clamped to [min, max]
  *
  * CRITICAL: The scheduler has NO inbound-message hook.
  * User messages must NEVER trigger a scheduler tick — they are handled
- * exclusively by the gateway reply path.  There is no handleMessage(),
+ * exclusively by the gateway reply path. There is no handleMessage(),
  * onMessage(), or similar method on this class.
  */
 
 import { tick, type TickContext, type TickResult } from "./loop.js";
 import { dispatchDecision, type DispatchContext } from "./integration.js";
+import { createTickAuditEntry, type ConsciousnessAuditLog } from "./audit.js";
 import type { MemoryRecallPipeline } from "./brain/types.js";
 import {
   DEFAULT_CONSCIOUSNESS_CONFIG,
@@ -30,8 +31,6 @@ import {
   type ConsciousnessState,
   type WorldSnapshot,
 } from "./types.js";
-
-// ── Scheduler options ─────────────────────────────────────────────────────────
 
 export type SchedulerOptions = {
   /**
@@ -54,16 +53,15 @@ export type SchedulerOptions = {
   onTick?: (result: TickResult) => void;
 
   /**
+   * Optional passive audit sink for tick-level observability.
+   * This never affects scheduler behavior; write failures are swallowed by the sink.
+   */
+  auditLog?: ConsciousnessAuditLog;
+
+  /**
    * Optional Living Brain components wired at boot.
    * When provided, each tick enriches the LLM prompt with recent Cortex notes
    * and semantically similar Hippocampus notes before the LLM call.
-   *
-   * Omitting this field is safe — the scheduler falls back to pre-4.5 behaviour
-   * (no memory enrichment) without any change to tick semantics.
-   *
-   * appendNote wiring: the caller closes over ingestion + sessionKey when
-   * constructing dispatch.appendNote so the loop itself never sees sessionKey.
-   * Only the recall pipeline needs sessionKey here (for session-scoped ANN search).
    */
   brain?: {
     /** Recall pipeline for prompt enrichment (read path). */
@@ -73,8 +71,6 @@ export type SchedulerOptions = {
   };
 };
 
-// ── Scheduler ─────────────────────────────────────────────────────────────────
-
 export class ConsciousnessScheduler {
   private state: ConsciousnessState;
   private timer: ReturnType<typeof setTimeout> | undefined = undefined;
@@ -82,9 +78,8 @@ export class ConsciousnessScheduler {
   /**
    * Separate pause flag — does NOT alias state.phase.
    * Reason: tick() returns a new ConsciousnessState with phase:"IDLE", and
-   * runTick() writes `this.state = result.state`, which would silently
+   * runTick() writes this.state = result.state, which would silently
    * overwrite any "PAUSED" phase set by pause() while the tick was in-flight.
-   * A dedicated boolean is immune to that overwrite.
    */
   private paused = false;
   private readonly options: SchedulerOptions;
@@ -98,16 +93,14 @@ export class ConsciousnessScheduler {
     this.options = options;
   }
 
-  // ── Lifecycle ───────────────────────────────────────────────────────────────
-
-  /** Start the tick loop.  No-op if already running. */
+  /** Start the tick loop. No-op if already running. */
   start(): void {
     if (this.running) return;
     this.running = true;
     this.scheduleNext(this.state.config.minTickIntervalMs);
   }
 
-  /** Stop the tick loop permanently.  Clears any pending timer. */
+  /** Stop the tick loop permanently. Clears any pending timer. */
   stop(): void {
     this.running = false;
     if (this.timer !== undefined) {
@@ -116,10 +109,7 @@ export class ConsciousnessScheduler {
     }
   }
 
-  /**
-   * Pause ticks.  Any tick already in flight completes normally but does not
-   * reschedule.  State phase is set to PAUSED.
-   */
+  /** Pause ticks and cancel any pending timer. */
   pause(): void {
     this.paused = true;
     if (this.timer !== undefined) {
@@ -129,11 +119,7 @@ export class ConsciousnessScheduler {
     this.state = { ...this.state, phase: "PAUSED" };
   }
 
-  /**
-   * Resume from PAUSED.  Schedules the next tick after minTickIntervalMs.
-   * No-op if the scheduler was never started OR if it is not currently paused
-   * (guards against duplicate timers when called from a non-paused state).
-   */
+  /** Resume from PAUSED and schedule the next tick after minTickIntervalMs. */
   resume(): void {
     if (!this.running || !this.paused) return;
     this.paused = false;
@@ -141,10 +127,7 @@ export class ConsciousnessScheduler {
     this.scheduleNext(this.state.config.minTickIntervalMs);
   }
 
-  // ── Internal tick loop ──────────────────────────────────────────────────────
-
   private scheduleNext(delayMs: number): void {
-    // paused flag is authoritative — immune to state.phase being overwritten by tick()
     if (!this.running || this.paused) return;
     this.timer = setTimeout(() => {
       void this.runTick();
@@ -154,7 +137,6 @@ export class ConsciousnessScheduler {
   private async runTick(): Promise<void> {
     if (!this.running) return;
 
-    // ① Build snapshot — if this fails, reschedule and stay alive
     let snap: WorldSnapshot;
     try {
       snap = await this.options.buildSnapshot();
@@ -163,24 +145,25 @@ export class ConsciousnessScheduler {
       return;
     }
 
-    // ② Run one consciousness tick (with optional memory context)
     const tickCtx: TickContext | undefined = this.options.brain
       ? { recall: this.options.brain.recall, sessionKey: this.options.brain.sessionKey }
       : undefined;
     const result = await tick(snap, this.state, tickCtx);
-    // Preserve PAUSED phase if pause() was called while this tick was in-flight;
-    // tick() always returns phase:"IDLE" and would otherwise overwrite it.
     this.state = this.paused ? { ...result.state, phase: "PAUSED" } : result.state;
 
-    // ③ Dispatch decision side-effects (errors caught inside dispatchDecision)
     if (result.decision !== undefined) {
       await dispatchDecision(result.decision, snap, this.options.dispatch, this.state.config);
     }
 
-    // ④ Notify telemetry / test observers
+    this.options.auditLog?.append(
+      createTickAuditEntry({
+        wake: result.watchdogResult.wake,
+        decision: result.decision?.action,
+        phase: result.state.phase,
+        llmCallCount: result.state.llmCallCount,
+      }),
+    );
     this.options.onTick?.(result);
-
-    // ⑤ Reschedule with adaptive delay
     this.scheduleNext(result.nextDelayMs);
   }
 }
