@@ -7,11 +7,14 @@
  */
 
 import {
+  notifyAutoExecution,
   requestToolApproval,
+  type AutoExecutionNotice,
   type ApprovalSurface,
 } from "./approval-surface.js";
 import { normalizeToolName } from "./tool-policy.js";
 import type { ResolvedToolPolicyMeta } from "./tool-policy-pipeline.js";
+import type { InMemoryUndoRegistry } from "./undo-registry.js";
 
 export type RateLimitWindow = "minute" | "hour" | "day";
 
@@ -42,6 +45,21 @@ export type WrapToolWithEnforcementOptions = {
   approvalSurface?: ApprovalSurface;
   approvalTimeoutMs?: number;
   actFirstEnabled?: boolean;
+  undoRegistry?: InMemoryUndoRegistry;
+  undoScopeKey?: string;
+};
+
+export type ToolExecutionResult<T = unknown> = {
+  value: T;
+  summary: string;
+  undoAvailable: boolean;
+  undoId?: string;
+};
+
+type UndoableToolResult = {
+  value?: unknown;
+  summary?: string;
+  undo?: () => Promise<void> | void;
 };
 
 function isRateLimitStore(value: unknown): value is RateLimitStore {
@@ -67,6 +85,61 @@ function resolveWrapOptions(
 
 function buildConfirmPrompt(toolName: string, score: number): string {
   return `Tool '${toolName}' needs approval before execution (reversibilityScore=${score.toFixed(2)})`;
+}
+
+function isUndoableToolResult(value: unknown): value is UndoableToolResult {
+  return typeof value === "object" && value !== null;
+}
+
+function summarizeToolResult(toolName: string, value: unknown): string {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim().slice(0, 160);
+  }
+  return `Tool '${toolName}' executed successfully`;
+}
+
+function buildExecutionResult(params: {
+  toolName: string;
+  rawResult: unknown;
+  options: WrapToolWithEnforcementOptions;
+}): ToolExecutionResult {
+  const raw = params.rawResult;
+  const value =
+    isUndoableToolResult(raw) && "value" in raw && raw.value !== undefined ? raw.value : raw;
+  const summary =
+    isUndoableToolResult(raw) && typeof raw.summary === "string" && raw.summary.trim()
+      ? raw.summary.trim()
+      : summarizeToolResult(params.toolName, value);
+
+  const undoFn =
+    isUndoableToolResult(raw) && typeof raw.undo === "function" ? raw.undo.bind(raw) : undefined;
+  const entry =
+    undoFn && params.options.undoRegistry && params.options.undoScopeKey
+      ? params.options.undoRegistry.register({
+          scopeKey: params.options.undoScopeKey,
+          toolName: params.toolName,
+          summary,
+          undo: undoFn,
+        })
+      : null;
+
+  const notice: AutoExecutionNotice = {
+    toolName: params.toolName,
+    summary,
+    undoAvailable: entry !== null,
+    ...(entry ? { undoId: entry.id } : {}),
+  };
+  void notifyAutoExecution({
+    surface: params.options.approvalSurface,
+    notice,
+  });
+
+  return {
+    value,
+    summary,
+    undoAvailable: entry !== null,
+    ...(entry ? { undoId: entry.id } : {}),
+  };
 }
 
 export function evaluateToolEnforcement(params: {
@@ -198,7 +271,24 @@ export function wrapToolWithEnforcement<T extends { name: string }>(
         })();
       }
       options.store?.record(tool.name);
-      return original(...args);
+      const result = original(...args);
+      if (!options.actFirstEnabled) {
+        return result;
+      }
+      if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+        return Promise.resolve(result).then((resolved) =>
+          buildExecutionResult({
+            toolName: tool.name,
+            rawResult: resolved,
+            options,
+          }),
+        );
+      }
+      return buildExecutionResult({
+        toolName: tool.name,
+        rawResult: result,
+        options,
+      });
     },
   } as T;
 }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_TOOL_APPROVAL_TIMEOUT_MS,
+  notifyAutoExecution,
   requestToolApproval,
   type ApprovalSurface,
 } from "./approval-surface.js";
@@ -70,5 +71,29 @@ describe("requestToolApproval", () => {
         confirmPrompt: "Approve?",
       }),
     ).resolves.toBe(false);
+  });
+
+  it("forwards auto-execution notices when the surface exposes a callback", async () => {
+    const surface: ApprovalSurface = {
+      onApprovalRequest: vi.fn().mockResolvedValue(true),
+      onAutoExecutionNotice: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await notifyAutoExecution({
+      surface,
+      notice: {
+        toolName: "calendar_add",
+        summary: "Calendar event added",
+        undoAvailable: true,
+        undoId: "undo-1",
+      },
+    });
+
+    expect(surface.onAutoExecutionNotice).toHaveBeenCalledWith({
+      toolName: "calendar_add",
+      summary: "Calendar event added",
+      undoAvailable: true,
+      undoId: "undo-1",
+    });
   });
 });

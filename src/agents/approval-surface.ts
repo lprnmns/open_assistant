@@ -6,8 +6,16 @@ export type ApprovalRequest = {
   confirmPrompt: string;
 };
 
+export type AutoExecutionNotice = {
+  toolName: string;
+  summary: string;
+  undoAvailable: boolean;
+  undoId?: string;
+};
+
 export type ApprovalSurface = {
   onApprovalRequest: (request: ApprovalRequest) => Promise<boolean> | boolean;
+  onAutoExecutionNotice?: (notice: AutoExecutionNotice) => Promise<void> | void;
 };
 
 export async function requestToolApproval(params: {
@@ -41,4 +49,14 @@ export async function requestToolApproval(params: {
       },
     );
   });
+}
+
+export async function notifyAutoExecution(params: {
+  surface?: ApprovalSurface;
+  notice: AutoExecutionNotice;
+}): Promise<void> {
+  if (!params.surface?.onAutoExecutionNotice) return;
+  try {
+    await Promise.resolve(params.surface.onAutoExecutionNotice(params.notice));
+  } catch {}
 }

@@ -6,6 +6,7 @@ import {
   type RateLimitCallCounts,
 } from "./tool-policy-enforce.js";
 import type { ResolvedToolPolicyMeta } from "./tool-policy-pipeline.js";
+import { InMemoryUndoRegistry } from "./undo-registry.js";
 
 function makeMeta(overrides: Partial<ResolvedToolPolicyMeta> = {}): ResolvedToolPolicyMeta {
   return {
@@ -146,6 +147,22 @@ describe("wrapToolWithEnforcement", () => {
     expect(execute).toHaveBeenCalledWith("arg");
   });
 
+  it("returns execution metadata for auto-run tools in act-first mode", async () => {
+    const execute = vi.fn().mockResolvedValue("Read finished");
+    const wrapped = wrapToolWithEnforcement(
+      { name: "read", execute },
+      makeMeta({ reversibilityScores: { read: 1.0 } }),
+      { actFirstEnabled: true },
+    );
+
+    // oxlint-disable-next-line typescript/no-explicit-any
+    await expect((wrapped as any).execute("arg")).resolves.toEqual({
+      value: "Read finished",
+      summary: "Read finished",
+      undoAvailable: false,
+    });
+  });
+
   it("throws for blocked classic enforcement", () => {
     const execute = vi.fn();
     const wrapped = wrapToolWithEnforcement(
@@ -216,5 +233,47 @@ describe("wrapToolWithEnforcement", () => {
     // oxlint-disable-next-line typescript/no-explicit-any
     expect(() => (wrapped as any).execute({})).toThrow("too risky");
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("notifies and registers undo for auto-run tools with undo metadata", async () => {
+    const undo = vi.fn().mockResolvedValue(undefined);
+    const execute = vi.fn().mockResolvedValue({
+      value: { id: "evt-1" },
+      summary: "Calendar event added",
+      undo,
+    });
+    const surface: ApprovalSurface = {
+      onApprovalRequest: vi.fn().mockResolvedValue(true),
+      onAutoExecutionNotice: vi.fn().mockResolvedValue(undefined),
+    };
+    const undoRegistry = new InMemoryUndoRegistry();
+    const wrapped = wrapToolWithEnforcement(
+      { name: "calendar_add", execute },
+      makeMeta({ reversibilityScores: { calendar_add: 0.8 } }),
+      {
+        actFirstEnabled: true,
+        approvalSurface: surface,
+        undoRegistry,
+        undoScopeKey: "session-1",
+      },
+    );
+
+    // oxlint-disable-next-line typescript/no-explicit-any
+    const result = await (wrapped as any).execute({ startsAt: "2026-04-03T14:00:00Z" });
+    expect(result.value).toEqual({ id: "evt-1" });
+    expect(result.summary).toBe("Calendar event added");
+    expect(result.undoAvailable).toBe(true);
+    expect(typeof result.undoId).toBe("string");
+    expect(surface.onAutoExecutionNotice).toHaveBeenCalledWith({
+      toolName: "calendar_add",
+      summary: "Calendar event added",
+      undoAvailable: true,
+      undoId: result.undoId,
+    });
+
+    const entry = undoRegistry.peekLast("session-1");
+    expect(entry?.summary).toBe("Calendar event added");
+    await undoRegistry.undoLast("session-1");
+    expect(undo).toHaveBeenCalledTimes(1);
   });
 });
