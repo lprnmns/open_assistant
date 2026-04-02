@@ -10,6 +10,7 @@ import { DEFAULT_AGENT_WORKSPACE_DIR, ensureAgentWorkspace } from "../../agents/
 import { resolveChannelModelOverride } from "../../channels/model-overrides.js";
 import { type OpenClawConfig, loadConfig } from "../../config/config.js";
 import { applyMergePatch } from "../../config/merge-patch.js";
+import { detectCognitiveMode } from "../../consciousness/cognitive-load.js";
 import { defaultRuntime } from "../../runtime.js";
 import { normalizeStringEntries } from "../../shared/string-normalization.js";
 import { resolveCommandAuthorization } from "../command-auth.js";
@@ -408,6 +409,10 @@ export async function getReplyFromConfig(
     workspaceDir,
   });
 
+  const cognitiveMode = detectCognitiveMode(
+    ctx.BodyForAgent ?? ctx.CommandBody ?? ctx.RawBody ?? ctx.Body ?? "",
+  ).mode;
+
   return runPreparedReply({
     ctx,
     sessionCtx,
@@ -452,5 +457,6 @@ export async function getReplyFromConfig(
     storePath,
     workspaceDir,
     abortedLastRun,
+    cognitiveMode,
   });
 }

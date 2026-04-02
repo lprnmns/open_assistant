@@ -194,6 +194,34 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Voice (TTS) is enabled.");
   });
 
+  it("injects executive reply mode guidance and keeps it shorter than companion mode", () => {
+    const executivePrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      cognitiveMode: "executive",
+    });
+    const companionPrompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      cognitiveMode: "companion",
+    });
+
+    expect(executivePrompt).toContain("## Reply Mode");
+    expect(executivePrompt).toContain("Current reply mode: executive.");
+    expect(executivePrompt).toContain("Be brief, direct, and action-first.");
+    expect(companionPrompt).toContain("Current reply mode: companion.");
+    expect(companionPrompt).toContain("Be warm, collaborative, and lightly explanatory.");
+    expect(executivePrompt.length).toBeLessThan(companionPrompt.length);
+  });
+
+  it("keeps standard mode prompt unchanged", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      cognitiveMode: "standard",
+    });
+
+    expect(prompt).not.toContain("## Reply Mode");
+    expect(prompt).not.toContain("Current reply mode:");
+  });
+
   it("adds reasoning tag hint when enabled", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",

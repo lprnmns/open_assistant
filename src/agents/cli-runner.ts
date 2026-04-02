@@ -2,6 +2,7 @@ import type { ImageContent } from "@mariozechner/pi-ai";
 import { resolveHeartbeatPrompt } from "../auto-reply/heartbeat.js";
 import type { ThinkLevel } from "../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../config/config.js";
+import type { CognitiveMode } from "../consciousness/cognitive-load.js";
 import { shouldLogVerbose } from "../globals.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { requestHeartbeatNow } from "../infra/heartbeat-wake.js";
@@ -61,6 +62,7 @@ export async function runCliAgent(params: {
   provider: string;
   model?: string;
   thinkLevel?: ThinkLevel;
+  cognitiveMode?: CognitiveMode;
   timeoutMs: number;
   runId: string;
   extraSystemPrompt?: string;
@@ -158,6 +160,7 @@ export async function runCliAgent(params: {
     config: params.config,
     defaultThinkLevel: params.thinkLevel,
     extraSystemPrompt,
+    cognitiveMode: params.cognitiveMode,
     ownerNumbers: params.ownerNumbers,
     heartbeatPrompt,
     docsPath: docsPath ?? undefined,

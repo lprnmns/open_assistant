@@ -1,5 +1,6 @@
 import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import type { CognitiveMode } from "../../consciousness/cognitive-load.js";
 import type { ExecElevatedDefaults } from "../bash-tools.js";
 import type { SkillSnapshot } from "../skills.js";
 
@@ -22,6 +23,7 @@ export type EmbeddedCompactionRuntimeContext = {
   model?: string;
   thinkLevel?: ThinkLevel;
   reasoningLevel?: ReasoningLevel;
+  cognitiveMode?: CognitiveMode;
   bashElevated?: ExecElevatedDefaults;
   extraSystemPrompt?: string;
   ownerNumbers?: string[];
@@ -46,6 +48,7 @@ export function buildEmbeddedCompactionRuntimeContext(params: {
   modelId?: string | null;
   thinkLevel?: ThinkLevel;
   reasoningLevel?: ReasoningLevel;
+  cognitiveMode?: CognitiveMode;
   bashElevated?: ExecElevatedDefaults;
   extraSystemPrompt?: string;
   ownerNumbers?: string[];
@@ -69,6 +72,7 @@ export function buildEmbeddedCompactionRuntimeContext(params: {
     model: params.modelId ?? undefined,
     thinkLevel: params.thinkLevel,
     reasoningLevel: params.reasoningLevel,
+    cognitiveMode: params.cognitiveMode,
     bashElevated: params.bashElevated,
     extraSystemPrompt: params.extraSystemPrompt,
     ownerNumbers: params.ownerNumbers,

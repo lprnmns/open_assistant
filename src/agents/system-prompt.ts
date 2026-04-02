@@ -2,6 +2,7 @@ import { createHmac, createHash } from "node:crypto";
 import type { ReasoningLevel, ThinkLevel } from "../auto-reply/thinking.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
+import type { CognitiveMode } from "../consciousness/cognitive-load.js";
 import { buildMemoryPromptSection } from "../memory/prompt-section.js";
 import { listDeliverableMessageChannels } from "../utils/message-channel.js";
 import type { ResolvedTimeFormat } from "./date-time.js";
@@ -173,11 +174,39 @@ function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readT
   ];
 }
 
+function buildCognitiveModeSection(params: {
+  cognitiveMode?: CognitiveMode;
+  isMinimal: boolean;
+}) {
+  if (params.isMinimal || !params.cognitiveMode || params.cognitiveMode === "standard") {
+    return [];
+  }
+  if (params.cognitiveMode === "executive") {
+    return [
+      "## Reply Mode",
+      "Current reply mode: executive.",
+      "Be brief, direct, and action-first.",
+      "Lead with the answer or next concrete step.",
+      "Minimize warmth, hedging, and extra explanation unless the user asks for depth.",
+      "",
+    ];
+  }
+  return [
+    "## Reply Mode",
+    "Current reply mode: companion.",
+    "Be warm, collaborative, and lightly explanatory.",
+    "Use a natural tone, include a little context, and help the user think through the next step.",
+    "Do not become verbose for its own sake; stay useful and grounded.",
+    "",
+  ];
+}
+
 export function buildAgentSystemPrompt(params: {
   workspaceDir: string;
   defaultThinkLevel?: ThinkLevel;
   reasoningLevel?: ReasoningLevel;
   extraSystemPrompt?: string;
+  cognitiveMode?: CognitiveMode;
   ownerNumbers?: string[];
   ownerDisplay?: OwnerIdDisplay;
   ownerDisplaySecret?: string;
@@ -397,6 +426,10 @@ export function buildAgentSystemPrompt(params: {
     isMinimal,
     readToolName,
   });
+  const cognitiveModeSection = buildCognitiveModeSection({
+    cognitiveMode: params.cognitiveMode,
+    isMinimal,
+  });
   const workspaceNotes = (params.workspaceNotes ?? []).map((note) => note.trim()).filter(Boolean);
 
   // For "none" mode, return just the basic identity line
@@ -563,6 +596,7 @@ export function buildAgentSystemPrompt(params: {
       messageToolHints: params.messageToolHints,
     }),
     ...buildVoiceSection({ isMinimal, ttsHint: params.ttsHint }),
+    ...cognitiveModeSection,
   ];
 
   if (extraSystemPrompt) {

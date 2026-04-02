@@ -11,6 +11,7 @@ import { resolveHeartbeatPrompt } from "../../auto-reply/heartbeat.js";
 import type { ReasoningLevel, ThinkLevel } from "../../auto-reply/thinking.js";
 import { resolveChannelCapabilities } from "../../config/channel-capabilities.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import type { CognitiveMode } from "../../consciousness/cognitive-load.js";
 import {
   ensureContextEnginesInitialized,
   resolveContextEngine,
@@ -148,6 +149,7 @@ export type CompactEmbeddedPiSessionParams = {
   model?: string;
   thinkLevel?: ThinkLevel;
   reasoningLevel?: ReasoningLevel;
+  cognitiveMode?: CognitiveMode;
   bashElevated?: ExecElevatedDefaults;
   customInstructions?: string;
   tokenBudget?: number;
@@ -954,6 +956,7 @@ export async function compactEmbeddedPiSessionDirect(
       defaultThinkLevel: params.thinkLevel,
       reasoningLevel: params.reasoningLevel ?? "off",
       extraSystemPrompt: params.extraSystemPrompt,
+      cognitiveMode: params.cognitiveMode,
       ownerNumbers: params.ownerNumbers,
       ownerDisplay: ownerDisplay.ownerDisplay,
       ownerDisplaySecret: ownerDisplay.ownerDisplaySecret,

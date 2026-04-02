@@ -133,6 +133,7 @@ export function buildEmbeddedRunBaseParams(params: {
     thinkLevel: params.run.thinkLevel,
     verboseLevel: params.run.verboseLevel,
     reasoningLevel: params.run.reasoningLevel,
+    cognitiveMode: params.run.cognitiveMode,
     execOverrides: params.run.execOverrides,
     bashElevated: params.run.bashElevated,
     timeoutMs: params.run.timeoutMs,

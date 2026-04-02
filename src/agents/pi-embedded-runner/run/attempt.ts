@@ -1571,6 +1571,7 @@ export function buildAfterTurnRuntimeContext(params: {
     | "modelId"
     | "thinkLevel"
     | "reasoningLevel"
+    | "cognitiveMode"
     | "bashElevated"
     | "extraSystemPrompt"
     | "ownerNumbers"
@@ -1598,6 +1599,7 @@ export function buildAfterTurnRuntimeContext(params: {
     modelId: params.attempt.modelId,
     thinkLevel: params.attempt.thinkLevel,
     reasoningLevel: params.attempt.reasoningLevel,
+    cognitiveMode: params.attempt.cognitiveMode,
     bashElevated: params.attempt.bashElevated,
     extraSystemPrompt: params.attempt.extraSystemPrompt,
     ownerNumbers: params.attempt.ownerNumbers,
@@ -1989,6 +1991,7 @@ export async function runEmbeddedAttempt(
       defaultThinkLevel: params.thinkLevel,
       reasoningLevel: params.reasoningLevel ?? "off",
       extraSystemPrompt: params.extraSystemPrompt,
+      cognitiveMode: params.cognitiveMode,
       ownerNumbers: params.ownerNumbers,
       ownerDisplay: ownerDisplay.ownerDisplay,
       ownerDisplaySecret: ownerDisplay.ownerDisplaySecret,

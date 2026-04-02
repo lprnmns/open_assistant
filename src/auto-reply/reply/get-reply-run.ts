@@ -4,6 +4,7 @@ import type { ExecToolDefaults } from "../../agents/bash-tools.js";
 import { resolveFastModeState } from "../../agents/fast-mode.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { resolveGroupSessionKey } from "../../config/sessions/group.js";
+import type { CognitiveMode } from "../../consciousness/cognitive-load.js";
 import {
   resolveSessionFilePath,
   resolveSessionFilePathOptions,
@@ -189,6 +190,7 @@ type RunPreparedReplyParams = {
   defaultProvider: string;
   defaultModel: string;
   timeoutMs: number;
+  cognitiveMode?: CognitiveMode;
   isNewSession: boolean;
   resetTriggered: boolean;
   systemSent: boolean;
@@ -232,6 +234,7 @@ export async function runPreparedReply(
     defaultProvider,
     defaultModel,
     timeoutMs,
+    cognitiveMode,
     isNewSession,
     resetTriggered,
     systemSent,
@@ -568,6 +571,7 @@ export async function runPreparedReply(
         defaultLevel: resolvedElevatedLevel ?? "off",
       },
       timeoutMs,
+      cognitiveMode,
       blockReplyBreak: resolvedBlockStreamingBreak,
       ownerNumbers: command.ownerList.length > 0 ? command.ownerList : undefined,
       inputProvenance: ctx.InputProvenance ?? sessionCtx.InputProvenance,
