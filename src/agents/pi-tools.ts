@@ -50,6 +50,7 @@ import type { SandboxContext } from "./sandbox.js";
 import { createToolFsPolicy, resolveToolFsConfig } from "./tool-fs-policy.js";
 import { wrapToolWithEnforcement } from "./tool-policy-enforce.js";
 import { getSessionRateLimitStore, InMemoryRateLimitStore } from "./tool-policy-rate-limit-store.js";
+import { getDefaultUndoRegistry } from "./undo-registry.js";
 import {
   applyToolPolicyPipeline,
   buildDefaultActFirstToolPolicyMeta,
@@ -645,6 +646,8 @@ export function createOpenClawCodingTools(options?: {
       store: rateLimitStore,
       actFirstEnabled,
       approvalSurface: options?.approvalSurface,
+      undoRegistry: actFirstEnabled ? getDefaultUndoRegistry() : undefined,
+      undoScopeKey: actFirstEnabled ? options?.sessionKey ?? agentId ?? undefined : undefined,
     }),
   );
   const withHooks = withEnforcement.map((tool) =>
