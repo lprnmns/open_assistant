@@ -30,10 +30,10 @@ describe("runtime smoke scenarios", () => {
     );
   });
 
-  it("shows that act-first has auto, confirm, and hard-block paths", async () => {
+  it("shows that act-first has auto, confirm, approval-required, and human-approved paths", async () => {
     const result = await simulateActFirstScenario();
 
-    expect(result.status).toBe("partial");
+    expect(result.status).toBe("pass");
     expect(result.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -45,7 +45,11 @@ describe("runtime smoke scenarios", () => {
           passed: true,
         }),
         expect.objectContaining({
-          label: "email-send-is-not-confirm",
+          label: "email-send-blocked-without-approval",
+          passed: true,
+        }),
+        expect.objectContaining({
+          label: "email-send-auto-with-human-approval",
           passed: true,
         }),
       ]),

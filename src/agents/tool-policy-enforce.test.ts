@@ -89,7 +89,7 @@ describe("evaluateToolEnforcement — act-first mode", () => {
     expect(result).toEqual({ mode: "auto", allowed: true });
   });
 
-  it("blocks low-score tools", () => {
+  it("blocks low-score tools with approval-required reason", () => {
     const meta = makeMeta({ reversibilityScores: { email_send: 0.2 } });
     const result = evaluateToolEnforcement({
       toolName: "email_send",
@@ -98,7 +98,32 @@ describe("evaluateToolEnforcement — act-first mode", () => {
     });
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
-      expect(result.reason).toBe("low-reversibility-score");
+      expect(result.reason).toBe("approval-required-low-reversibility");
+    }
+  });
+
+  it("auto-allows low-score tools when humanApproved is true", () => {
+    const meta = makeMeta({ reversibilityScores: { email_send: 0.2 } });
+    const result = evaluateToolEnforcement({
+      toolName: "email_send",
+      meta,
+      actFirstEnabled: true,
+      humanApproved: true,
+    });
+    expect(result).toEqual({ mode: "auto", allowed: true });
+  });
+
+  it("keeps missing-reversibility-score fail-closed even with humanApproved", () => {
+    const meta = makeMeta();
+    const result = evaluateToolEnforcement({
+      toolName: "unknown_tool",
+      meta,
+      actFirstEnabled: true,
+      humanApproved: true,
+    });
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) {
+      expect(result.reason).toBe("missing-reversibility-score");
     }
   });
 
@@ -222,7 +247,41 @@ describe("wrapToolWithEnforcement", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("blocks low-score tools before execute", () => {
+  it("requests approval for low-score tools and executes on approval", async () => {
+    const execute = vi.fn().mockResolvedValue("email sent");
+    const surface: ApprovalSurface = {
+      onApprovalRequest: vi.fn().mockResolvedValue(true),
+    };
+    const wrapped = wrapToolWithEnforcement(
+      { name: "email_send", execute },
+      makeMeta({ reversibilityScores: { email_send: 0.2 } }),
+      { actFirstEnabled: true, approvalSurface: surface },
+    );
+
+    // oxlint-disable-next-line typescript/no-explicit-any
+    const result = await (wrapped as any).execute({});
+    expect(surface.onApprovalRequest).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result.value).toBe("email sent");
+  });
+
+  it("rejects low-score tools when approval is denied", async () => {
+    const execute = vi.fn();
+    const surface: ApprovalSurface = {
+      onApprovalRequest: vi.fn().mockResolvedValue(false),
+    };
+    const wrapped = wrapToolWithEnforcement(
+      { name: "email_send", execute },
+      makeMeta({ reversibilityScores: { email_send: 0.2 } }),
+      { actFirstEnabled: true, approvalSurface: surface },
+    );
+
+    // oxlint-disable-next-line typescript/no-explicit-any
+    await expect((wrapped as any).execute({})).rejects.toThrow("approval denied or timed out");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("throws for low-score tools when no approval surface exists", () => {
     const execute = vi.fn();
     const wrapped = wrapToolWithEnforcement(
       { name: "email_send", execute },
@@ -231,7 +290,7 @@ describe("wrapToolWithEnforcement", () => {
     );
 
     // oxlint-disable-next-line typescript/no-explicit-any
-    expect(() => (wrapped as any).execute({})).toThrow("too risky");
+    expect(() => (wrapped as any).execute({})).toThrow("no approval surface");
     expect(execute).not.toHaveBeenCalled();
   });
 

@@ -322,7 +322,7 @@ export async function handleToolsInvokeHttpRequest(
     return true;
   }
 
-  // Policy enforcement: requiresHuman (fail-closed) + rate-limit.
+  // Policy enforcement: requiresHuman (fail-closed) + act-first + rate-limit.
   // Per-session store persists counts across HTTP requests for the same session.
   const rateLimitStore = getSessionRateLimitStore(sessionKey);
   const enforcement = evaluateToolEnforcement({
@@ -330,11 +330,19 @@ export async function handleToolsInvokeHttpRequest(
     meta: subagentFiltered.meta,
     humanApproved,
     callCounts: rateLimitStore,
+    actFirstEnabled: process.env.OPENCLAW_ACT_FIRST?.trim() === "1",
   });
   if (!enforcement.allowed) {
-    sendJson(res, 403, {
+    // approval-required-low-reversibility → 409 with approval_required type.
+    // The caller can retry with humanApproved: true to unlock execution.
+    const status = enforcement.reason === "approval-required-low-reversibility" ? 409 : 403;
+    const errorType =
+      enforcement.reason === "approval-required-low-reversibility"
+        ? "approval_required"
+        : enforcement.reason;
+    sendJson(res, status, {
       ok: false,
-      error: { type: enforcement.reason, message: enforcement.message },
+      error: { type: errorType, message: enforcement.message },
     });
     return true;
   }

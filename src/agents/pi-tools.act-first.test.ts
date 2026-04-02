@@ -8,14 +8,14 @@ describe("createOpenClawCodingTools — act-first", () => {
     expect(tools.some((tool) => tool.name === "read")).toBe(true);
   });
 
-  it("blocks low-reversibility exec calls when act-first is enabled", async () => {
+  it("blocks low-reversibility exec calls when act-first is enabled (no approval surface)", async () => {
     const execTool = createOpenClawCodingTools({ actFirstEnabled: true }).find(
       (tool) => tool.name === "exec",
     );
     expect(execTool).toBeTruthy();
     // oxlint-disable-next-line typescript/no-explicit-any
     await expect((execTool as any).execute("call-1", { command: "echo ok" })).rejects.toThrow(
-      "too risky",
+      "no approval surface",
     );
   });
 });
