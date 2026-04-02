@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { applyToolPolicyPipeline } from "./tool-policy-pipeline.js";
+import {
+  applyToolPolicyPipeline,
+  buildDefaultActFirstToolPolicyMeta,
+} from "./tool-policy-pipeline.js";
 
 type DummyTool = { name: string };
 
@@ -201,5 +204,27 @@ describe("tool-policy-pipeline — metadata", () => {
     expect(meta.reversibilityScores["read"]).toBe(1.0);
     expect(meta.rateLimits["write"]).toEqual({ perHour: 100 });
     expect(meta.requiresHuman.has("exec")).toBe(true);
+  });
+});
+
+describe("buildDefaultActFirstToolPolicyMeta", () => {
+  test("assigns auto score to calendar add tools", () => {
+    const meta = buildDefaultActFirstToolPolicyMeta([{ name: "calendar_add" }]);
+    expect(meta?.reversibilityScore?.calendar_add).toBe(0.8);
+  });
+
+  test("assigns blocked score to external send tools", () => {
+    const meta = buildDefaultActFirstToolPolicyMeta([{ name: "email_send" }]);
+    expect(meta?.reversibilityScore?.email_send).toBe(0.2);
+  });
+
+  test("assigns auto score to read tools", () => {
+    const meta = buildDefaultActFirstToolPolicyMeta([{ name: "read" }]);
+    expect(meta?.reversibilityScore?.read).toBe(1.0);
+  });
+
+  test("assigns confirm score to write-like tools", () => {
+    const meta = buildDefaultActFirstToolPolicyMeta([{ name: "write_file" }]);
+    expect(meta?.reversibilityScore?.write_file).toBe(0.5);
   });
 });

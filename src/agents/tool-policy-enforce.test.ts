@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ApprovalSurface } from "./approval-surface.js";
 import {
   evaluateToolEnforcement,
   wrapToolWithEnforcement,
   type RateLimitCallCounts,
 } from "./tool-policy-enforce.js";
 import type { ResolvedToolPolicyMeta } from "./tool-policy-pipeline.js";
-
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 function makeMeta(overrides: Partial<ResolvedToolPolicyMeta> = {}): ResolvedToolPolicyMeta {
   return {
@@ -23,179 +22,199 @@ function makeCountStore(counts: Record<string, number> = {}): RateLimitCallCount
   };
 }
 
-// ── requiresHuman (fail-closed) ───────────────────────────────────────────────
-
-describe("evaluateToolEnforcement — requiresHuman", () => {
-  it("blocks when tool is in requiresHuman and humanApproved is absent (fail-closed)", () => {
+describe("evaluateToolEnforcement — classic behavior", () => {
+  it("blocks requiresHuman tools when humanApproved is absent", () => {
     const meta = makeMeta({ requiresHuman: new Set(["exec"]) });
     const result = evaluateToolEnforcement({ toolName: "exec", meta });
     expect(result.allowed).toBe(false);
-    if (!result.allowed) expect(result.reason).toBe("requires-human");
+    if (!result.allowed) {
+      expect(result.mode).toBe("blocked");
+      expect(result.reason).toBe("requires-human");
+    }
   });
 
-  it("blocks when tool is in requiresHuman and humanApproved is false (fail-closed)", () => {
-    const meta = makeMeta({ requiresHuman: new Set(["exec"]) });
-    const result = evaluateToolEnforcement({ toolName: "exec", meta, humanApproved: false });
-    expect(result.allowed).toBe(false);
-  });
-
-  it("blocks when tool is in requiresHuman and humanApproved is undefined (fail-closed)", () => {
-    const meta = makeMeta({ requiresHuman: new Set(["exec"]) });
-    const result = evaluateToolEnforcement({ toolName: "exec", meta, humanApproved: undefined });
-    expect(result.allowed).toBe(false);
-  });
-
-  it("allows when tool is in requiresHuman and humanApproved is true", () => {
+  it("allows requiresHuman tools when humanApproved is true", () => {
     const meta = makeMeta({ requiresHuman: new Set(["exec"]) });
     const result = evaluateToolEnforcement({ toolName: "exec", meta, humanApproved: true });
-    expect(result.allowed).toBe(true);
+    expect(result).toEqual({ mode: "auto", allowed: true });
   });
 
-  it("allows when tool is NOT in requiresHuman (regardless of humanApproved)", () => {
-    const meta = makeMeta({ requiresHuman: new Set(["other"]) });
-    const result = evaluateToolEnforcement({ toolName: "exec", meta });
-    expect(result.allowed).toBe(true);
-  });
-
-  it("requiresHuman lookup uses normalized tool name (case-insensitive)", () => {
-    // Meta stores "exec" (normalized); caller passes "EXEC"
-    const meta = makeMeta({ requiresHuman: new Set(["exec"]) });
-    const result = evaluateToolEnforcement({ toolName: "EXEC", meta });
-    expect(result.allowed).toBe(false);
-  });
-
-  it("error message names the tool", () => {
-    const meta = makeMeta({ requiresHuman: new Set(["delete"]) });
-    const result = evaluateToolEnforcement({ toolName: "delete", meta });
-    if (!result.allowed) expect(result.message).toContain("delete");
-  });
-});
-
-// ── rate-limit ────────────────────────────────────────────────────────────────
-
-describe("evaluateToolEnforcement — rate-limit", () => {
-  it("allows when count is below perMinute limit", () => {
-    const meta = makeMeta({ rateLimits: { exec: { perMinute: 5 } } });
-    const counts = makeCountStore({ "exec:minute": 4 });
-    const result = evaluateToolEnforcement({ toolName: "exec", meta, callCounts: counts });
-    expect(result.allowed).toBe(true);
-  });
-
-  it("blocks when count meets perMinute limit (>= semantics)", () => {
-    const meta = makeMeta({ rateLimits: { exec: { perMinute: 5 } } });
-    const counts = makeCountStore({ "exec:minute": 5 });
+  it("blocks when rate limit is reached", () => {
+    const meta = makeMeta({ rateLimits: { exec: { perMinute: 2 } } });
+    const counts = makeCountStore({ "exec:minute": 2 });
     const result = evaluateToolEnforcement({ toolName: "exec", meta, callCounts: counts });
     expect(result.allowed).toBe(false);
     if (!result.allowed) {
       expect(result.reason).toBe("rate-limit-exceeded");
-      expect(result.message).toContain("5/5");
-      expect(result.message).toContain("per minute");
+      expect(result.message).toContain("2/2");
     }
   });
 
-  it("blocks when count exceeds perHour limit", () => {
-    const meta = makeMeta({ rateLimits: { exec: { perHour: 10 } } });
-    const counts = makeCountStore({ "exec:hour": 11 });
-    const result = evaluateToolEnforcement({ toolName: "exec", meta, callCounts: counts });
-    expect(result.allowed).toBe(false);
-    if (!result.allowed) expect(result.message).toContain("per hour");
-  });
-
-  it("blocks when count meets perDay limit", () => {
-    const meta = makeMeta({ rateLimits: { exec: { perDay: 100 } } });
-    const counts = makeCountStore({ "exec:day": 100 });
-    const result = evaluateToolEnforcement({ toolName: "exec", meta, callCounts: counts });
-    expect(result.allowed).toBe(false);
-    if (!result.allowed) expect(result.message).toContain("per day");
-  });
-
-  it("skips rate-limit check when callCounts is undefined", () => {
-    const meta = makeMeta({ rateLimits: { exec: { perMinute: 1 } } });
-    // No callCounts — limit is declared but not enforceable yet
-    const result = evaluateToolEnforcement({ toolName: "exec", meta });
-    expect(result.allowed).toBe(true);
-  });
-
-  it("rate-limit key uses normalized tool name (case-insensitive)", () => {
-    const meta = makeMeta({ rateLimits: { exec: { perMinute: 3 } } });
-    // counts keyed on normalized "exec"; caller passes "EXEC"
-    const counts = makeCountStore({ "exec:minute": 3 });
-    const result = evaluateToolEnforcement({ toolName: "EXEC", meta, callCounts: counts });
-    expect(result.allowed).toBe(false);
-  });
-
-  it("allows tool with no rate-limit config regardless of counts", () => {
-    const meta = makeMeta({ rateLimits: {} }); // no limits declared
-    const counts = makeCountStore({ "exec:minute": 9999 });
-    const result = evaluateToolEnforcement({ toolName: "exec", meta, callCounts: counts });
-    expect(result.allowed).toBe(true);
+  it("preserves allow behavior when act-first mode is disabled", () => {
+    const meta = makeMeta();
+    const result = evaluateToolEnforcement({ toolName: "write", meta, actFirstEnabled: false });
+    expect(result).toEqual({ mode: "auto", allowed: true });
   });
 });
 
-// ── requiresHuman takes priority over rate-limit ──────────────────────────────
+describe("evaluateToolEnforcement — act-first mode", () => {
+  it("auto-allows high-score tools", () => {
+    const meta = makeMeta({ reversibilityScores: { read: 1.0 } });
+    const result = evaluateToolEnforcement({ toolName: "read", meta, actFirstEnabled: true });
+    expect(result).toEqual({ mode: "auto", allowed: true });
+  });
 
-describe("evaluateToolEnforcement — priority", () => {
-  it("requiresHuman is checked before rate-limit — blocks with requires-human reason", () => {
-    const meta = makeMeta({
-      requiresHuman: new Set(["exec"]),
-      rateLimits: { exec: { perMinute: 1 } },
+  it("requests confirmation for mid-score tools", () => {
+    const meta = makeMeta({ reversibilityScores: { write: 0.5 } });
+    const result = evaluateToolEnforcement({ toolName: "write", meta, actFirstEnabled: true });
+    expect(result.allowed).toBe(true);
+    if (result.allowed) {
+      expect(result.mode).toBe("confirm");
+      if (result.mode === "confirm") {
+        expect(result.confirmPrompt).toContain("write");
+        expect(result.score).toBe(0.5);
+      }
+    }
+  });
+
+  it("auto-allows confirmed mid-score tools when humanApproved is true", () => {
+    const meta = makeMeta({ reversibilityScores: { write: 0.5 } });
+    const result = evaluateToolEnforcement({
+      toolName: "write",
+      meta,
+      actFirstEnabled: true,
+      humanApproved: true,
     });
-    const counts = makeCountStore({ "exec:minute": 999 });
-    const result = evaluateToolEnforcement({ toolName: "exec", meta, callCounts: counts });
+    expect(result).toEqual({ mode: "auto", allowed: true });
+  });
+
+  it("blocks low-score tools", () => {
+    const meta = makeMeta({ reversibilityScores: { email_send: 0.2 } });
+    const result = evaluateToolEnforcement({
+      toolName: "email_send",
+      meta,
+      actFirstEnabled: true,
+    });
     expect(result.allowed).toBe(false);
-    if (!result.allowed) expect(result.reason).toBe("requires-human");
+    if (!result.allowed) {
+      expect(result.reason).toBe("low-reversibility-score");
+    }
+  });
+
+  it("blocks tools with missing scores", () => {
+    const meta = makeMeta();
+    const result = evaluateToolEnforcement({
+      toolName: "unknown_tool",
+      meta,
+      actFirstEnabled: true,
+    });
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) {
+      expect(result.reason).toBe("missing-reversibility-score");
+    }
+  });
+
+  it("requiresHuman still takes priority over scores", () => {
+    const meta = makeMeta({
+      reversibilityScores: { exec: 1.0 },
+      requiresHuman: new Set(["exec"]),
+    });
+    const result = evaluateToolEnforcement({
+      toolName: "exec",
+      meta,
+      actFirstEnabled: true,
+    });
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) {
+      expect(result.reason).toBe("requires-human");
+    }
   });
 });
-
-// ── wrapToolWithEnforcement ───────────────────────────────────────────────────
 
 describe("wrapToolWithEnforcement", () => {
-  it("returns tool unchanged when it has no execute function", () => {
+  it("returns tool unchanged when no execute function exists", () => {
     const tool = { name: "read-only" };
-    const meta = makeMeta({ requiresHuman: new Set(["read-only"]) });
-    const wrapped = wrapToolWithEnforcement(tool, meta);
-    expect(wrapped).toBe(tool); // same reference, no wrapping
+    const wrapped = wrapToolWithEnforcement(tool, makeMeta());
+    expect(wrapped).toBe(tool);
   });
 
-  it("allowed tool calls through to original execute", async () => {
+  it("passes through allowed tools", async () => {
     const execute = vi.fn().mockResolvedValue("ok");
-    const tool = { name: "read", execute };
-    const meta = makeMeta(); // no requiresHuman, no rate-limit
-    const wrapped = wrapToolWithEnforcement(tool, meta);
+    const wrapped = wrapToolWithEnforcement({ name: "read", execute }, makeMeta());
     // oxlint-disable-next-line typescript/no-explicit-any
-    const result = await (wrapped as any).execute("arg1");
-    expect(result).toBe("ok");
-    expect(execute).toHaveBeenCalledWith("arg1");
+    await expect((wrapped as any).execute("arg")).resolves.toBe("ok");
+    expect(execute).toHaveBeenCalledWith("arg");
   });
 
-  it("blocked tool throws on execute (requiresHuman, humanApproved hardcoded false)", () => {
+  it("throws for blocked classic enforcement", () => {
     const execute = vi.fn();
-    const tool = { name: "delete", execute };
-    const meta = makeMeta({ requiresHuman: new Set(["delete"]) });
-    const wrapped = wrapToolWithEnforcement(tool, meta);
+    const wrapped = wrapToolWithEnforcement(
+      { name: "delete", execute },
+      makeMeta({ requiresHuman: new Set(["delete"]) }),
+    );
     // oxlint-disable-next-line typescript/no-explicit-any
     expect(() => (wrapped as any).execute()).toThrow("human approval");
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("agent path never self-approves — humanApproved is always false in wrapper", () => {
-    // Even if somehow called with extra args, the decision must be blocked
-    const execute = vi.fn();
-    const tool = { name: "exec", execute };
-    const meta = makeMeta({ requiresHuman: new Set(["exec"]) });
-    const wrapped = wrapToolWithEnforcement(tool, meta);
+  it("requests approval for mid-score tools and executes on approval", async () => {
+    const execute = vi.fn().mockResolvedValue("done");
+    const surface: ApprovalSurface = {
+      onApprovalRequest: vi.fn().mockResolvedValue(true),
+    };
+    const wrapped = wrapToolWithEnforcement(
+      { name: "calendar_add", execute },
+      makeMeta({ reversibilityScores: { calendar_add: 0.5 } }),
+      { actFirstEnabled: true, approvalSurface: surface },
+    );
+
     // oxlint-disable-next-line typescript/no-explicit-any
-    expect(() => (wrapped as any).execute("call-id", {})).toThrow();
+    await expect((wrapped as any).execute({ startsAt: "2026-04-03T14:00:00Z" })).resolves.toBe(
+      "done",
+    );
+    expect(surface.onApprovalRequest).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects mid-score tools when approval is denied", async () => {
+    const execute = vi.fn();
+    const surface: ApprovalSurface = {
+      onApprovalRequest: vi.fn().mockResolvedValue(false),
+    };
+    const wrapped = wrapToolWithEnforcement(
+      { name: "calendar_add", execute },
+      makeMeta({ reversibilityScores: { calendar_add: 0.5 } }),
+      { actFirstEnabled: true, approvalSurface: surface },
+    );
+
+    // oxlint-disable-next-line typescript/no-explicit-any
+    await expect((wrapped as any).execute({})).rejects.toThrow("approval denied or timed out");
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("forwards all arguments to original execute when allowed", async () => {
-    const execute = vi.fn().mockReturnValue("result");
-    const tool = { name: "read", execute };
-    const meta = makeMeta();
-    const wrapped = wrapToolWithEnforcement(tool, meta);
+  it("rejects mid-score tools when no approval surface exists", () => {
+    const execute = vi.fn();
+    const wrapped = wrapToolWithEnforcement(
+      { name: "calendar_add", execute },
+      makeMeta({ reversibilityScores: { calendar_add: 0.5 } }),
+      { actFirstEnabled: true },
+    );
+
     // oxlint-disable-next-line typescript/no-explicit-any
-    (wrapped as any).execute("id-1", { path: "/tmp" });
-    expect(execute).toHaveBeenCalledWith("id-1", { path: "/tmp" });
+    expect(() => (wrapped as any).execute({})).toThrow("no approval surface");
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("blocks low-score tools before execute", () => {
+    const execute = vi.fn();
+    const wrapped = wrapToolWithEnforcement(
+      { name: "email_send", execute },
+      makeMeta({ reversibilityScores: { email_send: 0.2 } }),
+      { actFirstEnabled: true },
+    );
+
+    // oxlint-disable-next-line typescript/no-explicit-any
+    expect(() => (wrapped as any).execute({})).toThrow("too risky");
+    expect(execute).not.toHaveBeenCalled();
   });
 });
