@@ -127,6 +127,9 @@ export async function runCli(argv: string[] = process.argv) {
   // Enforce the minimum supported runtime before doing any work.
   assertSupportedRuntime();
 
+  // Declared before try so the finally block can call stop().
+  let consciousnessLifecycle: { stop: () => void } | null = null;
+
   try {
     if (shouldUseRootHelpFastPath(normalizedArgv)) {
       const { outputRootHelp } = await import("./program/root-help.js");
@@ -153,6 +156,14 @@ export async function runCli(argv: string[] = process.argv) {
       console.error("[openclaw] Uncaught exception:", formatUncaughtError(error));
       process.exit(1);
     });
+
+    // ── Consciousness Loop (feature-flagged) ─────────────────────────────────
+    // CONSCIOUSNESS_ENABLED=1 activates the background tick loop.
+    // The lifecycle handle is kept for graceful shutdown in the finally block.
+    const { maybeStartConsciousnessLoop } = await import(
+      "../consciousness/boot-lifecycle.js"
+    );
+    consciousnessLifecycle = maybeStartConsciousnessLoop();
 
     const parseArgv = rewriteUpdateFlagArgv(normalizedArgv);
     // Register the primary command (builtin or subcli) so help and command parsing
@@ -189,6 +200,7 @@ export async function runCli(argv: string[] = process.argv) {
 
     await program.parseAsync(parseArgv);
   } finally {
+    consciousnessLifecycle?.stop();
     await closeCliMemoryManagers();
   }
 }
