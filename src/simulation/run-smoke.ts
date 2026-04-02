@@ -22,7 +22,8 @@
  *                    content to the correct activeChannelId.
  *   - Act-First:     reversibility scoring → auto/confirm/blocked
  *                    decisions → humanApproved unlock for low-score
- *                    tools → HTTP 409 approval_required response.
+ *                    tools.  HTTP 409 approval_required response is
+ *                    proven by separate gateway tests, not here.
  *   - Chrono-Spatial: temporal resolver parses "gecen hafta" →
  *                    UTC range → recall pipeline filters notes by
  *                    createdAt → no semantic-only fallback.
