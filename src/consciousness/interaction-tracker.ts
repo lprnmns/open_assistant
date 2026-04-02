@@ -2,7 +2,7 @@
  * src/consciousness/interaction-tracker.ts
  *
  * Lightweight in-memory tracker for the most recent owner interaction.
- * Updated by the inbound message pipeline on every user→bot message.
+ * Updated by the shared inbound reply pipeline on every user→bot message.
  * Read by the consciousness snapshot adapters to populate:
  *   - lastUserInteractionAt
  *   - activeChannelId
@@ -11,12 +11,43 @@
  * Real persistence (Redis) is wired in Sub-Task 9.2.
  */
 
+export type InteractionRouteLike = {
+  OriginatingTo?: string;
+  NativeChannelId?: string;
+  To?: string;
+  From?: string;
+};
+
 let _lastUserInteractionAt: number | undefined = undefined;
 let _activeChannelId: string | undefined = undefined;
 
+function normalizeRouteValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
 /**
- * Called by the inbound message pipeline when a user message arrives.
- * @param channelId  Normalized channel identifier (e.g. "telegram", "whatsapp").
+ * Resolve the best available active-route key for proactive follow-up.
+ *
+ * Order matters:
+ * - OriginatingTo is the explicit reply target carried across channels/extensions
+ * - NativeChannelId is the provider-specific conversation id when present
+ * - To / From are best-effort fallbacks for legacy contexts
+ */
+export function resolveActiveChannelIdFromInteraction(
+  route: InteractionRouteLike,
+): string | undefined {
+  return (
+    normalizeRouteValue(route.OriginatingTo) ??
+    normalizeRouteValue(route.NativeChannelId) ??
+    normalizeRouteValue(route.To) ??
+    normalizeRouteValue(route.From)
+  );
+}
+
+/**
+ * Called by the shared inbound reply pipeline when a user message arrives.
+ * @param channelId  Stable route key (for example "telegram:123" or "channel:C1").
  */
 export function recordUserInteraction(channelId: string): void {
   _lastUserInteractionAt = Date.now();
