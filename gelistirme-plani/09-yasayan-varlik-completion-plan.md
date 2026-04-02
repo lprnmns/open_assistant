@@ -76,7 +76,7 @@ Bu eksikler artık "nice to have" değil; ürünün ruhunu oluşturan tamamlama 
 |---------------------|-------------|--------|
 | `capturedAt` | `Date.now()` | Zaten doğru |
 | `lastUserInteractionAt` | Son inbound mesaj timestamp'i (DB/Redis) | Kanal adaptörü son mesaj zamanını cache'ler |
-| `pendingNoteCount` | Cortex.recentCount() | Yeni getter, mevcut `recent()` üstüne |
+| `pendingNoteCount` | Reflection queue / pending-note registry (yeni) | Cortex boyutu DEĞİL — bu alan LLM reflection için kuyruktaki iş sayısıdır. Cortex'e bağlanırsa Watchdog sürekli PENDING_NOTE ile uyanır ve davranış semantiği bozulur. Ayrı bir `PendingReflectionQueue` modülü gerekir: tick sonunda reflection üretildiyse kuyruğa girer, işlenince çıkar. |
 | `firedTriggerIds` | Trigger registry (yeni modül) | External trigger'lar → ID listesi |
 | `dueCronExpressions` | Cron registry (mevcut cron altyapısı varsa) | Şu an kullanılmıyor; boş array ile başla |
 | `externalWorldEvents` | Webhook / event ingest endpoint | Gelen event'ler buffer'a, snapshot sırasında oku |
@@ -86,7 +86,7 @@ Bu eksikler artık "nice to have" değil; ürünün ruhunu oluşturan tamamlama 
 
 **Dokunulacak dosyalar:**
 - `src/consciousness/snapshot.ts` (yeni) — `buildRealWorldSnapshot()` implementasyonu
-- `src/consciousness/brain/cortex.ts` — `recentCount()` getter
+- `src/consciousness/reflection-queue.ts` (yeni) — `PendingReflectionQueue` (enqueue/dequeue/count)
 - Kanal adaptör katmanı — `lastUserInteractionAt` + `activeChannelId` cache
 
 ### 3.3 activeChannelId Çözümleme
@@ -243,7 +243,8 @@ query.text → temporalResolver.resolve(text) → embed
 **Semantic similarity ile temporal narrowing nasıl birlikte çalışacak:**
 - Temporal filter bir **pre-filter**'dır: önce zaman aralığına göre aday seti daraltılır
 - Daraltılmış set üzerinde vector similarity sıralaması yapılır
-- Temporal filter boş sonuç dönerse (o aralıkta not yok) fallback: full semantic search + uyarı
+- **Temporal filter boş sonuç dönerse (o aralıkta not yok):** boş sonuç döner + kullanıcıya "bu zaman aralığında kayıtlı not bulunamadı" uyarısı verilir. 6 ay önceki benzer notu "geçen hafta" cevabı olarak döndürmek, çözmek istediğimiz zaman körlüğünü geri getirir — kabul edilemez.
+- **Fallback semantic search YALNIZCA** `TemporalResolver.resolve()` → `null` döndüğünde (ifade çözümlenemedi) devreye girer. Bu, resolver'ın "bağlamsal" veya tanınamayan ifadeler için graceful degradation'ıdır — temporal filter'ın boş sonuç durumu değil.
 
 **Dokunulacak dosyalar:**
 - `src/consciousness/brain/temporal-resolver.ts` (yeni)
@@ -317,22 +318,46 @@ reversibilityScore tanımsız  → MANDATORY_APPROVAL
 
 **Score'lar policy step'lerinde tanımlanır** (mevcut pipeline altyapısı bunu zaten destekliyor). Tool geliştiricisi kendi score'unu beyan eder; global policy override edebilir.
 
-### 5.3 Enforcement Entegrasyonu
+### 5.3 Enforcement + Orchestration Entegrasyonu
 
-**Dokunulacak dosya:** `src/agents/tool-policy-enforce.ts`
+**Dokunulacak dosyalar:**
+- `src/agents/tool-policy-enforce.ts` — üç durumlu `EnforcementResult`
+- `src/agents/pi-tools.ts` — `wrapToolWithEnforcement()` orchestration
+- `src/agents/approval-surface.ts` (yeni) — approval callback interface
 
-**Mevcut enforcement sırası:** `requiresHuman` → rate-limit → allow
+**Mevcut sorun:** Bugünkü enforcement çıktısı `{ allowed: boolean }` ikiliği. `CONFIRM_BRIEF` ara durumu mevcut yapıda ifade edilemiyor. `pi-tools.ts:619-622` içindeki `wrapToolWithEnforcement()` sadece allow/block biliyor.
+
+**Yeni enforcement çıktı tipi:**
+```
+type EnforcementResult =
+  | { mode: "auto"; allowed: true }
+  | { mode: "confirm"; allowed: true; confirmPrompt: string }
+  | { mode: "blocked"; allowed: false; reason: string }
+```
 
 **Yeni enforcement sırası:**
-1. `requiresHuman` set'inde mi? → Evet → `MANDATORY_APPROVAL` (mevcut davranış korunur)
+1. `requiresHuman` set'inde mi? → Evet → `{ mode: "blocked" }` (mevcut davranış korunur)
 2. `reversibilityScore` var mı?
-   - `>= 0.7` → `AUTO_EXECUTE` (skip human prompt)
-   - `>= 0.3` → `CONFIRM_BRIEF` (kısa onay UI)
-   - `< 0.3` → `MANDATORY_APPROVAL`
-   - `undefined` → `MANDATORY_APPROVAL`
+   - `>= 0.7` → `{ mode: "auto" }` (skip human prompt)
+   - `>= 0.3` → `{ mode: "confirm", confirmPrompt: "..." }` (approval surface'e yönlendir)
+   - `< 0.3` → `{ mode: "blocked" }`
+   - `undefined` → `{ mode: "blocked" }`
 3. Rate limit check (mevcut)
 
-**`requiresHuman` override:** `requiresHuman` listesindeki tool'lar `reversibilityScore`'dan bağımsız olarak her zaman `MANDATORY_APPROVAL`. Bu, fail-closed semantiği korur.
+**Orchestration (pi-tools.ts):**
+- `mode: "auto"` → execute + bildirim kuyruğuna ekle
+- `mode: "confirm"` → `ApprovalSurface.onApprovalRequest(tool, args, prompt)` çağır → 60s timeout → approve/reject
+- `mode: "blocked"` → mevcut reject davranışı
+
+**ApprovalSurface interface:**
+```
+interface ApprovalSurface {
+  onApprovalRequest(toolName: string, args: unknown, prompt: string): Promise<boolean>;
+}
+```
+Her kanal adaptörü (CLI, web UI, messaging) bunu implement eder. Default: reject (fail-closed).
+
+**`requiresHuman` override:** `requiresHuman` listesindeki tool'lar `reversibilityScore`'dan bağımsız olarak her zaman `{ mode: "blocked" }`. Bu, fail-closed semantiği korur.
 
 ### 5.4 Third-Party Communication Koruması
 
@@ -536,12 +561,13 @@ Loglar kontrol edildi. NullPointerException src/main.ts:142. Son deploy 14:32'de
 
 **Dokunulacak dosyalar:**
 - `src/consciousness/snapshot.ts` (yeni) — `buildRealWorldSnapshot()`
-- `src/consciousness/brain/cortex.ts` — `recentCount()` getter
+- `src/consciousness/reflection-queue.ts` (yeni) — `PendingReflectionQueue` (pendingNoteCount kaynağı)
 - App bootstrap dosyası — `startConsciousnessLoop()` çağrısı + feature flag
 - `src/consciousness/snapshot.test.ts` (yeni)
 
 **Kabul kriterleri:**
 - [ ] `buildRealWorldSnapshot()` en az `capturedAt`, `lastUserInteractionAt`, `pendingNoteCount`, `activeChannelId` gerçek kaynaktan doldurur
+- [ ] `pendingNoteCount` reflection queue'dan gelir (Cortex boyutundan DEĞİL)
 - [ ] Feature flag `CONSCIOUSNESS_ENABLED=1` ile koşullu boot
 - [ ] Graceful shutdown: SIGTERM → `scheduler.stop()`
 - [ ] Unit test: snapshot builder gerçek veri döner
@@ -601,30 +627,65 @@ Loglar kontrol edildi. NullPointerException src/main.ts:142. Son deploy 14:32'de
 - [ ] `Cortex.recent()` opsiyonel zaman filtresi uygular
 - [ ] `MemoryRecallQuery.temporalRange` alanı eklenir
 - [ ] Recall pipeline: query.text → resolver → filter → search
-- [ ] Temporal filter boş sonuç → fallback pure semantic + log
+- [ ] Temporal filter boş sonuç → boş döner + "bu aralıkta not yok" uyarısı (eski nota semantic fallback YOK)
+- [ ] Semantic fallback YALNIZCA resolver `null` döndüğünde (ifade çözülemedi) devreye girer
 - [ ] AT-3 senaryosu geçer: "geçen Salı spor podcasti" doğru notu döner
 
 **Blocker/risk:** Sub-Task 9.3'e bağımlı (temporal resolver hazır olmalı)
 
-### Sub-Task 9.5 — Act-First Decision Layer
+### Sub-Task 9.5 — Act-First Decision Layer + Approval Orchestration
 
-**Amaç:** `reversibilityScore` → execution mode karar ağacı aktif olsun.
+**Amaç:** `reversibilityScore` → execution mode karar ağacı aktif olsun; mevcut allow/block ikiliği üç durumlu (auto/confirm/block) execution modeline genişlesin.
+
+**Mevcut durum — neden sadece enforce.ts yetmez:**
+
+Bugünkü execution zinciri `src/agents/tool-policy-enforce.ts:135-160` ve `src/agents/pi-tools.ts:619-622` içinde `{ allowed: boolean }` ikiliğine göre kurulmuş. `CONFIRM_BRIEF` ara durumu mevcut yapıda ifade edilemiyor — enforcement fonksiyonu ya `allowed: true` ya `allowed: false` döner. Üç durumlu karar için:
+
+1. **Enforcement çıktı tipi genişlemeli:**
+   ```
+   type EnforcementResult =
+     | { mode: "auto"; allowed: true }
+     | { mode: "confirm"; allowed: true; confirmPrompt: string }
+     | { mode: "blocked"; allowed: false; reason: string }
+   ```
+
+2. **pi-tools.ts orchestration katmanı güncellenmeli:**
+   - `wrapToolWithEnforcement()` üç durumu handle etmeli
+   - `mode: "confirm"` → approval surface'e yönlendirmeli (UI callback / channel prompt)
+   - `mode: "auto"` → doğrudan execute + bildirim kuyruğuna ekle
+   - `mode: "blocked"` → mevcut davranış (reject)
+
+3. **Approval surface tanımlanmalı:**
+   - İnline channel prompt: "Takvime ekleyeyim mi? [Evet/Hayır]"
+   - Timeout: 60s → varsayılan BLOCK
+   - Approval callback: `onApprovalRequest(toolName, args, confirmPrompt) → Promise<boolean>`
+   - Bu callback kanal adaptöründen gelir (CLI, web UI, messaging)
 
 **Dokunulacak dosyalar:**
-- `src/agents/tool-policy-enforce.ts` — score → decision mapping
+- `src/agents/tool-policy-enforce.ts` — `EnforcementResult` üç durumlu çıktı + score → mode mapping
+- `src/agents/pi-tools.ts` — `wrapToolWithEnforcement()` üç durumlu orchestration
+- `src/agents/approval-surface.ts` (yeni) — `ApprovalSurface` interface + timeout logic
 - `src/agents/tool-policy-pipeline.ts` — varsayılan score tanımları (minimal)
 - `src/agents/tool-policy-enforce.test.ts` — yeni decision test'ler
+- `src/agents/pi-tools.test.ts` — orchestration test'ler (auto + confirm + block paths)
 
 **Kabul kriterleri:**
-- [ ] `reversibilityScore >= 0.7` → `AUTO_EXECUTE`
-- [ ] `0.3 <= score < 0.7` → `CONFIRM_BRIEF`
-- [ ] `score < 0.3` → `MANDATORY_APPROVAL`
-- [ ] `undefined` → `MANDATORY_APPROVAL` (fail-closed)
-- [ ] `requiresHuman` override: listede olan tool score'dan bağımsız `MANDATORY_APPROVAL`
-- [ ] AT-2 senaryosu geçer: takvim auto, mail approval
+- [ ] `EnforcementResult` üç durumlu: `auto` / `confirm` / `blocked`
+- [ ] `reversibilityScore >= 0.7` → `auto`
+- [ ] `0.3 <= score < 0.7` → `confirm` (approval surface'e yönlendirilir)
+- [ ] `score < 0.3` → `blocked`
+- [ ] `undefined` → `blocked` (fail-closed)
+- [ ] `requiresHuman` override: listede olan tool score'dan bağımsız `blocked`
+- [ ] `pi-tools.ts` `wrapToolWithEnforcement()` üç durumu doğru handle eder
+- [ ] `ApprovalSurface` interface tanımlı: `onApprovalRequest()` + 60s timeout
+- [ ] AT-2 senaryosu geçer: takvim auto, mail blocked (approval flow)
 - [ ] Mevcut `requiresHuman` enforcement kırılmaz
+- [ ] Mevcut allow/block davranışı feature flag kapalıyken korunur
 
-**Blocker/risk:** Mevcut tool ekosisteminde kaç tool'a score atanması gerektiği; ilk iterasyonda sadece bilinen tool'lara default score
+**Blocker/risk:**
+- Mevcut tool ekosisteminde kaç tool'a score atanması gerektiği; ilk iterasyonda sadece bilinen tool'lara default score
+- `ApprovalSurface` callback'inin kanal adaptöründen gelmesi gerekiyor — her kanal adaptörü (CLI, web, messaging) bunu implement etmeli
+- pi-tools.ts değişikliği geniş etkili; dikkatli backward-compat gerekli
 
 ### Sub-Task 9.6 — Act-First Notification + Undo
 
@@ -632,6 +693,7 @@ Loglar kontrol edildi. NullPointerException src/main.ts:142. Son deploy 14:32'de
 
 **Dokunulacak dosyalar:**
 - `src/agents/tool-policy-enforce.ts` — `ExecutionResult` tipi
+- `src/agents/approval-surface.ts` — bildirim kuyruğu entegrasyonu
 - UI/kanal adaptörü — bildirim rendering
 - Undo handler (yeni, basit)
 
