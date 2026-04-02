@@ -9,6 +9,7 @@ import {
 } from "../agents/pi-tools.policy.js";
 import {
   applyToolPolicyPipeline,
+  buildDefaultActFirstToolPolicyMeta,
   buildDefaultToolPolicyPipelineSteps,
 } from "../agents/tool-policy-pipeline.js";
 import { evaluateToolEnforcement } from "../agents/tool-policy-enforce.js";
@@ -279,6 +280,8 @@ export async function handleToolsInvokeHttpRequest(
     ]),
   });
 
+  const actFirstEnabled = process.env.OPENCLAW_ACT_FIRST?.trim() === "1";
+
   const subagentFiltered = applyToolPolicyPipeline({
     // oxlint-disable-next-line typescript/no-explicit-any
     tools: allTools as any,
@@ -298,6 +301,16 @@ export async function handleToolsInvokeHttpRequest(
         groupPolicy,
         agentId,
       }),
+      ...(actFirstEnabled
+        ? [
+            {
+              policy: undefined,
+              label: "act-first defaults",
+              // oxlint-disable-next-line typescript/no-explicit-any
+              meta: buildDefaultActFirstToolPolicyMeta(allTools as any),
+            },
+          ]
+        : []),
       { policy: subagentPolicy, label: "subagent tools.allow" },
     ],
   });
@@ -330,7 +343,7 @@ export async function handleToolsInvokeHttpRequest(
     meta: subagentFiltered.meta,
     humanApproved,
     callCounts: rateLimitStore,
-    actFirstEnabled: process.env.OPENCLAW_ACT_FIRST?.trim() === "1",
+    actFirstEnabled,
   });
   if (!enforcement.allowed) {
     // approval-required-low-reversibility → 409 with approval_required type.
@@ -343,6 +356,18 @@ export async function handleToolsInvokeHttpRequest(
     sendJson(res, status, {
       ok: false,
       error: { type: errorType, message: enforcement.message },
+    });
+    return true;
+  }
+  // confirm mode: tool is allowed but requires interactive approval first.
+  // HTTP callers must retry with humanApproved: true after presenting the prompt.
+  if (enforcement.mode === "confirm") {
+    sendJson(res, 409, {
+      ok: false,
+      error: {
+        type: "approval_required",
+        message: enforcement.confirmPrompt,
+      },
     });
     return true;
   }
