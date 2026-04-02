@@ -402,6 +402,17 @@ describe("runPreparedReply media-only handling", () => {
     expect(call?.followupRun.prompt).toContain("System: [t] Node connected.");
   });
 
+  it("carries cognitive mode into the followup run payload", async () => {
+    await runPreparedReply(
+      baseParams({
+        cognitiveMode: "executive",
+      }),
+    );
+
+    const call = vi.mocked(runReplyAgent).mock.calls[0]?.[0];
+    expect(call?.followupRun.run.cognitiveMode).toBe("executive");
+  });
+
   it("does not strip think-hint token from deferred queue body", async () => {
     // In steer mode the inferred thinkLevel is never consumed, so the first token
     // must not be stripped from the queue/steer body (followupRun.prompt).
