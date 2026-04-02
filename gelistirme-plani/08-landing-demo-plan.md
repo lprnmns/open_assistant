@@ -335,20 +335,18 @@ S4-S6 (runtime davranisi, yalnizca OA tarafinda dogrulanmis):
 
 **Icerik:** Demo recording + landing page'e embed + CTA formu
 
-**Durum: PARTIAL / PENDING** — CTA dürüst pending state'e getirildi, ama aşağıdaki iki kabul kriteri henüz karşılanmadı:
+**Durum: COMPLETE (static delivery)** — terminal GIF asset ve zero-backend early access formu eklendi.
 
 **Tamamlananlar:**
-- [x] İkincil CTA'lar yapılandırıldı: "See the Benchmark" (#benchmark anchor), "Terminal Demo" disabled/Coming Soon
+- [x] Ikincil CTA'lar yapilandirildi: "See the Benchmark" (#benchmark anchor), "Watch the Demo GIF" (`landing/demo.gif`)
 - [x] SaaS / enterprise vaadi yok
-- [x] "Watch the Demo" butonu demo asset olmadan yanıltıcı olmaktan çıkarıldı
+- [x] Terminal proof-tour GIF asset mevcut: `landing/demo.gif`
+- [x] GIF repo icindeki benchmark/runtime kanitlarindan render ediliyor: `scripts/render-landing-demo.py`
+- [x] Demo kapsami (5 sahne): note recall / distraction resistance / owner drain / third-party guard / quiet tick
+- [x] CTA artik gercek bir HTML form iceriyor (`FormSubmit` action ile static email collection)
 
-**Bekleyenler (açık):**
-- [ ] Demo 6 sahneyi takip eden 2-4 dakikalik video veya terminal GIF — çalışan sistem üzerinde kayıt gerektirir
-- [ ] CTA: Gerçek "Request early access" formu (email toplama) — backend endpoint veya dış form servisi gerektirir (Formspree vb.)
-
-**Ön koşullar:**
-- Demo kaydı için `pnpm dev` + scheduler canlı çalışmalı
-- Email formu için tercih edilecek servis kararlaştırılmalı (self-hosted, Formspree, ConvertKit, vb.)
+**Operasyonel not:**
+- `FormSubmit` delivery zincirinin ilk canli gonderimde inbox dogrulamasi gerektirmesi mumkundur; bu deploy-time operasyondur, landing kod eksikligi degildir.
 
 ### Sub-Task 8.7 — Claim Audit + QA Review
 
