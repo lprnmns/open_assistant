@@ -372,16 +372,21 @@ export function simulateCognitiveLoadScenario(): SmokeScenarioReport {
     cognitiveMode: assessment.mode,
   });
 
+  const hasNoEmoji = prompt.includes("Do not use emoji in this mode.");
+  const hasNoFluff = prompt.includes("Do not add filler phrases, pleasantries, or motivational commentary.");
+
   return {
     id: "cognitive-load",
     status:
       assessment.mode === "executive" &&
       prompt.includes("Current reply mode: executive.") &&
-      prompt.includes("Be brief, direct, and action-first.")
-        ? "partial"
+      prompt.includes("Be brief, direct, and action-first.") &&
+      hasNoEmoji &&
+      hasNoFluff
+        ? "pass"
         : "fail",
     summary:
-      "The inbound reply path does switch into executive mode and injects shorter, action-first guidance into the agent system prompt. What is still not guaranteed is a hard 'no emoji' rule; the prompt minimizes warmth but does not explicitly ban emoji output.",
+      "The inbound reply path switches into executive mode, injects action-first guidance, and explicitly bans emoji and filler in the agent system prompt.",
     checks: [
       {
         label: "executive-mode-detected",
@@ -397,9 +402,17 @@ export function simulateCognitiveLoadScenario(): SmokeScenarioReport {
       },
       {
         label: "hard-no-emoji-rule",
-        passed: false,
-        detail:
-          "The executive prompt tells the model to minimize warmth and extra explanation, but it does not contain an explicit emoji ban.",
+        passed: hasNoEmoji,
+        detail: hasNoEmoji
+          ? "Executive prompt contains explicit emoji ban."
+          : "Executive prompt does not contain an explicit emoji ban.",
+      },
+      {
+        label: "hard-no-fluff-rule",
+        passed: hasNoFluff,
+        detail: hasNoFluff
+          ? "Executive prompt contains explicit filler/pleasantries ban."
+          : "Executive prompt does not contain a filler ban.",
       },
     ],
     artifacts: {

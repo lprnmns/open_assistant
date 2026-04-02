@@ -74,10 +74,10 @@ describe("runtime smoke scenarios", () => {
     );
   });
 
-  it("switches to executive mode but does not hard-ban emoji output", () => {
+  it("switches to executive mode with explicit no-emoji and no-fluff rules", () => {
     const result = simulateCognitiveLoadScenario();
 
-    expect(result.status).toBe("partial");
+    expect(result.status).toBe("pass");
     expect(result.checks).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -90,7 +90,11 @@ describe("runtime smoke scenarios", () => {
         }),
         expect.objectContaining({
           label: "hard-no-emoji-rule",
-          passed: false,
+          passed: true,
+        }),
+        expect.objectContaining({
+          label: "hard-no-fluff-rule",
+          passed: true,
         }),
       ]),
     );

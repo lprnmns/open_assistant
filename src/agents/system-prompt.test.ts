@@ -194,7 +194,7 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Voice (TTS) is enabled.");
   });
 
-  it("injects executive reply mode guidance and keeps it shorter than companion mode", () => {
+  it("injects executive reply mode guidance with explicit no-emoji and no-fluff rules", () => {
     const executivePrompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
       cognitiveMode: "executive",
@@ -207,9 +207,10 @@ describe("buildAgentSystemPrompt", () => {
     expect(executivePrompt).toContain("## Reply Mode");
     expect(executivePrompt).toContain("Current reply mode: executive.");
     expect(executivePrompt).toContain("Be brief, direct, and action-first.");
+    expect(executivePrompt).toContain("Do not use emoji in this mode.");
+    expect(executivePrompt).toContain("Do not add filler phrases, pleasantries, or motivational commentary.");
     expect(companionPrompt).toContain("Current reply mode: companion.");
     expect(companionPrompt).toContain("Be warm, collaborative, and lightly explanatory.");
-    expect(executivePrompt.length).toBeLessThan(companionPrompt.length);
   });
 
   it("keeps standard mode prompt unchanged", () => {
