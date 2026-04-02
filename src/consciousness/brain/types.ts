@@ -1,3 +1,5 @@
+import type { TemporalRange } from "./temporal-resolver.js";
+
 /**
  * src/consciousness/brain/types.ts — Living Brain memory contracts
  *
@@ -138,6 +140,21 @@ export type MemoryRecallResult = {
    * Notes that already appear in `recent` are excluded (deduplicated by id).
    */
   readonly recalled: readonly MemoryNote[];
+  /**
+   * Optional recall warning when a temporal filter matched the query but the
+   * filtered candidate set was empty. Callers can surface this instead of
+   * silently falling back to unrelated older memories.
+   */
+  readonly warning?: string;
+};
+
+/**
+ * Optional createdAt filter applied before recency/vector ranking.
+ * `startTime` is inclusive, `endTime` is exclusive.
+ */
+export type MemoryTimeFilter = {
+  startTime?: number;
+  endTime?: number;
 };
 
 // ── Embedder ──────────────────────────────────────────────────────────────────
@@ -174,6 +191,11 @@ export interface Cortex {
    * Returns all staged notes when fewer than n are available.
    */
   recent(n: number): readonly MemoryNote[];
+  /**
+   * Return the n most recent notes that also satisfy the optional createdAt
+   * range filter. The result remains newest-first.
+   */
+  recent(n: number, filter?: MemoryTimeFilter): readonly MemoryNote[];
   /** Drain the buffer entirely.  Used at shutdown or in tests. */
   clear(): void;
 }
@@ -209,7 +231,7 @@ export interface Hippocampus {
   recall(
     queryVector: readonly number[],
     k: number,
-    filter?: { sessionKey?: string },
+    filter?: { sessionKey?: string; startTime?: number; endTime?: number },
   ): Promise<readonly MemoryNote[]>;
   /**
    * List notes by type without vector search.
@@ -285,6 +307,11 @@ export type MemoryRecallQuery = {
   recentN?: number;
   /** When set, restricts Hippocampus recall to this session only. */
   sessionKey?: string;
+  /**
+   * Optional pre-resolved temporal range. When omitted, the recall pipeline may
+   * derive one from the query text via the temporal resolver.
+   */
+  temporalRange?: TemporalRange;
 };
 
 /** Default values for optional MemoryRecallQuery fields. */

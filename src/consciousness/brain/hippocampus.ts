@@ -64,6 +64,7 @@ const VEC_TABLE = "consciousness_notes_vec";
 const META_TABLE = "consciousness_meta";
 /** Meta key under which the embedding dimensionality is stored. */
 const META_DIMS_KEY = "dims";
+type SqlParam = string | number | Buffer;
 
 // ── Serialization ─────────────────────────────────────────────────────────────
 
@@ -231,7 +232,7 @@ export class SqliteHippocampus implements Hippocampus {
   async recall(
     queryVector: readonly number[],
     k: number,
-    filter?: { sessionKey?: string },
+    filter?: { sessionKey?: string; startTime?: number; endTime?: number },
   ): Promise<readonly MemoryNote[]> {
     try {
       // ensureReady() opens the DB and restores dims from meta if needed.
@@ -243,16 +244,33 @@ export class SqliteHippocampus implements Hippocampus {
       const normalized = sanitizeAndNormalizeEmbedding([...queryVector]);
       const blob = vectorToBlob(normalized);
       const sessionKey = filter?.sessionKey?.trim() || undefined;
+      const startTime = Number.isFinite(filter?.startTime) ? filter?.startTime : undefined;
+      const endTime = Number.isFinite(filter?.endTime) ? filter?.endTime : undefined;
+
+      const whereClauses: string[] = [];
+      const params: SqlParam[] = [];
+      if (sessionKey) {
+        whereClauses.push(`n.session_key = ?`);
+        params.push(sessionKey);
+      }
+      if (startTime !== undefined) {
+        whereClauses.push(`n.created_at >= ?`);
+        params.push(startTime);
+      }
+      if (endTime !== undefined) {
+        whereClauses.push(`n.created_at < ?`);
+        params.push(endTime);
+      }
 
       const sql =
         `SELECT n.id, n.content, n.type, n.session_key, n.created_at\n` +
         `  FROM ${VEC_TABLE} v\n` +
         `  JOIN ${NOTES_TABLE} n ON n.id = v.id\n` +
-        (sessionKey ? `  WHERE n.session_key = ?\n` : ``) +
+        (whereClauses.length > 0 ? `  WHERE ${whereClauses.join(" AND ")}\n` : ``) +
         `  ORDER BY vec_distance_cosine(v.embedding, ?) ASC\n` +
         `  LIMIT ?`;
 
-      const params: unknown[] = sessionKey ? [sessionKey, blob, k] : [blob, k];
+      params.push(blob, k);
 
       const rows = db.prepare(sql).all(...params) as Array<{
         id: string;
@@ -293,7 +311,7 @@ export class SqliteHippocampus implements Hippocampus {
         ` ORDER BY created_at ASC` +
         (applyLimit ? ` LIMIT ?` : ``);
 
-      const params: unknown[] = [type];
+      const params: SqlParam[] = [type];
       if (sessionKey) params.push(sessionKey);
       if (applyLimit) params.push(limit!);
 

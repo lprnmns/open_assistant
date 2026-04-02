@@ -152,6 +152,24 @@ describe("InMemoryCortex — recent ordering", () => {
     expect(c.recent(-0.5)).toEqual([]);
     expect(c.recent(-1.9)).toEqual([]);
   });
+
+  it("applies an optional start/end time filter while keeping newest-first order", () => {
+    const c = new InMemoryCortex(5);
+    c.stage(note("old", 100));
+    c.stage(note("match-1", 200));
+    c.stage(note("match-2", 300));
+    c.stage(note("new", 400));
+
+    const result = c.recent(5, { startTime: 150, endTime: 350 });
+    expect(result.map((entry) => entry.content)).toEqual(["match-2", "match-1"]);
+  });
+
+  it("returns [] when the time filter excludes every note", () => {
+    const c = new InMemoryCortex(5);
+    c.stage(note("a", 100));
+    c.stage(note("b", 200));
+    expect(c.recent(5, { startTime: 300, endTime: 400 })).toEqual([]);
+  });
 });
 
 // ── circular wrap-around ──────────────────────────────────────────────────────
