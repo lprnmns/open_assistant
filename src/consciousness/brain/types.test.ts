@@ -157,6 +157,15 @@ describe("MemoryRecallResult shape", () => {
     expect(result.recalled).toHaveLength(0);
   });
 
+  it("warning is optional and can describe a temporal miss", () => {
+    const result: MemoryRecallResult = {
+      recent: [],
+      recalled: [],
+      warning: "No notes found in that time range.",
+    };
+    expect(result.warning).toBe("No notes found in that time range.");
+  });
+
   it("deduplication invariant: a note id in recent should not appear in recalled", () => {
     // Pipelines must enforce this; the type contract documents it.
     const shared = makeMemoryNote({ content: "shared", sessionKey: "s", id: "shared-id" });

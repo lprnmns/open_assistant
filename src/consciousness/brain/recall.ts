@@ -24,11 +24,15 @@ import {
   type Cortex,
   type Embedder,
   type Hippocampus,
+  type MemoryTimeFilter,
   type MemoryNote,
   type MemoryRecallPipeline,
   type MemoryRecallQuery,
   type MemoryRecallResult,
 } from "./types.js";
+import { resolveTemporalRange } from "./temporal-resolver.js";
+
+const TEMPORAL_MISS_WARNING = "No notes found in that time range.";
 
 // ── DefaultMemoryRecallPipeline ───────────────────────────────────────────────
 
@@ -42,15 +46,23 @@ export class DefaultMemoryRecallPipeline implements MemoryRecallPipeline {
   async recall(query: MemoryRecallQuery): Promise<MemoryRecallResult> {
     const recentN = query.recentN ?? RECALL_DEFAULTS.recentN;
     const k = query.k ?? RECALL_DEFAULTS.k;
+    const temporalRange = query.temporalRange ?? resolveTemporalRange(query.text);
+    const timeFilter: MemoryTimeFilter | undefined = temporalRange
+      ? {
+          startTime: temporalRange.start,
+          endTime: temporalRange.end,
+        }
+      : undefined;
 
     // ── Step 1: Cortex.recent — UNCONDITIONAL, synchronous ───────────────────
     // This always succeeds.  The recent slice is populated regardless of whether
     // the embedding stack is available.
-    const recent: readonly MemoryNote[] = this.cortex.recent(recentN);
+    const recent: readonly MemoryNote[] = this.cortex.recent(recentN, timeFilter);
 
     // ── Steps 2 + 3: Embed then Hippocampus recall ───────────────────────────
     // Both are wrapped so any failure returns recalled:[] with recent intact.
     let recalled: readonly MemoryNote[] = [];
+    let vectorSearchCompleted = false;
 
     try {
       const queryVector = await this.embedder.embed(query.text);
@@ -59,8 +71,13 @@ export class DefaultMemoryRecallPipeline implements MemoryRecallPipeline {
         const raw = await this.hippocampus.recall(
           queryVector,
           k,
-          query.sessionKey !== undefined ? { sessionKey: query.sessionKey } : undefined,
+          {
+            sessionKey: query.sessionKey,
+            startTime: timeFilter?.startTime,
+            endTime: timeFilter?.endTime,
+          },
         );
+        vectorSearchCompleted = true;
 
         // ── Step 4: Deduplicate — remove notes already in the recent slice ───
         const recentIds = new Set(recent.map((n) => n.id));
@@ -72,7 +89,12 @@ export class DefaultMemoryRecallPipeline implements MemoryRecallPipeline {
       // Embedder failure — skip Hippocampus entirely; recalled stays []
     }
 
-    return { recent, recalled };
+    const warning =
+      temporalRange && vectorSearchCompleted && recent.length === 0 && recalled.length === 0
+        ? TEMPORAL_MISS_WARNING
+        : undefined;
+
+    return { recent, recalled, warning };
   }
 }
 

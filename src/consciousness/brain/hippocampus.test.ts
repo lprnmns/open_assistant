@@ -187,6 +187,30 @@ describe("SqliteHippocampus — ingest + recall (requires sqlite-vec)", () => {
     expect(sessions.has("sess-2")).toBe(true);
   });
 
+  it("time filter returns only notes inside the createdAt window", async () => {
+    if (!hasVec) return;
+    await h.ingest(note("old", { id: "old", createdAt: 100 }), VEC_A);
+    await h.ingest(note("match", { id: "match", createdAt: 200 }), VEC_A);
+    await h.ingest(note("new", { id: "new", createdAt: 300 }), VEC_A);
+
+    const r = await h.recall(QUERY_NEAR_A, 5, { startTime: 150, endTime: 250 });
+    expect(r.map((entry) => entry.id)).toEqual(["match"]);
+  });
+
+  it("combined sessionKey + time filter narrows the candidate set before ranking", async () => {
+    if (!hasVec) return;
+    await h.ingest(note("s1-old", { id: "s1-old", sessionKey: "sess-1", createdAt: 100 }), VEC_A);
+    await h.ingest(note("s1-hit", { id: "s1-hit", sessionKey: "sess-1", createdAt: 200 }), VEC_A);
+    await h.ingest(note("s2-hit", { id: "s2-hit", sessionKey: "sess-2", createdAt: 200 }), VEC_A);
+
+    const r = await h.recall(QUERY_NEAR_A, 5, {
+      sessionKey: "sess-1",
+      startTime: 150,
+      endTime: 250,
+    });
+    expect(r.map((entry) => entry.id)).toEqual(["s1-hit"]);
+  });
+
   it("recall with queryVector dimension mismatch returns []", async () => {
     if (!hasVec) return;
     await h.ingest(note("4-d note"), VEC_A);            // dims = 4

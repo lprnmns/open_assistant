@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createMemoryRecallPipeline, DefaultMemoryRecallPipeline } from "./recall.js";
 import type { Cortex, Embedder, Hippocampus, MemoryNote } from "./types.js";
 import { RECALL_DEFAULTS, makeMemoryNote } from "./types.js";
+import { resolveTemporalRange } from "./temporal-resolver.js";
 
 // ── mock factories ────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ describe("DefaultMemoryRecallPipeline — happy path", () => {
     const { cortex, embedder, hippocampus } = makeDeps();
     const p = createMemoryRecallPipeline({ cortex, embedder, hippocampus });
     await p.recall({ text: "q" });
-    expect(cortex.recent).toHaveBeenCalledWith(RECALL_DEFAULTS.recentN);
+    expect(cortex.recent).toHaveBeenCalledWith(RECALL_DEFAULTS.recentN, undefined);
   });
 
   it("applies RECALL_DEFAULTS.k when k is omitted", async () => {
@@ -99,7 +100,7 @@ describe("DefaultMemoryRecallPipeline — happy path", () => {
     const { cortex, embedder, hippocampus } = makeDeps();
     const p = createMemoryRecallPipeline({ cortex, embedder, hippocampus });
     await p.recall({ text: "q", recentN: 10 });
-    expect(cortex.recent).toHaveBeenCalledWith(10);
+    expect(cortex.recent).toHaveBeenCalledWith(10, undefined);
   });
 
   it("honours explicit k override", async () => {
@@ -133,25 +134,110 @@ describe("DefaultMemoryRecallPipeline — happy path", () => {
     expect(hippocampus.recall).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Number),
-      { sessionKey: "sess-1" },
+      { sessionKey: "sess-1", startTime: undefined, endTime: undefined },
     );
   });
 
-  it("passes undefined filter when sessionKey is omitted", async () => {
+  it("passes an unfiltered object when sessionKey is omitted", async () => {
     const { cortex, embedder, hippocampus } = makeDeps();
     const p = createMemoryRecallPipeline({ cortex, embedder, hippocampus });
     await p.recall({ text: "q" });
     expect(hippocampus.recall).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(Number),
-      undefined,
+      { sessionKey: undefined, startTime: undefined, endTime: undefined },
     );
+  });
+
+  it("passes explicit temporalRange to cortex and hippocampus", async () => {
+    const { cortex, embedder, hippocampus } = makeDeps();
+    const p = createMemoryRecallPipeline({ cortex, embedder, hippocampus });
+    const temporalRange = {
+      start: Date.UTC(2026, 2, 10, 0, 0, 0, 0),
+      end: Date.UTC(2026, 2, 11, 0, 0, 0, 0),
+      confidence: "exact" as const,
+      rawExpression: "last Tuesday",
+    };
+
+    await p.recall({ text: "podcast", temporalRange, sessionKey: "sess-1" });
+
+    expect(cortex.recent).toHaveBeenCalledWith(RECALL_DEFAULTS.recentN, {
+      startTime: temporalRange.start,
+      endTime: temporalRange.end,
+    });
+    expect(hippocampus.recall).toHaveBeenCalledWith(expect.anything(), expect.any(Number), {
+      sessionKey: "sess-1",
+      startTime: temporalRange.start,
+      endTime: temporalRange.end,
+    });
+  });
+
+  it("derives temporalRange from query text when not explicitly provided", async () => {
+    const { cortex, embedder, hippocampus } = makeDeps();
+    const p = createMemoryRecallPipeline({ cortex, embedder, hippocampus });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(Date.UTC(2026, 2, 19, 12, 0, 0, 0)));
+    try {
+      const temporalRange = resolveTemporalRange("what did we decide last Tuesday?");
+
+      expect(temporalRange).not.toBeNull();
+      await p.recall({
+        text: "what did we decide last Tuesday?",
+      });
+
+      expect(cortex.recent).toHaveBeenCalledWith(RECALL_DEFAULTS.recentN, {
+        startTime: temporalRange!.start,
+        endTime: temporalRange!.end,
+      });
+      expect(hippocampus.recall).toHaveBeenCalledWith(expect.anything(), expect.any(Number), {
+        sessionKey: undefined,
+        startTime: temporalRange!.start,
+        endTime: temporalRange!.end,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("recall() resolves (returns Promise<MemoryRecallResult>)", async () => {
     const { cortex, embedder, hippocampus } = makeDeps();
     const p = createMemoryRecallPipeline({ cortex, embedder, hippocampus });
     await expect(p.recall({ text: "q" })).resolves.toBeDefined();
+  });
+
+  it("returns a warning when a resolved temporal filter yields no notes", async () => {
+    const { cortex, embedder, hippocampus } = makeDeps({
+      recentNotes: [],
+      recallResult: [],
+    });
+    const p = createMemoryRecallPipeline({ cortex, embedder, hippocampus });
+    const result = await p.recall({ text: "last Tuesday" });
+    expect(result.recent).toEqual([]);
+    expect(result.recalled).toEqual([]);
+    expect(result.warning).toBe("No notes found in that time range.");
+  });
+
+  it("does not emit a temporal warning when the resolver returns null", async () => {
+    const recalled = [makeNote("semantic hit")];
+    const { cortex, embedder, hippocampus } = makeDeps({
+      recentNotes: [],
+      recallResult: recalled,
+    });
+    const p = createMemoryRecallPipeline({ cortex, embedder, hippocampus });
+    const result = await p.recall({ text: "tell me something useful" });
+    expect(result.recalled).toEqual(recalled);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("does not emit a temporal warning when embedder fails before vector search", async () => {
+    const { cortex, embedder, hippocampus } = makeDeps({
+      recentNotes: [],
+      embedResult: new Error("embed fail"),
+    });
+    const p = createMemoryRecallPipeline({ cortex, embedder, hippocampus });
+    const result = await p.recall({ text: "last Tuesday" });
+    expect(result.recalled).toEqual([]);
+    expect(result.warning).toBeUndefined();
   });
 });
 

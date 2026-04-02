@@ -25,7 +25,7 @@
  *   keeps stage() at O(1) regardless of capacity.
  */
 
-import type { Cortex, MemoryNote } from "./types.js";
+import type { Cortex, MemoryNote, MemoryTimeFilter } from "./types.js";
 
 /** Default capacity used by createCortex() when no override is supplied. */
 export const DEFAULT_CORTEX_CAPACITY = 64;
@@ -63,14 +63,18 @@ export class InMemoryCortex implements Cortex {
    * Return the n most recently staged notes, newest-first.
    * Returns min(n, size) items.  Never throws; returns [] for n ≤ 0.
    */
-  recent(n: number): readonly MemoryNote[] {
+  recent(n: number, filter?: MemoryTimeFilter): readonly MemoryNote[] {
     const count = Math.min(Math.max(0, Math.floor(n)), this.size);
     const result: MemoryNote[] = [];
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < this.size && result.length < count; i++) {
       // (head - 1) is the most recent, (head - 2) the one before, etc.
       // Adding capacity before the modulo prevents negative indices.
       const idx = (this.head - 1 - i + this.capacity) % this.capacity;
-      result.push(this.buffer[idx]!);
+      const note = this.buffer[idx]!;
+      if (!matchesTimeFilter(note, filter)) {
+        continue;
+      }
+      result.push(note);
     }
     return result;
   }
@@ -88,4 +92,17 @@ export class InMemoryCortex implements Cortex {
  */
 export function createCortex(capacity?: number): InMemoryCortex {
   return new InMemoryCortex(capacity);
+}
+
+function matchesTimeFilter(note: MemoryNote, filter: MemoryTimeFilter | undefined): boolean {
+  if (!filter) {
+    return true;
+  }
+  if (filter.startTime !== undefined && note.createdAt < filter.startTime) {
+    return false;
+  }
+  if (filter.endTime !== undefined && note.createdAt >= filter.endTime) {
+    return false;
+  }
+  return true;
 }
