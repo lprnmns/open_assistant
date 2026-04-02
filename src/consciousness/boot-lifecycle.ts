@@ -17,8 +17,8 @@
  *
  * Sub-Task 9.1 scope (minimal wiring):
  *   - pendingNoteCount → PendingReflectionQueue.count()
- *   - lastUserInteractionAt → undefined (not wired; no-op Watchdog path)
- *   - activeChannelId → undefined (SEND_MESSAGE falls back to silent drop)
+ *   - lastUserInteractionAt → in-process InteractionTracker
+ *   - activeChannelId → in-process InteractionTracker route key
  *   - firedTriggerIds → [] (no trigger registry yet)
  *   - sendToChannel → no-op (real transport wired in 9.2)
  *   - appendNote → no-op (brain ingestion wired in 9.2)
@@ -68,7 +68,7 @@ export function maybeStartConsciousnessLoop(
   const scheduler = startConsciousnessLoop({
     buildSnapshot: () =>
       buildRealWorldSnapshot({
-        // Real in-process sources — updated by the inbound message pipeline.
+        // Real in-process sources — updated by the shared inbound reply pipeline.
         // Persisted (Redis) sources are wired in Sub-Task 9.2.
         getLastUserInteractionAt: () => getLastUserInteractionAt(),
         getPendingNoteCount: () => reflectionQueue.count(),

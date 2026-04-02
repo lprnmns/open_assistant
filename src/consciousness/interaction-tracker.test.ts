@@ -8,6 +8,7 @@ import {
   getActiveChannelId,
   getLastUserInteractionAt,
   recordUserInteraction,
+  resolveActiveChannelIdFromInteraction,
 } from "./interaction-tracker.js";
 
 describe("InteractionTracker", () => {
@@ -53,5 +54,51 @@ describe("InteractionTracker", () => {
     recordUserInteraction("telegram");
     const t2 = getLastUserInteractionAt()!;
     expect(t2).toBeGreaterThanOrEqual(t1);
+  });
+
+  it("prefers OriginatingTo as the active route key", () => {
+    expect(
+      resolveActiveChannelIdFromInteraction({
+        OriginatingTo: "telegram:123",
+        NativeChannelId: "native:ignored",
+        To: "to:ignored",
+        From: "from:ignored",
+      }),
+    ).toBe("telegram:123");
+  });
+
+  it("falls back to NativeChannelId when OriginatingTo is absent", () => {
+    expect(
+      resolveActiveChannelIdFromInteraction({
+        NativeChannelId: "discord:channel:42",
+        To: "to:ignored",
+        From: "from:ignored",
+      }),
+    ).toBe("discord:channel:42");
+  });
+
+  it("falls back to To then From for legacy contexts", () => {
+    expect(
+      resolveActiveChannelIdFromInteraction({
+        To: "whatsapp:+15550001111",
+      }),
+    ).toBe("whatsapp:+15550001111");
+
+    expect(
+      resolveActiveChannelIdFromInteraction({
+        From: "signal:+15550002222",
+      }),
+    ).toBe("signal:+15550002222");
+  });
+
+  it("ignores empty route fragments", () => {
+    expect(
+      resolveActiveChannelIdFromInteraction({
+        OriginatingTo: "  ",
+        NativeChannelId: "",
+        To: "  ",
+        From: undefined,
+      }),
+    ).toBeUndefined();
   });
 });

@@ -6,6 +6,10 @@ import {
 } from "../../bindings/records.js";
 import { shouldSuppressLocalExecApprovalPrompt } from "../../channels/plugins/exec-approval-local.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import {
+  recordUserInteraction,
+  resolveActiveChannelIdFromInteraction,
+} from "../../consciousness/interaction-tracker.js";
 import { parseSessionThreadInfo } from "../../config/sessions/delivery-info.js";
 import { resolveStorePath } from "../../config/sessions/paths.js";
 import { loadSessionStore, resolveSessionStoreEntry } from "../../config/sessions/store.js";
@@ -212,6 +216,13 @@ export async function dispatchReplyFromConfig(params: {
   if (shouldSkipDuplicateInbound(ctx)) {
     recordProcessed("skipped", { reason: "duplicate" });
     return { queuedFinal: false, counts: dispatcher.getQueuedCounts() };
+  }
+
+  // Track the owner's latest reply route at the shared inbound reply entry point
+  // so built-in channels and extensions update consciousness consistently.
+  const activeChannelId = resolveActiveChannelIdFromInteraction(ctx);
+  if (activeChannelId) {
+    recordUserInteraction(activeChannelId);
   }
 
   const sessionStoreEntry = resolveSessionStoreLookup(ctx, cfg);
