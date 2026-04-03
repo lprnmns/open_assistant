@@ -10,7 +10,10 @@
  *   - Boot seam: maybeStartConsciousnessLoop() verified end-to-end
  */
 
-import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 import type { TickResult } from "./loop.js";
 import { FileInteractionStore } from "./interaction-store.js";
@@ -360,5 +363,160 @@ describe("WS-1.2: effectiveSilenceThresholdMs persistence", () => {
     };
     expect(merged.lastTickAt).toBe(firstTickAt);
     expect(merged.effectiveSilenceThresholdMs).toBe(259_200_000);
+  });
+});
+
+// ── Real boot seam with disk state (end-to-end) ───────────────────────────────
+//
+// These tests exercise the actual code path in boot-lifecycle.ts lines 103-132:
+//   FileInteractionStore is constructed with a real file path → loadSync() reads
+//   the persisted JSON → effectiveThresholdRef and lastTickAtRef are seeded from
+//   disk → getEffectiveSilenceThresholdMs() / getLastTickAt() expose those refs.
+//
+// They also exercise lines 142-157 (the real onTickCallback wiring):
+//   _fireOnTickForTest() calls the actual onTickCallback extracted at boot →
+//   refs are updated → interactionStore.save() is called → close() flushes to disk.
+
+describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes real disk state", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cl-boot-seam-"));
+    _resetInteractionTrackerForTest();
+  });
+
+  afterEach(() => {
+    _resetInteractionTrackerForTest();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("persisted effectiveSilenceThresholdMs beats env at boot (real disk read)", () => {
+    // Write a state file where effectiveSilenceThresholdMs has been backoff-expanded to
+    // 2_700_000 (smaller than env=259_200_000 — simulating an earlier small threshold that
+    // was expanded by backoff; the persisted value MUST take priority regardless of size).
+    const statePath = path.join(tmpDir, "state.json");
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({ effectiveSilenceThresholdMs: 2_700_000, lastTickAt: 1_700_000_000_000 }),
+    );
+
+    const lifecycle = maybeStartConsciousnessLoop({
+      CONSCIOUSNESS_ENABLED: "1",
+      CONSCIOUSNESS_STATE_PATH: statePath,
+      CONSCIOUSNESS_SILENCE_THRESHOLD_MS: "259200000", // env says 3 days
+    });
+
+    try {
+      expect(lifecycle).not.toBeNull();
+      // Persisted value (2.7M) must win over env (259.2M)
+      expect(lifecycle!.getEffectiveSilenceThresholdMs()).toBe(2_700_000);
+    } finally {
+      lifecycle?.stop();
+    }
+  });
+
+  it("persisted lastTickAt is restored to getLastTickAt() at boot (real disk read)", () => {
+    const persistedLastTickAt = 1_700_000_000_000;
+    const statePath = path.join(tmpDir, "state.json");
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({
+        effectiveSilenceThresholdMs: 259_200_000,
+        lastTickAt: persistedLastTickAt,
+      }),
+    );
+
+    const lifecycle = maybeStartConsciousnessLoop({
+      CONSCIOUSNESS_ENABLED: "1",
+      CONSCIOUSNESS_STATE_PATH: statePath,
+    });
+
+    try {
+      expect(lifecycle).not.toBeNull();
+      // lastTickAtRef must be seeded from disk — no tick has fired yet
+      expect(lifecycle!.getLastTickAt()).toBe(persistedLastTickAt);
+    } finally {
+      lifecycle?.stop();
+    }
+  });
+
+  it("_fireOnTickForTest writes updated refs back to real disk via onTickCallback wiring", async () => {
+    const statePath = path.join(tmpDir, "state.json");
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({ effectiveSilenceThresholdMs: 259_200_000, lastTickAt: 1_700_000_000_000 }),
+    );
+
+    const lifecycle = maybeStartConsciousnessLoop({
+      CONSCIOUSNESS_ENABLED: "1",
+      CONSCIOUSNESS_STATE_PATH: statePath,
+      CONSCIOUSNESS_SILENCE_THRESHOLD_MS: "259200000",
+    });
+    expect(lifecycle).not.toBeNull();
+
+    const newThreshold = 518_400_000; // 2× backoff
+    const beforeFire = Date.now();
+
+    // Fire the real onTickCallback through the test seam
+    lifecycle!._fireOnTickForTest(makeSilenceThresholdTickResult(newThreshold));
+
+    // Flush pending debounced write synchronously before reading the file
+    await lifecycle!.interactionStore!.close();
+    lifecycle!.stop(); // idempotent — store already closed
+
+    const afterFire = Date.now();
+
+    // Read the real disk file back
+    const written = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
+      effectiveSilenceThresholdMs: number;
+      lastTickAt: number;
+    };
+
+    // onTickCallback must have persisted the backoff-expanded threshold
+    expect(written.effectiveSilenceThresholdMs).toBe(newThreshold);
+
+    // onTickCallback must have persisted a fresh lastTickAt (set via Date.now() inside callback)
+    expect(written.lastTickAt).toBeGreaterThanOrEqual(beforeFire);
+    expect(written.lastTickAt).toBeLessThanOrEqual(afterFire);
+
+    // In-memory refs must also reflect the updates
+    expect(lifecycle!.getEffectiveSilenceThresholdMs()).toBe(newThreshold);
+    expect(lifecycle!.getLastTickAt()).toBeGreaterThanOrEqual(beforeFire);
+  });
+
+  it("no-wake tick updates lastTickAt on disk without changing effectiveSilenceThresholdMs", async () => {
+    const originalThreshold = 259_200_000;
+    const statePath = path.join(tmpDir, "state.json");
+    fs.writeFileSync(
+      statePath,
+      JSON.stringify({
+        effectiveSilenceThresholdMs: originalThreshold,
+        lastTickAt: 1_700_000_000_000,
+      }),
+    );
+
+    const lifecycle = maybeStartConsciousnessLoop({
+      CONSCIOUSNESS_ENABLED: "1",
+      CONSCIOUSNESS_STATE_PATH: statePath,
+      CONSCIOUSNESS_SILENCE_THRESHOLD_MS: String(originalThreshold),
+    });
+    expect(lifecycle).not.toBeNull();
+
+    const beforeFire = Date.now();
+    lifecycle!._fireOnTickForTest(makeNoWakeTickResult());
+    await lifecycle!.interactionStore!.close();
+    lifecycle!.stop();
+    const afterFire = Date.now();
+
+    const written = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
+      effectiveSilenceThresholdMs: number;
+      lastTickAt: number;
+    };
+
+    // Threshold must be unchanged — no SILENCE_THRESHOLD fired
+    expect(written.effectiveSilenceThresholdMs).toBe(originalThreshold);
+    // lastTickAt must have been updated by the tick
+    expect(written.lastTickAt).toBeGreaterThanOrEqual(beforeFire);
+    expect(written.lastTickAt).toBeLessThanOrEqual(afterFire);
   });
 });
