@@ -289,6 +289,51 @@ describe("seedInteractionTracker + setInteractionStore integration", () => {
     expect(parsed.lastProactiveSentAt).toBe(1_700_000_000_000);
   });
 
+  it("restart boundary: loadSync() hydrates mergedState so WS-1.2/1.3 fields survive first partial save", async () => {
+    // ── Simulate first process: WS-1.2/1.3 write their fields, then shutdown ──
+    const diskStorage: { data: string } = { data: "" };
+    const storeA = new FileInteractionStore({
+      filePath: "/fake/state.json",
+      debounceMs: 0,
+      _writeForTest: (_, d) => { diskStorage.data = d; },
+    });
+    storeA.save({ effectiveSilenceThresholdMs: 259_200_000 });
+    storeA.save({ lastProactiveSentAt: 1_700_000_000_000 });
+    await storeA.close();
+    expect(diskStorage.data).not.toBe(""); // something was written
+
+    // ── Simulate second process: boot reads disk, then inbound message arrives ──
+    const writes: Array<string> = [];
+    const storeB = new FileInteractionStore({
+      filePath: "/fake/state.json",
+      debounceMs: 0,
+      _writeForTest: (_, d) => writes.push(d),
+      _readForTest: () => diskStorage.data,
+    });
+
+    // Boot-lifecycle: load from disk + seed tracker
+    const loaded = storeB.loadSync();
+    expect(loaded).not.toBeNull();
+    setInteractionStore(storeB);
+    if (loaded) seedInteractionTracker(loaded);
+
+    // First inbound message — recordUserInteraction writes only 3 tracker fields
+    recordUserInteraction("telegram:77", "telegram");
+    await storeB.close();
+
+    expect(writes).toHaveLength(1);
+    const parsed = JSON.parse(writes[0]!) as PersistedInteractionState;
+
+    // Tracker fields
+    expect(parsed.activeChannelId).toBe("telegram:77");
+    expect(parsed.activeChannelType).toBe("telegram");
+    expect(typeof parsed.lastUserInteractionAt).toBe("number");
+
+    // WS-1.2/1.3 fields from first process must NOT have been wiped
+    expect(parsed.effectiveSilenceThresholdMs).toBe(259_200_000);
+    expect(parsed.lastProactiveSentAt).toBe(1_700_000_000_000);
+  });
+
   it("after stop (setInteractionStore(null)), recordUserInteraction does not persist", () => {
     const writes: Array<{ path: string; data: string }> = [];
     const store = makeStore({ writes });

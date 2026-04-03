@@ -135,6 +135,11 @@ export class FileInteractionStore implements InteractionStore {
 
   /**
    * Synchronous read for boot-time seeding.
+   *
+   * On success, hydrates this.mergedState with the loaded data so that
+   * subsequent partial save() calls preserve all previously persisted fields
+   * across process restarts — not just within the same process instance.
+   *
    * Returns null when the file does not exist or contains invalid JSON.
    */
   loadSync(): PersistedInteractionState | null {
@@ -146,7 +151,12 @@ export class FileInteractionStore implements InteractionStore {
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         return null;
       }
-      return parsed as PersistedInteractionState;
+      const state = parsed as PersistedInteractionState;
+      // Hydrate internal merged state so the restart boundary is transparent:
+      // the first partial save() after boot merges onto the full disk snapshot
+      // rather than onto an empty object.
+      this.mergedState = { ...state };
+      return state;
     } catch {
       return null;
     }
