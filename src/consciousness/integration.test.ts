@@ -138,6 +138,47 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     ]);
   });
 
+  it("updates runtime state and calls onProactiveSent after a successful send", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+
+    const onProactiveSent = vi.fn();
+    const ctx = makeCtx({
+      proactiveState: {},
+      onProactiveSent,
+    });
+    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
+    const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello!" };
+
+    const result = await dispatchDecision(decision, snap, ctx);
+
+    expect(result.dispatched).toBe(true);
+    expect(ctx.proactiveState?.lastSentAt).toBe(NOW);
+    expect(onProactiveSent).toHaveBeenCalledOnce();
+    expect(onProactiveSent).toHaveBeenCalledWith(NOW);
+  });
+
+  it("does not call onProactiveSent when the proactive send is rate-limited", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(NOW));
+
+    const onProactiveSent = vi.fn();
+    const ctx = makeCtx({
+      proactiveState: { lastSentAt: NOW - 10_000 },
+      onProactiveSent,
+    });
+    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
+    const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello again" };
+
+    const result = await dispatchDecision(decision, snap, ctx, {
+      ...DEFAULT_CONSCIOUSNESS_CONFIG,
+      proactiveMessageMinIntervalMs: 60_000,
+    });
+
+    expect(result.dispatched).toBe(false);
+    expect(onProactiveSent).not.toHaveBeenCalled();
+  });
+
   it("returns dispatched:false with error when sendToChannel throws — does not rethrow", async () => {
     const auditLog = new ConsciousnessAuditLog();
     const ctx = makeCtx({

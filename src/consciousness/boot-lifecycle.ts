@@ -73,11 +73,22 @@ export type ConsciousnessLifecycle = {
    */
   getLastTickAt: () => number | undefined;
   /**
+   * Returns the Unix ms timestamp of the last successful proactive SEND_MESSAGE
+   * dispatch, or undefined if none has been recorded in the current/persisted
+   * lifecycle yet.
+   */
+  getLastProactiveSentAt: () => number | undefined;
+  /**
    * Test seam: directly invoke the onTick callback that was wired into the
    * scheduler.  Allows verifying onTick → store persistence without timers.
    * Never call from production code.
    */
   _fireOnTickForTest: (result: TickResult) => void;
+  /**
+   * Test seam: directly invoke the persistence hook used after successful
+   * proactive SEND_MESSAGE dispatches.
+   */
+  _fireOnProactiveSentForTest: (sentAt?: number) => void;
 };
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -137,7 +148,14 @@ export function maybeStartConsciousnessLoop(
     filePath: resolveAuditLogPath(env),
   });
   setGlobalConsciousnessAuditLog(auditLog);
-  const proactiveState: { lastSentAt?: number } = {};
+  const proactiveState: { lastSentAt?: number } = {
+    lastSentAt: loaded?.lastProactiveSentAt as number | undefined,
+  };
+
+  const onProactiveSentCallback = (sentAt: number): void => {
+    proactiveState.lastSentAt = sentAt;
+    interactionStore?.save({ lastProactiveSentAt: sentAt });
+  };
 
   // Named onTick callback — extracted so the lifecycle can expose it as a test seam.
   const onTickCallback = (result: TickResult): void => {
@@ -196,6 +214,7 @@ export function maybeStartConsciousnessLoop(
       },
       appendNote: async (_content: string) => {},
       proactiveState,
+      onProactiveSent: onProactiveSentCallback,
       auditLog,
     },
     auditLog,
@@ -229,7 +248,9 @@ export function maybeStartConsciousnessLoop(
     interactionStore,
     getEffectiveSilenceThresholdMs: () => effectiveThresholdRef.value,
     getLastTickAt: () => lastTickAtRef.value,
+    getLastProactiveSentAt: () => proactiveState.lastSentAt,
     _fireOnTickForTest: onTickCallback,
+    _fireOnProactiveSentForTest: (sentAt = Date.now()) => onProactiveSentCallback(sentAt),
   };
 }
 

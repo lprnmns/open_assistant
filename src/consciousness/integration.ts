@@ -55,6 +55,13 @@ export type DispatchContext = {
   };
 
   /**
+   * Optional persistence hook for successful proactive sends.
+   * Called only after sendToChannel resolved and the in-memory proactiveState
+   * was updated, so the durable store stays aligned with runtime state.
+   */
+  onProactiveSent?: (sentAt: number) => void;
+
+  /**
    * Optional audit sink for proactive send attempts.
    */
   auditLog?: ConsciousnessAuditLog;
@@ -128,6 +135,7 @@ export async function dispatchDecision(
         if (ctx.proactiveState) {
           ctx.proactiveState.lastSentAt = now;
         }
+        ctx.onProactiveSent?.(now);
         ctx.auditLog?.append(
           createDispatchAuditEntry({
             timestamp: now,
