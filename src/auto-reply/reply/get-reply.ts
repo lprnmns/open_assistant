@@ -419,6 +419,7 @@ export async function getReplyFromConfig(
     signals: cognitiveAssessment.signals,
   });
   const cognitiveMode = cognitiveAssessment.mode;
+  resolvedOpts?.onCognitiveModeResolved?.(cognitiveMode);
 
   return runPreparedReply({
     ctx,

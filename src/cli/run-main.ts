@@ -128,7 +128,7 @@ export async function runCli(argv: string[] = process.argv) {
   assertSupportedRuntime();
 
   // Declared before try so the finally block can call stop().
-  let consciousnessLifecycle: { stop: () => void } | null = null;
+  let consciousnessLifecycle: { stop: () => Promise<void> } | null = null;
 
   try {
     if (shouldUseRootHelpFastPath(normalizedArgv)) {
@@ -163,7 +163,7 @@ export async function runCli(argv: string[] = process.argv) {
     const { maybeStartConsciousnessLoop } = await import(
       "../consciousness/boot-lifecycle.js"
     );
-    consciousnessLifecycle = maybeStartConsciousnessLoop();
+    consciousnessLifecycle = await maybeStartConsciousnessLoop();
 
     const parseArgv = rewriteUpdateFlagArgv(normalizedArgv);
     // Register the primary command (builtin or subcli) so help and command parsing
@@ -200,7 +200,7 @@ export async function runCli(argv: string[] = process.argv) {
 
     await program.parseAsync(parseArgv);
   } finally {
-    consciousnessLifecycle?.stop();
+    await consciousnessLifecycle?.stop();
     await closeCliMemoryManagers();
   }
 }

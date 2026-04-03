@@ -1,4 +1,5 @@
 import type { ImageContent } from "@mariozechner/pi-ai";
+import type { CognitiveMode } from "../consciousness/cognitive-load.js";
 import type { InteractiveReply } from "../interactive/payload.js";
 import type { TypingController } from "./reply/typing.js";
 
@@ -62,6 +63,8 @@ export type GetReplyOptions = {
   /** Called when the actual model is selected (including after fallback).
    * Use this to get model/provider/thinkLevel for responsePrefix template interpolation. */
   onModelSelected?: (ctx: ModelSelectedContext) => void;
+  /** Called once the inbound message's cognitive mode is resolved. */
+  onCognitiveModeResolved?: (mode: CognitiveMode) => void;
   disableBlockStreaming?: boolean;
   /** Timeout for block reply delivery (ms). */
   blockReplyTimeoutMs?: number;

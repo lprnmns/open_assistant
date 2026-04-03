@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEntry } from "../../config/sessions.js";
+import type { ProductionBrain } from "../../consciousness/brain/brain-factory.js";
+import { setConsciousnessRuntime } from "../../consciousness/runtime.js";
 import { loadSessionStore, saveSessionStore } from "../../config/sessions.js";
 import { onAgentEvent } from "../../infra/agent-events.js";
 import { peekSystemEvents, resetSystemEventsForTest } from "../../infra/system-events.js";
@@ -84,6 +86,35 @@ type RunWithModelFallbackParams = {
   run: (provider: string, model: string) => Promise<unknown>;
 };
 
+function makeFakeBrain(): ProductionBrain {
+  return {
+    cortex: {
+      stage: () => {},
+      recent: () => [],
+      clear: () => {},
+    },
+    hippocampus: {
+      ingest: async () => {},
+      recall: async () => [],
+      close: async () => {},
+    },
+    embedder: {
+      embed: async () => [],
+    },
+    ingestion: {
+      ingest: vi.fn().mockResolvedValue(undefined),
+    },
+    recall: {
+      recall: vi.fn().mockResolvedValue({ recent: [], recalled: [] }),
+    },
+    sessionKey: "consciousness-main",
+    dbPath: "data/consciousness.db",
+    providerId: "test-provider",
+    model: "test-model",
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 beforeEach(() => {
   runEmbeddedPiAgentMock.mockClear();
   runCliAgentMock.mockClear();
@@ -107,6 +138,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   resetSystemEventsForTest();
+  setConsciousnessRuntime(null);
 });
 
 describe("runReplyAgent onAgentRunStart", () => {
@@ -214,6 +246,31 @@ describe("runReplyAgent onAgentRunStart", () => {
     expect(onAgentRunStart).toHaveBeenCalledTimes(1);
     expect(onAgentRunStart).toHaveBeenCalledWith("run-started");
     expect(result).toMatchObject({ text: "ok" });
+  });
+
+  it("ingests guarded assistant reply payloads into the consciousness brain", async () => {
+    const brain = makeFakeBrain();
+    setConsciousnessRuntime({ brain });
+    runCliAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "assistant says hi" }],
+      meta: {
+        agentMeta: {
+          provider: "claude-cli",
+          model: "opus-4.5",
+        },
+      },
+    });
+
+    const result = await createRun({
+      provider: "claude-cli",
+      model: "opus-4.5",
+    });
+
+    expect(result).toMatchObject({ text: "assistant says hi" });
+    expect(brain.ingestion.ingest).toHaveBeenCalledWith({
+      content: "[assistant]: assistant says hi",
+      sessionKey: "main",
+    });
   });
 });
 

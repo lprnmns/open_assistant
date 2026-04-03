@@ -1,38 +1,29 @@
 /**
- * src/consciousness/boot-lifecycle.ts — Production boot wiring for the Consciousness Loop
+ * src/consciousness/boot-lifecycle.ts - Production boot wiring for the
+ * Consciousness Loop.
  *
- * Provides maybeStartConsciousnessLoop() — the single call-site that the app
- * bootstrap makes to wire the consciousness loop into the process lifecycle.
- *
- * Feature flag:
- *   CONSCIOUSNESS_ENABLED=1   — enables the loop (default: disabled)
- *
- * When enabled, this module:
- *   1. Creates a PendingReflectionQueue instance
- *   2. Constructs SnapshotAdapters from real in-process interaction sources
- *   3. Calls startConsciousnessLoop() with the wired adapters
- *   4. Registers SIGTERM / SIGINT handlers for graceful shutdown
- *   5. Returns a cleanup function for the call-site finally block
- *
- * Sub-Task 9.2 scope:
- *   - pendingNoteCount → PendingReflectionQueue.count()
- *   - lastUserInteractionAt → in-process InteractionTracker
- *   - activeChannelId / activeChannelType → in-process InteractionTracker route
- *   - firedTriggerIds → [] (no trigger registry yet)
- *   - sendToChannel → routeReply() for routable channels
- *   - appendNote → no-op (brain ingestion wired in a later sub-task)
+ * maybeStartConsciousnessLoop() is the single app bootstrap seam for the
+ * background loop. When CONSCIOUSNESS_ENABLED=1 it wires:
+ *   1. persisted interaction state
+ *   2. production Living Brain init
+ *   3. snapshot adapters
+ *   4. proactive dispatch callbacks
+ *   5. graceful shutdown
  */
 
 import process from "node:process";
-import { startConsciousnessLoop } from "./boot.js";
-import type { ConsciousnessScheduler } from "./boot.js";
-import type { TickResult } from "./loop.js";
-import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
+import { resolveSessionAgentId } from "../agents/agent-scope.js";
+import { loadConfig, type OpenClawConfig } from "../config/config.js";
 import {
   clearGlobalConsciousnessAuditLog,
   ConsciousnessAuditLog,
   setGlobalConsciousnessAuditLog,
 } from "./audit.js";
+import { startConsciousnessLoop, type ConsciousnessScheduler } from "./boot.js";
+import {
+  createProductionBrain,
+  type ProductionBrain,
+} from "./brain/brain-factory.js";
 import {
   getActiveChannelId,
   getActiveChannelType,
@@ -41,81 +32,48 @@ import {
   setInteractionStore,
 } from "./interaction-tracker.js";
 import { FileInteractionStore } from "./interaction-store.js";
+import type { TickResult } from "./loop.js";
 import { PendingReflectionQueue } from "./reflection-queue.js";
+import { setConsciousnessRuntime } from "./runtime.js";
 import { buildRealWorldSnapshot } from "./snapshot.js";
-
-// ── Result type ───────────────────────────────────────────────────────────────
+import { ingestConversationTurn } from "./turn-ingestion.js";
+import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 
 export type ConsciousnessLifecycle = {
-  /** Stop the loop — safe to call multiple times. */
-  stop: () => void;
-  /** The underlying scheduler (for introspection / testing). */
+  stop: () => Promise<void>;
   scheduler: ConsciousnessScheduler;
-  /** The reflection queue that feeds pendingNoteCount. */
+  brain: ProductionBrain;
   reflectionQueue: PendingReflectionQueue;
-  /** Structured audit trail for proactive sends, ticks, and mode transitions. */
   auditLog: ConsciousnessAuditLog;
-  /**
-   * Persistent interaction store backing the InteractionTracker.
-   * undefined when persistence is disabled (CONSCIOUSNESS_STATE_PATH not set
-   * and no default path was resolved).  Closed automatically on stop().
-   */
   interactionStore?: FileInteractionStore;
-  /**
-   * Returns the current effective silence threshold (ms) from the mutable ref.
-   * Reflects the persisted backoff-expanded value after a SILENCE_THRESHOLD tick.
-   * Useful for tests and monitoring without triggering a snapshot build.
-   */
   getEffectiveSilenceThresholdMs: () => number;
-  /**
-   * Returns the Unix ms timestamp of the last completed tick, or undefined if
-   * no tick has run yet.  Read from the same ref used by the snapshot adapter.
-   */
   getLastTickAt: () => number | undefined;
-  /**
-   * Returns the Unix ms timestamp of the last successful proactive SEND_MESSAGE
-   * dispatch, or undefined if none has been recorded in the current/persisted
-   * lifecycle yet.
-   */
   getLastProactiveSentAt: () => number | undefined;
-  /**
-   * Test seam: directly invoke the onTick callback that was wired into the
-   * scheduler.  Allows verifying onTick → store persistence without timers.
-   * Never call from production code.
-   */
   _fireOnTickForTest: (result: TickResult) => void;
-  /**
-   * Test seam: directly invoke the persistence hook used after successful
-   * proactive SEND_MESSAGE dispatches.
-   */
   _fireOnProactiveSentForTest: (sentAt?: number) => void;
 };
 
-// ── Main entry point ──────────────────────────────────────────────────────────
+export type BootLifecycleDeps = {
+  loadConfig?: () => OpenClawConfig;
+  createProductionBrain?: typeof createProductionBrain;
+};
 
-/**
- * Start the consciousness loop if CONSCIOUSNESS_ENABLED=1.
- *
- * Returns null when the feature flag is off — the caller can treat this
- * as a clean no-op without branching.
- *
- * @param env  Process environment (injected for testability; default: process.env)
- */
-export function maybeStartConsciousnessLoop(
+export async function maybeStartConsciousnessLoop(
   env: NodeJS.ProcessEnv = process.env,
-): ConsciousnessLifecycle | null {
+  deps: BootLifecycleDeps = {},
+): Promise<ConsciousnessLifecycle | null> {
   if (!isTruthy(env.CONSCIOUSNESS_ENABLED)) {
     return null;
   }
 
-  // ── Interaction store (persistence) ────────────────────────────────────────
-  // Seed in-memory tracker from disk before the loop starts so that silence
-  // detection and channel routing survive process restarts.
-  const interactionStore = resolveInteractionStorePath(env)
-    ? new FileInteractionStore({ filePath: resolveInteractionStorePath(env)! })
-    : undefined;
+  const loadConfigFn = deps.loadConfig ?? loadConfig;
+  const createProductionBrainFn =
+    deps.createProductionBrain ?? createProductionBrain;
 
-  // Load persisted state once at boot (synchronous — safe at startup).
+  const interactionStorePath = resolveInteractionStorePath(env);
+  const interactionStore = interactionStorePath
+    ? new FileInteractionStore({ filePath: interactionStorePath })
+    : undefined;
   const loaded = interactionStore ? interactionStore.loadSync() : null;
   if (loaded) {
     seedInteractionTracker(loaded);
@@ -124,44 +82,32 @@ export function maybeStartConsciousnessLoop(
     setInteractionStore(interactionStore);
   }
 
-  // ── Silence threshold resolution ───────────────────────────────────────────
-  // Priority: persisted (survives backoff expansion across restarts)
-  //         > CONSCIOUSNESS_SILENCE_THRESHOLD_MS env (operator intent)
-  //         > DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs (engine default)
-  //
-  // The engine default (30 min) is intentionally low for generic use.
-  // The MVP / Yaşayan Varlık production intent is 3 days (259_200_000 ms).
-  // Operators set CONSCIOUSNESS_SILENCE_THRESHOLD_MS=259200000 in .env.
-  const envThreshold = resolvePositiveIntEnv(env.CONSCIOUSNESS_SILENCE_THRESHOLD_MS);
+  const envThreshold = resolvePositiveIntEnv(
+    env.CONSCIOUSNESS_SILENCE_THRESHOLD_MS,
+  );
   const baseSilenceThresholdMs =
     envThreshold ?? DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs;
-
-  // Mutable refs — updated by onTick after every tick and persisted to store.
-  // Initialized from disk (persisted backoff) or the resolved base threshold.
   const effectiveThresholdRef = {
     value: loaded?.effectiveSilenceThresholdMs ?? baseSilenceThresholdMs,
   };
   const lastTickAtRef = { value: loaded?.lastTickAt as number | undefined };
+  const proactiveState: { lastSentAt?: number } = {
+    lastSentAt: loaded?.lastProactiveSentAt as number | undefined,
+  };
 
   const reflectionQueue = new PendingReflectionQueue();
   const auditLog = new ConsciousnessAuditLog({
     filePath: resolveAuditLogPath(env),
   });
   setGlobalConsciousnessAuditLog(auditLog);
-  const proactiveState: { lastSentAt?: number } = {
-    lastSentAt: loaded?.lastProactiveSentAt as number | undefined,
-  };
 
   const onProactiveSentCallback = (sentAt: number): void => {
     proactiveState.lastSentAt = sentAt;
     interactionStore?.save({ lastProactiveSentAt: sentAt });
   };
 
-  // Named onTick callback — extracted so the lifecycle can expose it as a test seam.
   const onTickCallback = (result: TickResult): void => {
-    // Persist lastTickAt after every tick.
     lastTickAtRef.value = Date.now();
-    // Persist backoff-expanded threshold when SILENCE_THRESHOLD fired.
     if (
       result.watchdogResult.wake === true &&
       result.watchdogResult.reason === "SILENCE_THRESHOLD" &&
@@ -175,74 +121,117 @@ export function maybeStartConsciousnessLoop(
     });
   };
 
-  const scheduler = startConsciousnessLoop({
-    config: { baseSilenceThresholdMs },
-    buildSnapshot: () =>
-      buildRealWorldSnapshot({
-        getLastUserInteractionAt: () => getLastUserInteractionAt(),
-        getPendingNoteCount: () => reflectionQueue.count(),
-        getFiredTriggerIds: () => [],
-        getActiveChannelId: () => getActiveChannelId(),
-        getActiveChannelType: () => getActiveChannelType(),
-        getLastTickAt: () => lastTickAtRef.value,
-        getEffectiveSilenceThresholdMs: () => effectiveThresholdRef.value,
-      }),
-    onTick: onTickCallback,
-    dispatch: {
-      sendToChannel: async (channelId: string, content: string, channelType?: string) => {
-        const { loadConfig } = await import("../config/config.js");
-        const { isRoutableChannel, routeReply } = await import(
-          "../auto-reply/reply/route-reply.js"
-        );
-
-        if (!channelType || !isRoutableChannel(channelType)) {
-          throw new Error(
-            `Active channel is not routable for consciousness dispatch: ${String(channelType ?? "(unknown)")}`,
-          );
-        }
-
-        const result = await routeReply({
-          payload: { text: content },
-          channel: channelType,
-          to: channelId,
-          cfg: loadConfig(),
-          mirror: false,
-        });
-        if (!result.ok) {
-          throw new Error(result.error ?? `Failed to route proactive message to ${channelType}`);
-        }
-      },
-      appendNote: async (_content: string) => {},
-      proactiveState,
-      onProactiveSent: onProactiveSentCallback,
-      auditLog,
-    },
-    auditLog,
-  });
-
-  // ── Graceful shutdown ─────────────────────────────────────────────────────
-
   let stopped = false;
+  let scheduler: ConsciousnessScheduler | null = null;
+  let brain: ProductionBrain | null = null;
 
-  const stop = () => {
+  const stop = async (): Promise<void> => {
     if (stopped) return;
     stopped = true;
-    scheduler.stop();
+    scheduler?.stop();
     clearGlobalConsciousnessAuditLog(auditLog);
+    setConsciousnessRuntime(null);
+
+    const closes: Promise<unknown>[] = [];
     if (interactionStore) {
       setInteractionStore(null);
-      void interactionStore.close();
+      closes.push(interactionStore.close());
+    }
+    if (brain) {
+      closes.push(brain.close());
+    }
+    if (closes.length > 0) {
+      await Promise.allSettled(closes);
     }
   };
 
-  // SIGTERM is sent by process managers (Docker, systemd, k8s).
-  // SIGINT is Ctrl-C in terminal.
-  process.once("SIGTERM", stop);
-  process.once("SIGINT", stop);
+  try {
+    const cfg = loadConfigFn();
+    const sessionKey = resolveBrainSessionKey(env);
+    brain = await createProductionBrainFn({
+      cfg,
+      dbPath: resolveBrainDbPath(env),
+      sessionKey,
+      agentId: resolveSessionAgentId({ config: cfg, sessionKey }),
+    });
+    const activeBrain = brain;
+
+    scheduler = startConsciousnessLoop({
+      config: { baseSilenceThresholdMs },
+      buildSnapshot: () =>
+        buildRealWorldSnapshot({
+          getLastUserInteractionAt: () => getLastUserInteractionAt(),
+          getPendingNoteCount: () => reflectionQueue.count(),
+          getFiredTriggerIds: () => [],
+          getActiveChannelId: () => getActiveChannelId(),
+          getActiveChannelType: () => getActiveChannelType(),
+          getLastTickAt: () => lastTickAtRef.value,
+          getEffectiveSilenceThresholdMs: () => effectiveThresholdRef.value,
+        }),
+      onTick: onTickCallback,
+      dispatch: {
+        sendToChannel: async (
+          channelId: string,
+          content: string,
+          channelType?: string,
+        ) => {
+          const { isRoutableChannel, routeReply } = await import(
+            "../auto-reply/reply/route-reply.js"
+          );
+
+          if (!channelType || !isRoutableChannel(channelType)) {
+            throw new Error(
+              `Active channel is not routable for consciousness dispatch: ${String(channelType ?? "(unknown)")}`,
+            );
+          }
+
+          const result = await routeReply({
+            payload: { text: content },
+            channel: channelType,
+            to: channelId,
+            cfg: loadConfigFn(),
+            mirror: false,
+          });
+          if (!result.ok) {
+            throw new Error(
+              result.error ??
+                `Failed to route proactive message to ${channelType}`,
+            );
+          }
+          await ingestConversationTurn({
+            direction: "assistant/proactive",
+            sessionKey: activeBrain.sessionKey,
+            text: content,
+          });
+        },
+        proactiveState,
+        onProactiveSent: onProactiveSentCallback,
+        auditLog,
+      },
+      auditLog,
+      brain: {
+        ingestion: activeBrain.ingestion,
+        recall: activeBrain.recall,
+        sessionKey: activeBrain.sessionKey,
+      },
+    });
+    setConsciousnessRuntime({ brain: activeBrain });
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+
+  process.once("SIGTERM", () => {
+    void stop();
+  });
+  process.once("SIGINT", () => {
+    void stop();
+  });
 
   return {
     stop,
-    scheduler,
+    scheduler: scheduler!,
+    brain: brain!,
     reflectionQueue,
     auditLog,
     interactionStore,
@@ -250,11 +239,10 @@ export function maybeStartConsciousnessLoop(
     getLastTickAt: () => lastTickAtRef.value,
     getLastProactiveSentAt: () => proactiveState.lastSentAt,
     _fireOnTickForTest: onTickCallback,
-    _fireOnProactiveSentForTest: (sentAt = Date.now()) => onProactiveSentCallback(sentAt),
+    _fireOnProactiveSentForTest: (sentAt = Date.now()) =>
+      onProactiveSentCallback(sentAt),
   };
 }
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function isTruthy(value: string | undefined): boolean {
   return value === "1" || value?.toLowerCase() === "true";
@@ -265,10 +253,6 @@ function resolveAuditLogPath(env: NodeJS.ProcessEnv): string | undefined {
   return filePath ? filePath : undefined;
 }
 
-/**
- * Parse an env var as a positive integer.
- * Returns undefined when the value is absent, non-numeric, or <= 0.
- */
 function resolvePositiveIntEnv(value: string | undefined): number | undefined {
   if (!value?.trim()) return undefined;
   const n = Number(value.trim());
@@ -276,10 +260,18 @@ function resolvePositiveIntEnv(value: string | undefined): number | undefined {
 }
 
 function resolveInteractionStorePath(env: NodeJS.ProcessEnv): string | undefined {
-  const explicit = env.CONSCIOUSNESS_STATE_PATH?.trim();
-  if (explicit) return explicit;
-  // Default: data/consciousness-state.json relative to CWD.
-  // Operators can disable by setting CONSCIOUSNESS_STATE_PATH="" (empty string).
+  const configured = env.CONSCIOUSNESS_STATE_PATH?.trim();
+  if (configured) return configured;
   if (env.CONSCIOUSNESS_STATE_PATH === "") return undefined;
   return "data/consciousness-state.json";
+}
+
+function resolveBrainDbPath(env: NodeJS.ProcessEnv): string {
+  const configured = env.CONSCIOUSNESS_DB_PATH?.trim();
+  return configured || "data/consciousness.db";
+}
+
+function resolveBrainSessionKey(env: NodeJS.ProcessEnv): string {
+  const configured = env.CONSCIOUSNESS_SESSION_KEY?.trim();
+  return configured || "consciousness-main";
 }

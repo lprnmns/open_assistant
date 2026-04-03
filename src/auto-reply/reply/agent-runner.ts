@@ -20,6 +20,7 @@ import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnosti
 import { generateSecureUuid } from "../../infra/secure-random.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { defaultRuntime } from "../../runtime.js";
+import { ingestAssistantPayloads } from "../../consciousness/turn-ingestion.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 import {
   buildFallbackClearedNotice,
@@ -579,6 +580,12 @@ export async function runReplyAgent(params: {
       hasReminderCommitment && successfulCronAdds === 0 && !coveredByExistingCron
         ? appendUnscheduledReminderNote(replyPayloads)
         : replyPayloads;
+
+    await ingestAssistantPayloads({
+      payloads: guardedReplyPayloads,
+      sessionKey,
+      direction: "assistant",
+    });
 
     await signalTypingIfNeeded(guardedReplyPayloads, typingSignals);
 

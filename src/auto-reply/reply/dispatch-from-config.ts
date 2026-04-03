@@ -6,10 +6,13 @@ import {
 } from "../../bindings/records.js";
 import { shouldSuppressLocalExecApprovalPrompt } from "../../channels/plugins/exec-approval-local.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import type { CognitiveMode } from "../../consciousness/cognitive-load.js";
+import { sanitizeExecutiveReplyPayload } from "../../consciousness/executive-sanitizer.js";
 import {
   recordUserInteraction,
   resolveActiveChannelIdFromInteraction,
 } from "../../consciousness/interaction-tracker.js";
+import { ingestConversationTurn } from "../../consciousness/turn-ingestion.js";
 import { parseSessionThreadInfo } from "../../config/sessions/delivery-info.js";
 import { resolveStorePath } from "../../config/sessions/paths.js";
 import { loadSessionStore, resolveSessionStoreEntry } from "../../config/sessions/store.js";
@@ -234,6 +237,11 @@ export async function dispatchReplyFromConfig(params: {
 
   const sessionStoreEntry = resolveSessionStoreLookup(ctx, cfg);
   const acpDispatchSessionKey = sessionStoreEntry.sessionKey ?? sessionKey;
+  await ingestConversationTurn({
+    direction: "user",
+    sessionKey: acpDispatchSessionKey,
+    text: ctx.BodyForAgent ?? ctx.Body ?? "",
+  });
   // Restore route thread context only from the active turn or the thread-scoped session key.
   // Do not read thread ids from the normalised session store here: `origin.threadId` can be
   // folded back into lastThreadId/deliveryContext during store normalisation and resurrect a
@@ -550,7 +558,12 @@ export async function dispatchReplyFromConfig(params: {
     // TTS audio separately from the accumulated block content.
     let accumulatedBlockText = "";
     let blockCount = 0;
+    let resolvedCognitiveMode: CognitiveMode | undefined;
     const { maybeApplyTtsToPayload } = await loadTtsRuntime();
+    const maybeSanitizeExecutivePayload = (payload: ReplyPayload): ReplyPayload =>
+      resolvedCognitiveMode === "executive"
+        ? sanitizeExecutiveReplyPayload(payload)
+        : payload;
 
     const resolveToolDeliveryPayload = (payload: ReplyPayload): ReplyPayload | null => {
       if (
@@ -596,6 +609,10 @@ export async function dispatchReplyFromConfig(params: {
       ctx,
       {
         ...params.replyOptions,
+        onCognitiveModeResolved: (mode) => {
+          resolvedCognitiveMode = mode;
+          params.replyOptions?.onCognitiveModeResolved?.(mode);
+        },
         typingPolicy: typing.typingPolicy,
         suppressTyping: typing.suppressTyping,
         onToolResult: (payload: ReplyPayload) => {
@@ -622,24 +639,25 @@ export async function dispatchReplyFromConfig(params: {
         },
         onBlockReply: (payload: ReplyPayload, context?: BlockReplyContext) => {
           const run = async () => {
+            const sanitizedPayload = maybeSanitizeExecutivePayload(payload);
             // Suppress reasoning payloads — channels using this generic dispatch
             // path (WhatsApp, web, etc.) do not have a dedicated reasoning lane.
             // Telegram has its own dispatch path that handles reasoning splitting.
-            if (payload.isReasoning === true) {
+            if (sanitizedPayload.isReasoning === true) {
               return;
             }
             // Accumulate block text for TTS generation after streaming.
             // Exclude compaction status notices — they are informational UI
             // signals and must not be synthesised into the spoken reply.
-            if (payload.text && !payload.isCompactionNotice) {
+            if (sanitizedPayload.text && !sanitizedPayload.isCompactionNotice) {
               if (accumulatedBlockText.length > 0) {
                 accumulatedBlockText += "\n";
               }
-              accumulatedBlockText += payload.text;
+              accumulatedBlockText += sanitizedPayload.text;
               blockCount++;
             }
             const ttsPayload = await maybeApplyTtsToPayload({
-              payload,
+              payload: sanitizedPayload,
               cfg,
               channel: ttsChannel,
               kind: "block",
@@ -690,13 +708,14 @@ export async function dispatchReplyFromConfig(params: {
     let queuedFinal = false;
     let routedFinalCount = 0;
     for (const reply of replies) {
+      const sanitizedReply = maybeSanitizeExecutivePayload(reply);
       // Suppress reasoning payloads from channel delivery — channels using this
       // generic dispatch path do not have a dedicated reasoning lane.
-      if (reply.isReasoning === true) {
+      if (sanitizedReply.isReasoning === true) {
         continue;
       }
       const ttsReply = await maybeApplyTtsToPayload({
-        payload: reply,
+        payload: sanitizedReply,
         cfg,
         channel: ttsChannel,
         kind: "final",

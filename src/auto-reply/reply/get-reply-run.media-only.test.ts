@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProductionBrain } from "../../consciousness/brain/brain-factory.js";
+import { setConsciousnessRuntime } from "../../consciousness/runtime.js";
 
 vi.mock("../../agents/auth-profiles/session-override.js", () => ({
   resolveSessionAuthProfileOverride: vi.fn().mockResolvedValue(undefined),
@@ -103,6 +105,38 @@ async function loadFreshGetReplyRunModuleForTest() {
   ({ runPreparedReply } = await import("./get-reply-run.js"));
 }
 
+function makeFakeBrain(): ProductionBrain {
+  return {
+    cortex: {
+      stage: () => {},
+      recent: () => [],
+      clear: () => {},
+    },
+    hippocampus: {
+      ingest: async () => {},
+      recall: async () => [],
+      close: async () => {},
+    },
+    embedder: {
+      embed: async () => [],
+    },
+    ingestion: {
+      ingest: vi.fn().mockResolvedValue(undefined),
+    },
+    recall: {
+      recall: vi.fn().mockResolvedValue({
+        recent: [],
+        recalled: [],
+      }),
+    },
+    sessionKey: "consciousness-main",
+    dbPath: "data/consciousness.db",
+    providerId: "test-provider",
+    model: "test-model",
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 function baseParams(
   overrides: Partial<Parameters<typeof runPreparedReply>[0]> = {},
 ): Parameters<typeof runPreparedReply>[0] {
@@ -183,6 +217,10 @@ describe("runPreparedReply media-only handling", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     await loadFreshGetReplyRunModuleForTest();
+  });
+
+  afterEach(() => {
+    setConsciousnessRuntime(null);
   });
 
   it("allows media-only prompts and preserves thread context in queued followups", async () => {
@@ -411,6 +449,68 @@ describe("runPreparedReply media-only handling", () => {
 
     const call = vi.mocked(runReplyAgent).mock.calls[0]?.[0];
     expect(call?.followupRun.run.cognitiveMode).toBe("executive");
+  });
+
+  it("injects reactive recall into the followup extra system prompt", async () => {
+    const brain = makeFakeBrain();
+    vi.mocked(brain.recall.recall).mockResolvedValueOnce({
+      recent: [
+        {
+          id: "recent-1",
+          content: "[user]: launch ne zamandi",
+          type: "episodic",
+          createdAt: 1,
+          sessionKey: "session-key",
+        },
+      ],
+      recalled: [
+        {
+          id: "recalled-1",
+          content: "[assistant]: gecen sali deadline cuma demistim",
+          type: "episodic",
+          createdAt: 2,
+          sessionKey: "session-key",
+        },
+      ],
+      warning: "No notes found in that time range.",
+    });
+    setConsciousnessRuntime({ brain });
+
+    await runPreparedReply(
+      baseParams({
+        ctx: {
+          Body: "gecen sali ne konustuk",
+          BodyForAgent: "gecen sali ne konustuk",
+          RawBody: "gecen sali ne konustuk",
+          CommandBody: "gecen sali ne konustuk",
+          ThreadHistoryBody: "Earlier message in this thread",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+          ChatType: "group",
+        },
+        sessionCtx: {
+          Body: "gecen sali ne konustuk",
+          BodyStripped: "gecen sali ne konustuk",
+          ThreadHistoryBody: "Earlier message in this thread",
+          Provider: "slack",
+          ChatType: "group",
+          OriginatingChannel: "slack",
+          OriginatingTo: "C123",
+        },
+      }),
+    );
+
+    expect(brain.recall.recall).toHaveBeenCalledWith({
+      text: "gecen sali ne konustuk",
+      sessionKey: "session-key",
+    });
+    const call = vi.mocked(runReplyAgent).mock.calls[0]?.[0];
+    expect(call?.followupRun.run.extraSystemPrompt).toContain(
+      "Consciousness memory context:",
+    );
+    expect(call?.followupRun.run.extraSystemPrompt).toContain(
+      "[assistant]: gecen sali deadline cuma demistim",
+    );
   });
 
   it("does not strip think-hint token from deferred queue body", async () => {

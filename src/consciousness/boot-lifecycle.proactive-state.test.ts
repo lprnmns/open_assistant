@@ -8,9 +8,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/config.js";
+import type { ProductionBrain } from "./brain/brain-factory.js";
 import { maybeStartConsciousnessLoop } from "./boot-lifecycle.js";
 import { _resetInteractionTrackerForTest } from "./interaction-tracker.js";
 import { dispatchDecision } from "./integration.js";
+import { setConsciousnessRuntime } from "./runtime.js";
 import {
   DEFAULT_CONSCIOUSNESS_CONFIG,
   type TickDecision,
@@ -59,20 +62,58 @@ function makeSnap(overrides: Partial<WorldSnapshot> = {}): WorldSnapshot {
     activeChannelId: "web-chat",
     activeChannelType: "webchat",
     lastTickAt: undefined,
-    effectiveSilenceThresholdMs: DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs,
+    effectiveSilenceThresholdMs:
+      DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs,
     ...overrides,
+  };
+}
+
+function makeFakeBrain(): ProductionBrain {
+  return {
+    cortex: {
+      stage: () => {},
+      recent: () => [],
+      clear: () => {},
+    },
+    hippocampus: {
+      ingest: async () => {},
+      recall: async () => [],
+      close: async () => {},
+    },
+    embedder: {
+      embed: async () => [],
+    },
+    ingestion: {
+      ingest: vi.fn().mockResolvedValue(undefined),
+    },
+    recall: {
+      recall: vi.fn().mockResolvedValue({ recent: [], recalled: [] }),
+    },
+    sessionKey: "consciousness-main",
+    dbPath: "data/consciousness.db",
+    providerId: "test-provider",
+    model: "test-model",
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function makeDeps(brain: ProductionBrain = makeFakeBrain()) {
+  return {
+    loadConfig: () => ({}) as OpenClawConfig,
+    createProductionBrain: vi.fn().mockResolvedValue(brain),
   };
 }
 
 afterEach(() => {
   _resetInteractionTrackerForTest();
+  setConsciousnessRuntime(null);
   process.removeAllListeners("SIGTERM");
   process.removeAllListeners("SIGINT");
   vi.useRealTimers();
 });
 
-describe("maybeStartConsciousnessLoop — proactive cooldown persistence", () => {
-  it("hydrates lastProactiveSentAt from the persisted interaction state at boot", () => {
+describe("maybeStartConsciousnessLoop - proactive cooldown persistence", () => {
+  it("hydrates lastProactiveSentAt from the persisted interaction state at boot", async () => {
     const statePath = makeTempStatePath();
     writeState(statePath, {
       lastProactiveSentAt: NOW,
@@ -81,39 +122,39 @@ describe("maybeStartConsciousnessLoop — proactive cooldown persistence", () =>
       activeChannelType: "telegram",
     });
 
-    const lifecycle = maybeStartConsciousnessLoop(makeEnv(statePath));
+    const lifecycle = await maybeStartConsciousnessLoop(makeEnv(statePath), makeDeps());
 
     expect(lifecycle).not.toBeNull();
     expect(lifecycle?.getLastProactiveSentAt()).toBe(NOW);
 
-    lifecycle?.stop();
+    await lifecycle?.stop();
   });
 
-  it("persists lastProactiveSentAt when the proactive send hook fires", () => {
+  it("persists lastProactiveSentAt when the proactive send hook fires", async () => {
     const statePath = makeTempStatePath();
-    const lifecycle = maybeStartConsciousnessLoop(makeEnv(statePath));
+    const lifecycle = await maybeStartConsciousnessLoop(makeEnv(statePath), makeDeps());
 
     expect(lifecycle).not.toBeNull();
 
     lifecycle?._fireOnProactiveSentForTest(NOW);
-    lifecycle?.stop();
+    await lifecycle?.stop();
 
     expect(readState(statePath).lastProactiveSentAt).toBe(NOW);
   });
 
-  it("restores the proactive cooldown across process restart", () => {
+  it("restores the proactive cooldown across process restart", async () => {
     const statePath = makeTempStatePath();
 
-    const lifecycleA = maybeStartConsciousnessLoop(makeEnv(statePath));
+    const lifecycleA = await maybeStartConsciousnessLoop(makeEnv(statePath), makeDeps());
     lifecycleA?._fireOnProactiveSentForTest(NOW);
-    lifecycleA?.stop();
+    await lifecycleA?.stop();
 
-    const lifecycleB = maybeStartConsciousnessLoop(makeEnv(statePath));
+    const lifecycleB = await maybeStartConsciousnessLoop(makeEnv(statePath), makeDeps());
 
     expect(lifecycleB).not.toBeNull();
     expect(lifecycleB?.getLastProactiveSentAt()).toBe(NOW);
 
-    lifecycleB?.stop();
+    await lifecycleB?.stop();
   });
 
   it("rate-limits a restarted lifecycle when the persisted proactive cooldown is still active", async () => {
@@ -123,7 +164,7 @@ describe("maybeStartConsciousnessLoop — proactive cooldown persistence", () =>
     const statePath = makeTempStatePath();
     writeState(statePath, { lastProactiveSentAt: NOW });
 
-    const lifecycle = maybeStartConsciousnessLoop(makeEnv(statePath));
+    const lifecycle = await maybeStartConsciousnessLoop(makeEnv(statePath), makeDeps());
     const sendToChannel = vi.fn().mockResolvedValue(undefined);
     const decision: TickDecision = {
       action: "SEND_MESSAGE",
@@ -147,7 +188,7 @@ describe("maybeStartConsciousnessLoop — proactive cooldown persistence", () =>
     expect(result.dispatched).toBe(false);
     expect(sendToChannel).not.toHaveBeenCalled();
 
-    lifecycle?.stop();
+    await lifecycle?.stop();
   });
 
   it("allows a restarted lifecycle to send again after the persisted cooldown elapsed", async () => {
@@ -157,7 +198,7 @@ describe("maybeStartConsciousnessLoop — proactive cooldown persistence", () =>
     const statePath = makeTempStatePath();
     writeState(statePath, { lastProactiveSentAt: NOW });
 
-    const lifecycle = maybeStartConsciousnessLoop(makeEnv(statePath));
+    const lifecycle = await maybeStartConsciousnessLoop(makeEnv(statePath), makeDeps());
     const sendToChannel = vi.fn().mockResolvedValue(undefined);
     const decision: TickDecision = {
       action: "SEND_MESSAGE",
@@ -166,7 +207,10 @@ describe("maybeStartConsciousnessLoop — proactive cooldown persistence", () =>
 
     const result = await dispatchDecision(
       decision,
-      makeSnap({ activeChannelId: "telegram:owner", activeChannelType: "telegram" }),
+      makeSnap({
+        activeChannelId: "telegram:owner",
+        activeChannelType: "telegram",
+      }),
       {
         sendToChannel,
         appendNote: vi.fn().mockResolvedValue(undefined),
@@ -181,6 +225,6 @@ describe("maybeStartConsciousnessLoop — proactive cooldown persistence", () =>
     expect(result.dispatched).toBe(true);
     expect(sendToChannel).toHaveBeenCalledOnce();
 
-    lifecycle?.stop();
+    await lifecycle?.stop();
   });
 });

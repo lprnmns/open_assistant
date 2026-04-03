@@ -5,6 +5,7 @@ import { resolveFastModeState } from "../../agents/fast-mode.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { resolveGroupSessionKey } from "../../config/sessions/group.js";
 import type { CognitiveMode } from "../../consciousness/cognitive-load.js";
+import { buildReactiveRecallSection } from "../../consciousness/reactive-recall.js";
 import {
   resolveSessionFilePath,
   resolveSessionFilePathOptions,
@@ -292,8 +293,20 @@ export async function runPreparedReply(
   const inboundMetaPrompt = buildInboundMetaSystemPrompt(
     isNewSession ? sessionCtx : { ...sessionCtx, ThreadStarterBody: undefined },
   );
+  const reactiveRecallSection = await buildReactiveRecallSection({
+    text:
+      ctx.BodyForAgent ??
+      sessionCtx.BodyStripped ??
+      sessionCtx.Body ??
+      ctx.CommandBody ??
+      ctx.RawBody ??
+      ctx.Body ??
+      "",
+    sessionKey,
+  });
   const extraSystemPromptParts = [
     inboundMetaPrompt,
+    reactiveRecallSection,
     groupChatContext,
     groupIntro,
     groupSystemPrompt,

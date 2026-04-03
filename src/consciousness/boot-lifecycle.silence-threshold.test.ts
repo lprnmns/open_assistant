@@ -13,12 +13,15 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { OpenClawConfig } from "../config/config.js";
+import type { ProductionBrain } from "./brain/brain-factory.js";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 import type { TickResult } from "./loop.js";
 import { FileInteractionStore } from "./interaction-store.js";
 import { maybeStartConsciousnessLoop } from "./boot-lifecycle.js";
 import { _resetInteractionTrackerForTest } from "./interaction-tracker.js";
+import { setConsciousnessRuntime } from "./runtime.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -40,6 +43,46 @@ function makeTestStore(opts: {
       return storage.data;
     },
   });
+}
+
+function makeFakeBrain(): ProductionBrain {
+  return {
+    cortex: {
+      stage: () => {},
+      recent: () => [],
+      clear: () => {},
+    },
+    hippocampus: {
+      ingest: async () => {},
+      recall: async () => [],
+      close: async () => {},
+    },
+    embedder: {
+      embed: async () => [],
+    },
+    ingestion: {
+      ingest: vi.fn().mockResolvedValue(undefined),
+    },
+    recall: {
+      recall: vi.fn().mockResolvedValue({ recent: [], recalled: [] }),
+    },
+    sessionKey: "consciousness-main",
+    dbPath: "data/consciousness.db",
+    providerId: "test-provider",
+    model: "test-model",
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+function makeDeps(brain: ProductionBrain = makeFakeBrain()) {
+  return {
+    loadConfig: () => ({}) as OpenClawConfig,
+    createProductionBrain: vi.fn().mockResolvedValue(brain),
+  };
+}
+
+async function startLoop(env: NodeJS.ProcessEnv) {
+  return await maybeStartConsciousnessLoop(env, makeDeps());
 }
 
 /**
@@ -75,23 +118,26 @@ function makeNoWakeTickResult(): TickResult {
 
 afterEach(() => {
   _resetInteractionTrackerForTest();
+  setConsciousnessRuntime(null);
+  process.removeAllListeners("SIGTERM");
+  process.removeAllListeners("SIGINT");
 });
 
 // ── Boot seam: env var resolution ────────────────────────────────────────────
 
 describe("WS-1.2: maybeStartConsciousnessLoop() env var wiring", () => {
-  it("returns null when CONSCIOUSNESS_ENABLED is not set", () => {
-    const lifecycle = maybeStartConsciousnessLoop({});
+  it("returns null when CONSCIOUSNESS_ENABLED is not set", async () => {
+    const lifecycle = await startLoop({});
     expect(lifecycle).toBeNull();
   });
 
-  it("returns null when CONSCIOUSNESS_ENABLED=0", () => {
-    const lifecycle = maybeStartConsciousnessLoop({ CONSCIOUSNESS_ENABLED: "0" });
+  it("returns null when CONSCIOUSNESS_ENABLED=0", async () => {
+    const lifecycle = await startLoop({ CONSCIOUSNESS_ENABLED: "0" });
     expect(lifecycle).toBeNull();
   });
 
-  it("starts when CONSCIOUSNESS_ENABLED=1; uses engine default when no threshold env set", () => {
-    const lifecycle = maybeStartConsciousnessLoop({
+  it("starts when CONSCIOUSNESS_ENABLED=1; uses engine default when no threshold env set", async () => {
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_STATE_PATH: "", // disable persistence
     });
@@ -102,11 +148,11 @@ describe("WS-1.2: maybeStartConsciousnessLoop() env var wiring", () => {
     expect(lifecycle!.getEffectiveSilenceThresholdMs()).toBe(
       DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs,
     );
-    lifecycle!.stop();
+    await lifecycle!.stop();
   });
 
-  it("CONSCIOUSNESS_SILENCE_THRESHOLD_MS overrides engine default in scheduler config", () => {
-    const lifecycle = maybeStartConsciousnessLoop({
+  it("CONSCIOUSNESS_SILENCE_THRESHOLD_MS overrides engine default in scheduler config", async () => {
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_SILENCE_THRESHOLD_MS: "259200000",
       CONSCIOUSNESS_STATE_PATH: "", // disable persistence
@@ -114,11 +160,11 @@ describe("WS-1.2: maybeStartConsciousnessLoop() env var wiring", () => {
     expect(lifecycle).not.toBeNull();
     expect(lifecycle!.scheduler.currentConfig.baseSilenceThresholdMs).toBe(259_200_000);
     expect(lifecycle!.getEffectiveSilenceThresholdMs()).toBe(259_200_000);
-    lifecycle!.stop();
+    await lifecycle!.stop();
   });
 
-  it("CONSCIOUSNESS_SILENCE_THRESHOLD_MS=0 is ignored (falls back to engine default)", () => {
-    const lifecycle = maybeStartConsciousnessLoop({
+  it("CONSCIOUSNESS_SILENCE_THRESHOLD_MS=0 is ignored (falls back to engine default)", async () => {
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_SILENCE_THRESHOLD_MS: "0",
       CONSCIOUSNESS_STATE_PATH: "",
@@ -127,11 +173,11 @@ describe("WS-1.2: maybeStartConsciousnessLoop() env var wiring", () => {
     expect(lifecycle!.getEffectiveSilenceThresholdMs()).toBe(
       DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs,
     );
-    lifecycle!.stop();
+    await lifecycle!.stop();
   });
 
-  it("CONSCIOUSNESS_SILENCE_THRESHOLD_MS=NaN is ignored (falls back to engine default)", () => {
-    const lifecycle = maybeStartConsciousnessLoop({
+  it("CONSCIOUSNESS_SILENCE_THRESHOLD_MS=NaN is ignored (falls back to engine default)", async () => {
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_SILENCE_THRESHOLD_MS: "not-a-number",
       CONSCIOUSNESS_STATE_PATH: "",
@@ -140,14 +186,14 @@ describe("WS-1.2: maybeStartConsciousnessLoop() env var wiring", () => {
     expect(lifecycle!.getEffectiveSilenceThresholdMs()).toBe(
       DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs,
     );
-    lifecycle!.stop();
+    await lifecycle!.stop();
   });
 });
 
 // ── Boot seam: persisted state priority ──────────────────────────────────────
 
 describe("WS-1.2: persisted effectiveSilenceThresholdMs takes priority over env", () => {
-  it("persisted value beats env var at boot", () => {
+  it("persisted value beats env var at boot", async () => {
     // Simulate disk state from a previous process that expanded backoff to 2.7M
     const diskState = JSON.stringify({
       effectiveSilenceThresholdMs: 2_700_000,
@@ -168,7 +214,7 @@ describe("WS-1.2: persisted effectiveSilenceThresholdMs takes priority over env"
     // the ref initialized without persistence. So instead we test the ref path directly:
     // start lifecycle with no store, then assert the ref starts at baseSilenceThresholdMs,
     // then fire a SILENCE_THRESHOLD tick and assert getEffectiveSilenceThresholdMs updates.
-    const lifecycle = maybeStartConsciousnessLoop({
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_SILENCE_THRESHOLD_MS: "259200000",
       CONSCIOUSNESS_STATE_PATH: "", // no file store
@@ -182,7 +228,7 @@ describe("WS-1.2: persisted effectiveSilenceThresholdMs takes priority over env"
 
     // After tick: effective threshold updated to backoff value
     expect(lifecycle!.getEffectiveSilenceThresholdMs()).toBe(777_600_000);
-    lifecycle!.stop();
+    await lifecycle!.stop();
 
     void diskState; // silence unused var warning
   });
@@ -213,18 +259,18 @@ describe("WS-1.2: persisted effectiveSilenceThresholdMs takes priority over env"
 // ── Boot seam: lastTickAt persistence ────────────────────────────────────────
 
 describe("WS-1.2: lastTickAt ref and persistence", () => {
-  it("getLastTickAt returns undefined before any tick fires", () => {
-    const lifecycle = maybeStartConsciousnessLoop({
+  it("getLastTickAt returns undefined before any tick fires", async () => {
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_STATE_PATH: "",
     });
     expect(lifecycle).not.toBeNull();
     expect(lifecycle!.getLastTickAt()).toBeUndefined();
-    lifecycle!.stop();
+    await lifecycle!.stop();
   });
 
-  it("getLastTickAt is set after _fireOnTickForTest called (no-wake tick)", () => {
-    const lifecycle = maybeStartConsciousnessLoop({
+  it("getLastTickAt is set after _fireOnTickForTest called (no-wake tick)", async () => {
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_STATE_PATH: "",
     });
@@ -235,7 +281,7 @@ describe("WS-1.2: lastTickAt ref and persistence", () => {
     const lastTickAt = lifecycle!.getLastTickAt();
     expect(lastTickAt).toBeGreaterThanOrEqual(before);
     expect(lastTickAt).toBeLessThanOrEqual(after);
-    lifecycle!.stop();
+    await lifecycle!.stop();
   });
 
   it("lastTickAt from disk is restored via store.loadSync() at boot", () => {
@@ -390,7 +436,7 @@ describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes re
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("persisted effectiveSilenceThresholdMs beats env at boot (real disk read)", () => {
+  it("persisted effectiveSilenceThresholdMs beats env at boot (real disk read)", async () => {
     // Write a state file where effectiveSilenceThresholdMs has been backoff-expanded to
     // 2_700_000 (smaller than env=259_200_000 — simulating an earlier small threshold that
     // was expanded by backoff; the persisted value MUST take priority regardless of size).
@@ -400,7 +446,7 @@ describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes re
       JSON.stringify({ effectiveSilenceThresholdMs: 2_700_000, lastTickAt: 1_700_000_000_000 }),
     );
 
-    const lifecycle = maybeStartConsciousnessLoop({
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_STATE_PATH: statePath,
       CONSCIOUSNESS_SILENCE_THRESHOLD_MS: "259200000", // env says 3 days
@@ -411,11 +457,11 @@ describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes re
       // Persisted value (2.7M) must win over env (259.2M)
       expect(lifecycle!.getEffectiveSilenceThresholdMs()).toBe(2_700_000);
     } finally {
-      lifecycle?.stop();
+      await lifecycle?.stop();
     }
   });
 
-  it("persisted lastTickAt is restored to getLastTickAt() at boot (real disk read)", () => {
+  it("persisted lastTickAt is restored to getLastTickAt() at boot (real disk read)", async () => {
     const persistedLastTickAt = 1_700_000_000_000;
     const statePath = path.join(tmpDir, "state.json");
     fs.writeFileSync(
@@ -426,7 +472,7 @@ describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes re
       }),
     );
 
-    const lifecycle = maybeStartConsciousnessLoop({
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_STATE_PATH: statePath,
     });
@@ -436,7 +482,7 @@ describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes re
       // lastTickAtRef must be seeded from disk — no tick has fired yet
       expect(lifecycle!.getLastTickAt()).toBe(persistedLastTickAt);
     } finally {
-      lifecycle?.stop();
+      await lifecycle?.stop();
     }
   });
 
@@ -447,7 +493,7 @@ describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes re
       JSON.stringify({ effectiveSilenceThresholdMs: 259_200_000, lastTickAt: 1_700_000_000_000 }),
     );
 
-    const lifecycle = maybeStartConsciousnessLoop({
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_STATE_PATH: statePath,
       CONSCIOUSNESS_SILENCE_THRESHOLD_MS: "259200000",
@@ -462,7 +508,7 @@ describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes re
 
     // Flush pending debounced write synchronously before reading the file
     await lifecycle!.interactionStore!.close();
-    lifecycle!.stop(); // idempotent — store already closed
+    await lifecycle!.stop(); // idempotent — store already closed
 
     const afterFire = Date.now();
 
@@ -495,7 +541,7 @@ describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes re
       }),
     );
 
-    const lifecycle = maybeStartConsciousnessLoop({
+    const lifecycle = await startLoop({
       CONSCIOUSNESS_ENABLED: "1",
       CONSCIOUSNESS_STATE_PATH: statePath,
       CONSCIOUSNESS_SILENCE_THRESHOLD_MS: String(originalThreshold),
@@ -505,7 +551,7 @@ describe("WS-1.2: real boot seam — maybeStartConsciousnessLoop reads/writes re
     const beforeFire = Date.now();
     lifecycle!._fireOnTickForTest(makeNoWakeTickResult());
     await lifecycle!.interactionStore!.close();
-    lifecycle!.stop();
+    await lifecycle!.stop();
     const afterFire = Date.now();
 
     const written = JSON.parse(fs.readFileSync(statePath, "utf8")) as {
