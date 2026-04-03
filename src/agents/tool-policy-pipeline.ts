@@ -133,6 +133,9 @@ function resolveDefaultActFirstScore(toolName: string): number | undefined {
   if (/^calendar(?:[_.-](add|create|update))?$/.test(key)) {
     return 0.8;
   }
+  if (/^calendar(?:[_.-](cancel|delete|remove))$/.test(key)) {
+    return 0.5;
+  }
   if (ACT_FIRST_BLOCK_PATTERNS.some((pattern) => pattern.test(key))) {
     return 0.2;
   }

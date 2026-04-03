@@ -58,6 +58,8 @@ import { supportsModelTools } from "../model-tool-support.js";
 import { ensureOpenClawModelsJson } from "../models-config.js";
 import { createConfiguredOllamaStreamFn } from "../ollama-stream.js";
 import { resolveOwnerDisplaySetting } from "../owner-display.js";
+import { createExecApprovalSurfaceAdapter } from "../exec-approval-surface-adapter.js";
+import { prepareExternalRuntimeTools } from "../external-tool-runtime.js";
 import { createBundleLspToolRuntime } from "../pi-bundle-lsp-runtime.js";
 import { createBundleMcpToolRuntime } from "../pi-bundle-mcp-tools.js";
 import {
@@ -66,7 +68,7 @@ import {
   validateGeminiTurns,
 } from "../pi-embedded-helpers.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../pi-project-settings.js";
-import { createOpenClawCodingTools } from "../pi-tools.js";
+import { createOpenClawCodingTools, resolveToolLoopDetectionConfig } from "../pi-tools.js";
 import { ensureRuntimePluginsLoaded } from "../runtime-plugins.js";
 import { resolveSandboxContext } from "../sandbox.js";
 import { repairSessionFileIfNeeded } from "../session-file-repair.js";
@@ -789,8 +791,23 @@ export async function compactEmbeddedPiSessionDirect(
         : runtimeModel,
       apiKeyInfo,
     );
+    const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
+      sessionKey: params.sessionKey,
+      config: params.config,
+    });
 
     const runAbortController = new AbortController();
+    const externalApprovalSurface = createExecApprovalSurfaceAdapter({
+      workdir: effectiveWorkspace,
+      agentId: sessionAgentId,
+      sessionKey: params.sessionKey,
+      turnSourceChannel: resolvedMessageProvider,
+      turnSourceAccountId: params.agentAccountId,
+    });
+    const externalLoopDetection = resolveToolLoopDetectionConfig({
+      cfg: params.config,
+      agentId: sessionAgentId,
+    });
     const toolsRaw = createOpenClawCodingTools({
       exec: {
         elevated: params.bashElevated,
@@ -839,10 +856,36 @@ export async function compactEmbeddedPiSessionDirect(
           ],
         })
       : undefined;
+    const bundleMcpTools = prepareExternalRuntimeTools({
+      tools: bundleMcpRuntime?.tools ?? [],
+      agentId: sessionAgentId,
+      sessionKey: sandboxSessionKey,
+      sessionId: params.sessionId,
+      runId: params.runId,
+      modelProvider: model.provider,
+      modelId,
+      modelCompat: effectiveModel.compat,
+      abortSignal: runAbortController.signal,
+      approvalSurface: externalApprovalSurface,
+      loopDetection: externalLoopDetection,
+    });
+    const bundleLspTools = prepareExternalRuntimeTools({
+      tools: bundleLspRuntime?.tools ?? [],
+      agentId: sessionAgentId,
+      sessionKey: sandboxSessionKey,
+      sessionId: params.sessionId,
+      runId: params.runId,
+      modelProvider: model.provider,
+      modelId,
+      modelCompat: effectiveModel.compat,
+      abortSignal: runAbortController.signal,
+      approvalSurface: externalApprovalSurface,
+      loopDetection: externalLoopDetection,
+    });
     const effectiveTools = [
       ...tools,
-      ...(bundleMcpRuntime?.tools ?? []),
-      ...(bundleLspRuntime?.tools ?? []),
+      ...bundleMcpTools,
+      ...bundleLspTools,
     ];
     const allowedToolNames = collectAllowedToolNames({ tools: effectiveTools });
     logToolSchemasForGoogle({ tools: effectiveTools, provider });
@@ -893,10 +936,6 @@ export async function compactEmbeddedPiSessionDirect(
             return undefined;
           })()
         : undefined;
-    const { defaultAgentId, sessionAgentId } = resolveSessionAgentIds({
-      sessionKey: params.sessionKey,
-      config: params.config,
-    });
     // Resolve channel-specific message actions for system prompt
     const channelActions = runtimeChannel
       ? listChannelSupportedActions(

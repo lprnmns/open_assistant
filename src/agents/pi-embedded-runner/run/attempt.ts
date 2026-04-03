@@ -62,6 +62,8 @@ import { supportsModelTools } from "../../model-tool-support.js";
 import { createConfiguredOllamaStreamFn } from "../../ollama-stream.js";
 import { createOpenAIWebSocketStreamFn, releaseWsSession } from "../../openai-ws-stream.js";
 import { resolveOwnerDisplaySetting } from "../../owner-display.js";
+import { createExecApprovalSurfaceAdapter } from "../../exec-approval-surface-adapter.js";
+import { prepareExternalRuntimeTools } from "../../external-tool-runtime.js";
 import { createBundleLspToolRuntime } from "../../pi-bundle-lsp-runtime.js";
 import { createBundleMcpToolRuntime } from "../../pi-bundle-mcp-tools.js";
 import {
@@ -1776,6 +1778,19 @@ export async function runEmbeddedAttempt(
     let yieldAbortSettled: Promise<void> | null = null;
     // Check if the model supports native image input
     const modelHasVision = params.model.input?.includes("image") ?? false;
+    const externalApprovalSurface = createExecApprovalSurfaceAdapter({
+      workdir: effectiveWorkspace,
+      agentId: sessionAgentId,
+      sessionKey: params.sessionKey,
+      turnSourceChannel: params.messageChannel ?? params.messageProvider,
+      turnSourceTo: params.messageTo,
+      turnSourceAccountId: params.agentAccountId,
+      turnSourceThreadId: params.messageThreadId,
+    });
+    const externalLoopDetection = resolveToolLoopDetectionConfig({
+      cfg: params.config,
+      agentId: sessionAgentId,
+    });
     const toolsRaw = params.disableTools
       ? []
       : createOpenClawCodingTools({
@@ -1861,10 +1876,36 @@ export async function runEmbeddedAttempt(
           ],
         })
       : undefined;
+    const bundleMcpTools = prepareExternalRuntimeTools({
+      tools: bundleMcpRuntime?.tools ?? [],
+      agentId: sessionAgentId,
+      sessionKey: sandboxSessionKey,
+      sessionId: params.sessionId,
+      runId: params.runId,
+      modelProvider: params.model.provider,
+      modelId: params.modelId,
+      modelCompat: params.model.compat,
+      abortSignal: runAbortController.signal,
+      approvalSurface: externalApprovalSurface,
+      loopDetection: externalLoopDetection,
+    });
+    const bundleLspTools = prepareExternalRuntimeTools({
+      tools: bundleLspRuntime?.tools ?? [],
+      agentId: sessionAgentId,
+      sessionKey: sandboxSessionKey,
+      sessionId: params.sessionId,
+      runId: params.runId,
+      modelProvider: params.model.provider,
+      modelId: params.modelId,
+      modelCompat: params.model.compat,
+      abortSignal: runAbortController.signal,
+      approvalSurface: externalApprovalSurface,
+      loopDetection: externalLoopDetection,
+    });
     const effectiveTools = [
       ...tools,
-      ...(bundleMcpRuntime?.tools ?? []),
-      ...(bundleLspRuntime?.tools ?? []),
+      ...bundleMcpTools,
+      ...bundleLspTools,
     ];
     const allowedToolNames = collectAllowedToolNames({
       tools: effectiveTools,
