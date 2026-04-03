@@ -93,6 +93,11 @@ export class ConsciousnessScheduler {
     this.options = options;
   }
 
+  /** The ConsciousnessConfig that was resolved at construction time. */
+  get currentConfig(): ConsciousnessConfig {
+    return this.state.config;
+  }
+
   /** Start the tick loop. No-op if already running. */
   start(): void {
     if (this.running) return;

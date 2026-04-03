@@ -26,6 +26,7 @@
 import process from "node:process";
 import { startConsciousnessLoop } from "./boot.js";
 import type { ConsciousnessScheduler } from "./boot.js";
+import type { TickResult } from "./loop.js";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 import {
   clearGlobalConsciousnessAuditLog,
@@ -60,6 +61,23 @@ export type ConsciousnessLifecycle = {
    * and no default path was resolved).  Closed automatically on stop().
    */
   interactionStore?: FileInteractionStore;
+  /**
+   * Returns the current effective silence threshold (ms) from the mutable ref.
+   * Reflects the persisted backoff-expanded value after a SILENCE_THRESHOLD tick.
+   * Useful for tests and monitoring without triggering a snapshot build.
+   */
+  getEffectiveSilenceThresholdMs: () => number;
+  /**
+   * Returns the Unix ms timestamp of the last completed tick, or undefined if
+   * no tick has run yet.  Read from the same ref used by the snapshot adapter.
+   */
+  getLastTickAt: () => number | undefined;
+  /**
+   * Test seam: directly invoke the onTick callback that was wired into the
+   * scheduler.  Allows verifying onTick → store persistence without timers.
+   * Never call from production code.
+   */
+  _fireOnTickForTest: (result: TickResult) => void;
 };
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -121,6 +139,24 @@ export function maybeStartConsciousnessLoop(
   setGlobalConsciousnessAuditLog(auditLog);
   const proactiveState: { lastSentAt?: number } = {};
 
+  // Named onTick callback — extracted so the lifecycle can expose it as a test seam.
+  const onTickCallback = (result: TickResult): void => {
+    // Persist lastTickAt after every tick.
+    lastTickAtRef.value = Date.now();
+    // Persist backoff-expanded threshold when SILENCE_THRESHOLD fired.
+    if (
+      result.watchdogResult.wake === true &&
+      result.watchdogResult.reason === "SILENCE_THRESHOLD" &&
+      result.watchdogResult.nextSilenceThresholdMs !== undefined
+    ) {
+      effectiveThresholdRef.value = result.watchdogResult.nextSilenceThresholdMs;
+    }
+    interactionStore?.save({
+      lastTickAt: lastTickAtRef.value,
+      effectiveSilenceThresholdMs: effectiveThresholdRef.value,
+    });
+  };
+
   const scheduler = startConsciousnessLoop({
     config: { baseSilenceThresholdMs },
     buildSnapshot: () =>
@@ -133,22 +169,7 @@ export function maybeStartConsciousnessLoop(
         getLastTickAt: () => lastTickAtRef.value,
         getEffectiveSilenceThresholdMs: () => effectiveThresholdRef.value,
       }),
-    onTick: (result) => {
-      // Persist lastTickAt after every tick.
-      lastTickAtRef.value = Date.now();
-      // Persist backoff-expanded threshold when SILENCE_THRESHOLD fired.
-      if (
-        result.watchdogResult.wake === true &&
-        result.watchdogResult.reason === "SILENCE_THRESHOLD" &&
-        result.watchdogResult.nextSilenceThresholdMs !== undefined
-      ) {
-        effectiveThresholdRef.value = result.watchdogResult.nextSilenceThresholdMs;
-      }
-      interactionStore?.save({
-        lastTickAt: lastTickAtRef.value,
-        effectiveSilenceThresholdMs: effectiveThresholdRef.value,
-      });
-    },
+    onTick: onTickCallback,
     dispatch: {
       sendToChannel: async (channelId: string, content: string, channelType?: string) => {
         const { loadConfig } = await import("../config/config.js");
@@ -200,7 +221,16 @@ export function maybeStartConsciousnessLoop(
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
 
-  return { stop, scheduler, reflectionQueue, auditLog, interactionStore };
+  return {
+    stop,
+    scheduler,
+    reflectionQueue,
+    auditLog,
+    interactionStore,
+    getEffectiveSilenceThresholdMs: () => effectiveThresholdRef.value,
+    getLastTickAt: () => lastTickAtRef.value,
+    _fireOnTickForTest: onTickCallback,
+  };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
