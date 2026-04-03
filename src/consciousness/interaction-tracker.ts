@@ -1,4 +1,5 @@
 import type { OriginatingChannelType } from "../auto-reply/templating.js";
+import type { InteractionStore, PersistedInteractionState } from "./interaction-store.js";
 
 /**
  * src/consciousness/interaction-tracker.ts
@@ -10,8 +11,11 @@ import type { OriginatingChannelType } from "../auto-reply/templating.js";
  *   - activeChannelId
  *   - activeChannelType
  *
- * Scope: process lifetime only — no persistence, no Redis.
- * Real persistence (Redis) is wired in Sub-Task 9.2.
+ * Persistence: when an InteractionStore is wired via setInteractionStore(),
+ *   every recordUserInteraction() call debounce-flushes state to disk so that
+ *   process restarts do not reset the interaction timeline.
+ *   Boot-lifecycle seeds the in-memory state via seedInteractionTracker()
+ *   before the consciousness loop starts.
  */
 
 export type InteractionRouteLike = {
@@ -24,6 +28,7 @@ export type InteractionRouteLike = {
 let _lastUserInteractionAt: number | undefined = undefined;
 let _activeChannelId: string | undefined = undefined;
 let _activeChannelType: OriginatingChannelType | undefined = undefined;
+let _store: InteractionStore | null = null;
 
 function normalizeRouteValue(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -50,6 +55,32 @@ export function resolveActiveChannelIdFromInteraction(
 }
 
 /**
+ * Wire a persistent store so that every recordUserInteraction() call is
+ * debounce-flushed to disk.  Call once at boot (before the first message
+ * can arrive).  Pass null to detach the store (shutdown / test teardown).
+ */
+export function setInteractionStore(store: InteractionStore | null): void {
+  _store = store;
+}
+
+/**
+ * Seed in-memory state from a previously persisted snapshot.
+ * Called by boot-lifecycle after loadSync() — must run before the first
+ * inbound message can arrive so the tracker never returns stale undefined.
+ */
+export function seedInteractionTracker(state: PersistedInteractionState): void {
+  if (state.lastUserInteractionAt !== undefined) {
+    _lastUserInteractionAt = state.lastUserInteractionAt;
+  }
+  if (state.activeChannelId !== undefined) {
+    _activeChannelId = state.activeChannelId;
+  }
+  if (state.activeChannelType !== undefined) {
+    _activeChannelType = state.activeChannelType as OriginatingChannelType;
+  }
+}
+
+/**
  * Called by the shared inbound reply pipeline when a user message arrives.
  * @param channelId    Stable route key (for example "telegram:123" or "channel:C1").
  * @param channelType  Provider/channel type required for routeReply().
@@ -61,6 +92,11 @@ export function recordUserInteraction(
   _lastUserInteractionAt = Date.now();
   _activeChannelId = channelId;
   _activeChannelType = channelType;
+  _store?.save({
+    lastUserInteractionAt: _lastUserInteractionAt,
+    activeChannelId: _activeChannelId,
+    activeChannelType: _activeChannelType,
+  });
 }
 
 /** Returns the epoch-ms timestamp of the last owner message, or undefined if none yet. */
@@ -83,4 +119,5 @@ export function _resetInteractionTrackerForTest(): void {
   _lastUserInteractionAt = undefined;
   _activeChannelId = undefined;
   _activeChannelType = undefined;
+  _store = null;
 }

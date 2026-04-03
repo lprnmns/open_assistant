@@ -35,7 +35,10 @@ import {
   getActiveChannelId,
   getActiveChannelType,
   getLastUserInteractionAt,
+  seedInteractionTracker,
+  setInteractionStore,
 } from "./interaction-tracker.js";
+import { FileInteractionStore } from "./interaction-store.js";
 import { PendingReflectionQueue } from "./reflection-queue.js";
 import { buildRealWorldSnapshot } from "./snapshot.js";
 
@@ -50,6 +53,12 @@ export type ConsciousnessLifecycle = {
   reflectionQueue: PendingReflectionQueue;
   /** Structured audit trail for proactive sends, ticks, and mode transitions. */
   auditLog: ConsciousnessAuditLog;
+  /**
+   * Persistent interaction store backing the InteractionTracker.
+   * undefined when persistence is disabled (CONSCIOUSNESS_STATE_PATH not set
+   * and no default path was resolved).  Closed automatically on stop().
+   */
+  interactionStore?: FileInteractionStore;
 };
 
 // ── Main entry point ──────────────────────────────────────────────────────────
@@ -67,6 +76,21 @@ export function maybeStartConsciousnessLoop(
 ): ConsciousnessLifecycle | null {
   if (!isTruthy(env.CONSCIOUSNESS_ENABLED)) {
     return null;
+  }
+
+  // ── Interaction store (persistence) ────────────────────────────────────────
+  // Seed in-memory tracker from disk before the loop starts so that silence
+  // detection and channel routing survive process restarts.
+  const interactionStore = resolveInteractionStorePath(env)
+    ? new FileInteractionStore({ filePath: resolveInteractionStorePath(env)! })
+    : undefined;
+
+  if (interactionStore) {
+    const loaded = interactionStore.loadSync();
+    if (loaded) {
+      seedInteractionTracker(loaded);
+    }
+    setInteractionStore(interactionStore);
   }
 
   const reflectionQueue = new PendingReflectionQueue();
@@ -128,6 +152,10 @@ export function maybeStartConsciousnessLoop(
     stopped = true;
     scheduler.stop();
     clearGlobalConsciousnessAuditLog(auditLog);
+    if (interactionStore) {
+      setInteractionStore(null);
+      void interactionStore.close();
+    }
   };
 
   // SIGTERM is sent by process managers (Docker, systemd, k8s).
@@ -135,7 +163,7 @@ export function maybeStartConsciousnessLoop(
   process.once("SIGTERM", stop);
   process.once("SIGINT", stop);
 
-  return { stop, scheduler, reflectionQueue, auditLog };
+  return { stop, scheduler, reflectionQueue, auditLog, interactionStore };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -147,4 +175,13 @@ function isTruthy(value: string | undefined): boolean {
 function resolveAuditLogPath(env: NodeJS.ProcessEnv): string | undefined {
   const filePath = env.CONSCIOUSNESS_AUDIT_LOG_PATH?.trim();
   return filePath ? filePath : undefined;
+}
+
+function resolveInteractionStorePath(env: NodeJS.ProcessEnv): string | undefined {
+  const explicit = env.CONSCIOUSNESS_STATE_PATH?.trim();
+  if (explicit) return explicit;
+  // Default: data/consciousness-state.json relative to CWD.
+  // Operators can disable by setting CONSCIOUSNESS_STATE_PATH="" (empty string).
+  if (env.CONSCIOUSNESS_STATE_PATH === "") return undefined;
+  return "data/consciousness-state.json";
 }
