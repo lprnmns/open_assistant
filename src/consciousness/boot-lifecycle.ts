@@ -26,6 +26,7 @@
 import process from "node:process";
 import { startConsciousnessLoop } from "./boot.js";
 import type { ConsciousnessScheduler } from "./boot.js";
+import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 import {
   clearGlobalConsciousnessAuditLog,
   ConsciousnessAuditLog,
@@ -85,13 +86,33 @@ export function maybeStartConsciousnessLoop(
     ? new FileInteractionStore({ filePath: resolveInteractionStorePath(env)! })
     : undefined;
 
+  // Load persisted state once at boot (synchronous — safe at startup).
+  const loaded = interactionStore ? interactionStore.loadSync() : null;
+  if (loaded) {
+    seedInteractionTracker(loaded);
+  }
   if (interactionStore) {
-    const loaded = interactionStore.loadSync();
-    if (loaded) {
-      seedInteractionTracker(loaded);
-    }
     setInteractionStore(interactionStore);
   }
+
+  // ── Silence threshold resolution ───────────────────────────────────────────
+  // Priority: persisted (survives backoff expansion across restarts)
+  //         > CONSCIOUSNESS_SILENCE_THRESHOLD_MS env (operator intent)
+  //         > DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs (engine default)
+  //
+  // The engine default (30 min) is intentionally low for generic use.
+  // The MVP / Yaşayan Varlık production intent is 3 days (259_200_000 ms).
+  // Operators set CONSCIOUSNESS_SILENCE_THRESHOLD_MS=259200000 in .env.
+  const envThreshold = resolvePositiveIntEnv(env.CONSCIOUSNESS_SILENCE_THRESHOLD_MS);
+  const baseSilenceThresholdMs =
+    envThreshold ?? DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs;
+
+  // Mutable refs — updated by onTick after every tick and persisted to store.
+  // Initialized from disk (persisted backoff) or the resolved base threshold.
+  const effectiveThresholdRef = {
+    value: loaded?.effectiveSilenceThresholdMs ?? baseSilenceThresholdMs,
+  };
+  const lastTickAtRef = { value: loaded?.lastTickAt as number | undefined };
 
   const reflectionQueue = new PendingReflectionQueue();
   const auditLog = new ConsciousnessAuditLog({
@@ -101,17 +122,33 @@ export function maybeStartConsciousnessLoop(
   const proactiveState: { lastSentAt?: number } = {};
 
   const scheduler = startConsciousnessLoop({
+    config: { baseSilenceThresholdMs },
     buildSnapshot: () =>
       buildRealWorldSnapshot({
-        // Real in-process sources — updated by the shared inbound reply pipeline.
-        // Persisted (Redis) sources are wired in Sub-Task 9.2.
         getLastUserInteractionAt: () => getLastUserInteractionAt(),
         getPendingNoteCount: () => reflectionQueue.count(),
         getFiredTriggerIds: () => [],
         getActiveChannelId: () => getActiveChannelId(),
         getActiveChannelType: () => getActiveChannelType(),
-        getLastTickAt: () => undefined,
+        getLastTickAt: () => lastTickAtRef.value,
+        getEffectiveSilenceThresholdMs: () => effectiveThresholdRef.value,
       }),
+    onTick: (result) => {
+      // Persist lastTickAt after every tick.
+      lastTickAtRef.value = Date.now();
+      // Persist backoff-expanded threshold when SILENCE_THRESHOLD fired.
+      if (
+        result.watchdogResult.wake === true &&
+        result.watchdogResult.reason === "SILENCE_THRESHOLD" &&
+        result.watchdogResult.nextSilenceThresholdMs !== undefined
+      ) {
+        effectiveThresholdRef.value = result.watchdogResult.nextSilenceThresholdMs;
+      }
+      interactionStore?.save({
+        lastTickAt: lastTickAtRef.value,
+        effectiveSilenceThresholdMs: effectiveThresholdRef.value,
+      });
+    },
     dispatch: {
       sendToChannel: async (channelId: string, content: string, channelType?: string) => {
         const { loadConfig } = await import("../config/config.js");
@@ -175,6 +212,16 @@ function isTruthy(value: string | undefined): boolean {
 function resolveAuditLogPath(env: NodeJS.ProcessEnv): string | undefined {
   const filePath = env.CONSCIOUSNESS_AUDIT_LOG_PATH?.trim();
   return filePath ? filePath : undefined;
+}
+
+/**
+ * Parse an env var as a positive integer.
+ * Returns undefined when the value is absent, non-numeric, or <= 0.
+ */
+function resolvePositiveIntEnv(value: string | undefined): number | undefined {
+  if (!value?.trim()) return undefined;
+  const n = Number(value.trim());
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
 }
 
 function resolveInteractionStorePath(env: NodeJS.ProcessEnv): string | undefined {
