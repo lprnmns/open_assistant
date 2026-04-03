@@ -48,10 +48,13 @@ export type PersistedInteractionState = {
  */
 export interface InteractionStore {
   /**
-   * Enqueue a write.  Debounced — rapid calls collapse to a single flush.
+   * Enqueue a partial-update write.  The store shallow-merges the supplied
+   * fields onto its accumulated state so callers can update a single field
+   * without overwriting fields owned by other workstreams.
+   * Debounced — rapid calls collapse to a single flush.
    * Never throws.
    */
-  save(state: PersistedInteractionState): void;
+  save(partial: Partial<PersistedInteractionState>): void;
   /**
    * Flush any pending write and release resources.
    * Safe to call multiple times (idempotent after first call).
@@ -83,7 +86,13 @@ export type FileInteractionStoreOptions = {
 export class FileInteractionStore implements InteractionStore {
   private readonly filePath: string;
   private readonly debounceMs: number;
-  private pendingState: PersistedInteractionState | null = null;
+  /**
+   * Accumulated full state.  Every save() shallow-merges its partial onto this
+   * so no field is silently dropped when different workstreams write different
+   * subsets of PersistedInteractionState.
+   */
+  private mergedState: PersistedInteractionState = {};
+  private hasPending = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private readonly _writeForTest?: (filePath: string, data: string) => void;
@@ -98,9 +107,12 @@ export class FileInteractionStore implements InteractionStore {
 
   // ── Public API ──────────────────────────────────────────────────────────────
 
-  save(state: PersistedInteractionState): void {
+  save(partial: Partial<PersistedInteractionState>): void {
     if (this.closed) return;
-    this.pendingState = state;
+    // Shallow-merge: only the supplied keys are updated; all other fields
+    // already present in mergedState are preserved unchanged.
+    this.mergedState = { ...this.mergedState, ...partial };
+    this.hasPending = true;
     if (this.timer === null) {
       this.timer = setTimeout(() => {
         this.timer = null;
@@ -116,7 +128,7 @@ export class FileInteractionStore implements InteractionStore {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    if (this.pendingState !== null) {
+    if (this.hasPending) {
       this.flushNow();
     }
   }
@@ -143,9 +155,9 @@ export class FileInteractionStore implements InteractionStore {
   // ── Internal ────────────────────────────────────────────────────────────────
 
   private flushNow(): void {
-    const state = this.pendingState;
-    if (state === null) return;
-    this.pendingState = null;
+    if (!this.hasPending) return;
+    this.hasPending = false;
+    const state = this.mergedState;
     try {
       const data = JSON.stringify(state, null, 2);
       if (this._writeForTest) {
