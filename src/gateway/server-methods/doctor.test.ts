@@ -30,6 +30,22 @@ const invokeDoctorMemoryStatus = async (respond: ReturnType<typeof vi.fn>) => {
   });
 };
 
+const invokeDoctorExecApprovalStatus = async (
+  respond: ReturnType<typeof vi.fn>,
+  hasExecApprovalClients: () => boolean = () => false,
+) => {
+  await doctorHandlers["doctor.exec-approval.status"]({
+    req: {} as never,
+    params: {} as never,
+    respond: respond as never,
+    context: {
+      hasExecApprovalClients,
+    } as never,
+    client: null,
+    isWebchatConnect: () => false,
+  });
+};
+
 const expectEmbeddingErrorResponse = (respond: ReturnType<typeof vi.fn>, error: string) => {
   expect(respond).toHaveBeenCalledWith(
     true,
@@ -108,5 +124,35 @@ describe("doctor.memory.status", () => {
 
     expectEmbeddingErrorResponse(respond, "gateway memory probe failed: timeout");
     expect(close).toHaveBeenCalled();
+  });
+});
+
+describe("doctor.exec-approval.status", () => {
+  it("reports when approval clients are connected", async () => {
+    const respond = vi.fn();
+
+    await invokeDoctorExecApprovalStatus(respond, () => true);
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      {
+        hasExecApprovalClients: true,
+      },
+      undefined,
+    );
+  });
+
+  it("falls back to false when the runtime hook is absent", async () => {
+    const respond = vi.fn();
+
+    await invokeDoctorExecApprovalStatus(respond);
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      {
+        hasExecApprovalClients: false,
+      },
+      undefined,
+    );
   });
 });

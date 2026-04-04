@@ -13,6 +13,10 @@ export type DoctorMemoryStatusPayload = {
   };
 };
 
+export type DoctorExecApprovalStatusPayload = {
+  hasExecApprovalClients: boolean;
+};
+
 export const doctorHandlers: GatewayRequestHandlers = {
   "doctor.memory.status": async ({ respond }) => {
     const cfg = loadConfig();
@@ -58,5 +62,11 @@ export const doctorHandlers: GatewayRequestHandlers = {
     } finally {
       await manager.close?.().catch(() => {});
     }
+  },
+  "doctor.exec-approval.status": async ({ respond, context }) => {
+    const payload: DoctorExecApprovalStatusPayload = {
+      hasExecApprovalClients: context.hasExecApprovalClients?.() ?? false,
+    };
+    respond(true, payload, undefined);
   },
 };

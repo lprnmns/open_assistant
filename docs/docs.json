@@ -1500,6 +1500,7 @@
                   "help/environment",
                   "help/debugging",
                   "help/testing",
+                  "help/founder-mvp-runbook",
                   "help/scripts",
                   "debug/node-issue",
                   "diagnostics/flags"
