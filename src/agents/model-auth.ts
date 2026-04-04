@@ -265,12 +265,96 @@ function resolveAwsSdkAuthInfo(): { mode: "aws-sdk"; source: string } {
   return { mode: "aws-sdk", source: "aws-sdk default chain" };
 }
 
+function resolveReusableAuthProviders(provider: string): readonly string[] {
+  // Codex CLI login is stored as an openai-codex OAuth profile. Reuse that
+  // bearer credential for OpenAI auth when no direct openai credentials exist,
+  // so memory embeddings can start from the same signed-in account.
+  if (normalizeProviderId(provider) === "openai") {
+    return ["openai-codex"];
+  }
+  return [];
+}
+
 export type ResolvedProviderAuth = {
   apiKey?: string;
   profileId?: string;
   source: string;
   mode: "api-key" | "oauth" | "token" | "aws-sdk";
 };
+
+function resolveStoredProfileAuthMode(
+  store: AuthProfileStore,
+  profileId: string,
+): ResolvedProviderAuth["mode"] {
+  const mode = store.profiles[profileId]?.type;
+  return mode === "oauth" ? "oauth" : mode === "token" ? "token" : "api-key";
+}
+
+async function resolveOrderedProfileAuth(params: {
+  requestedProvider: string;
+  orderProvider: string;
+  cfg?: OpenClawConfig;
+  preferredProfile?: string;
+  store: AuthProfileStore;
+  agentDir?: string;
+}): Promise<ResolvedProviderAuth | null> {
+  const order = resolveAuthProfileOrder({
+    cfg: params.cfg,
+    store: params.store,
+    provider: params.orderProvider,
+    preferredProfile: params.preferredProfile,
+  });
+  for (const candidate of order) {
+    try {
+      const resolved = await resolveApiKeyForProfile({
+        cfg: params.cfg,
+        store: params.store,
+        profileId: candidate,
+        agentDir: params.agentDir,
+      });
+      if (resolved) {
+        const reused =
+          normalizeProviderId(params.orderProvider) !== normalizeProviderId(params.requestedProvider);
+        return {
+          apiKey: resolved.apiKey,
+          profileId: candidate,
+          source: reused
+            ? `profile:${candidate} (reused for ${params.requestedProvider})`
+            : `profile:${candidate}`,
+          mode: resolveStoredProfileAuthMode(params.store, candidate),
+        };
+      }
+    } catch (err) {
+      log.debug?.(
+        `auth profile "${candidate}" failed for provider "${params.requestedProvider}" via "${params.orderProvider}": ${String(err)}`,
+      );
+    }
+  }
+  return null;
+}
+
+async function resolveReusableProviderAuth(params: {
+  provider: string;
+  cfg?: OpenClawConfig;
+  preferredProfile?: string;
+  store: AuthProfileStore;
+  agentDir?: string;
+}): Promise<ResolvedProviderAuth | null> {
+  for (const fallbackProvider of resolveReusableAuthProviders(params.provider)) {
+    const resolved = await resolveOrderedProfileAuth({
+      requestedProvider: params.provider,
+      orderProvider: fallbackProvider,
+      cfg: params.cfg,
+      preferredProfile: params.preferredProfile,
+      store: params.store,
+      agentDir: params.agentDir,
+    });
+    if (resolved) {
+      return resolved;
+    }
+  }
+  return null;
+}
 
 export async function resolveApiKeyForProvider(params: {
   provider: string;
@@ -307,32 +391,16 @@ export async function resolveApiKeyForProvider(params: {
     return resolveAwsSdkAuthInfo();
   }
 
-  const order = resolveAuthProfileOrder({
+  const directProfileAuth = await resolveOrderedProfileAuth({
+    requestedProvider: provider,
+    orderProvider: provider,
     cfg,
     store,
-    provider,
     preferredProfile,
+    agentDir: params.agentDir,
   });
-  for (const candidate of order) {
-    try {
-      const resolved = await resolveApiKeyForProfile({
-        cfg,
-        store,
-        profileId: candidate,
-        agentDir: params.agentDir,
-      });
-      if (resolved) {
-        const mode = store.profiles[candidate]?.type;
-        return {
-          apiKey: resolved.apiKey,
-          profileId: candidate,
-          source: `profile:${candidate}`,
-          mode: mode === "oauth" ? "oauth" : mode === "token" ? "token" : "api-key",
-        };
-      }
-    } catch (err) {
-      log.debug?.(`auth profile "${candidate}" failed for provider "${provider}": ${String(err)}`);
-    }
+  if (directProfileAuth) {
+    return directProfileAuth;
   }
 
   const envResolved = resolveEnvApiKey(provider);
@@ -352,6 +420,17 @@ export async function resolveApiKeyForProvider(params: {
   const syntheticLocalAuth = resolveSyntheticLocalProviderAuth({ cfg, provider });
   if (syntheticLocalAuth) {
     return syntheticLocalAuth;
+  }
+
+  const reusableAuth = await resolveReusableProviderAuth({
+    provider,
+    cfg,
+    preferredProfile,
+    store,
+    agentDir: params.agentDir,
+  });
+  if (reusableAuth) {
+    return reusableAuth;
   }
 
   const normalized = normalizeProviderId(provider);
@@ -417,10 +496,12 @@ export function resolveModelAuthMode(
   }
 
   const authStore = store ?? ensureAuthProfileStore();
-  const profiles = listProfilesForProvider(authStore, resolved);
-  if (profiles.length > 0) {
+  const resolveModeFromProfiles = (profileIds: string[]): ModelAuthMode | undefined => {
+    if (profileIds.length === 0) {
+      return undefined;
+    }
     const modes = new Set(
-      profiles
+      profileIds
         .map((id) => authStore.profiles[id]?.type)
         .filter((mode): mode is "api_key" | "oauth" | "token" => Boolean(mode)),
     );
@@ -439,6 +520,12 @@ export function resolveModelAuthMode(
     if (modes.has("api_key")) {
       return "api-key";
     }
+    return undefined;
+  };
+
+  const directMode = resolveModeFromProfiles(listProfilesForProvider(authStore, resolved));
+  if (directMode) {
+    return directMode;
   }
 
   if (authOverride === undefined && normalizeProviderId(resolved) === "amazon-bedrock") {
@@ -452,6 +539,18 @@ export function resolveModelAuthMode(
 
   if (hasUsableCustomProviderApiKey(cfg, resolved)) {
     return "api-key";
+  }
+
+  const reusableProfileIds = Array.from(
+    new Set(
+      resolveReusableAuthProviders(resolved).flatMap((fallbackProvider) =>
+        listProfilesForProvider(authStore, fallbackProvider),
+      ),
+    ),
+  );
+  const reusableMode = resolveModeFromProfiles(reusableProfileIds);
+  if (reusableMode) {
+    return reusableMode;
   }
 
   return "unknown";
@@ -472,26 +571,16 @@ export async function hasAvailableAuthForProvider(params: {
     return true;
   }
 
-  const order = resolveAuthProfileOrder({
+  const directProfileAuth = await resolveOrderedProfileAuth({
+    requestedProvider: provider,
+    orderProvider: provider,
     cfg,
     store,
-    provider,
     preferredProfile,
+    agentDir: params.agentDir,
   });
-  for (const candidate of order) {
-    try {
-      const resolved = await resolveApiKeyForProfile({
-        cfg,
-        store,
-        profileId: candidate,
-        agentDir: params.agentDir,
-      });
-      if (resolved) {
-        return true;
-      }
-    } catch (err) {
-      log.debug?.(`auth profile "${candidate}" failed for provider "${provider}": ${String(err)}`);
-    }
+  if (directProfileAuth) {
+    return true;
   }
 
   if (resolveEnvApiKey(provider)) {
@@ -501,6 +590,18 @@ export async function hasAvailableAuthForProvider(params: {
     return true;
   }
   if (resolveSyntheticLocalProviderAuth({ cfg, provider })) {
+    return true;
+  }
+
+  if (
+    await resolveReusableProviderAuth({
+      provider,
+      cfg,
+      preferredProfile,
+      store,
+      agentDir: params.agentDir,
+    })
+  ) {
     return true;
   }
 

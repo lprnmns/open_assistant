@@ -73,6 +73,24 @@ describe("resolveModelAuthMode", () => {
     expect(resolveModelAuthMode("openai", undefined, store)).toBe("mixed");
   });
 
+  it("reuses Codex OAuth mode when openai has no direct auth profiles", () => {
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "openai-codex:default": {
+          type: "oauth",
+          provider: "openai-codex",
+          access: "access-token",
+          refresh: "refresh-token",
+          expires: Date.now() + 60_000,
+          accountId: "acct_123",
+        },
+      },
+    };
+
+    expect(resolveModelAuthMode("openai", undefined, store)).toBe("oauth");
+  });
+
   it("returns aws-sdk when provider auth is overridden", () => {
     expect(
       resolveModelAuthMode(

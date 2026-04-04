@@ -121,7 +121,7 @@ describe("getApiKeyForModel", () => {
     }
   });
 
-  it("suggests openai-codex when only Codex OAuth is configured", async () => {
+  it("reuses openai-codex OAuth when openai auth is requested", async () => {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-auth-"));
 
     try {
@@ -158,13 +158,64 @@ describe("getApiKeyForModel", () => {
             "utf8",
           );
 
-          let error: unknown = null;
-          try {
-            await resolveApiKeyForProvider({ provider: "openai" });
-          } catch (err) {
-            error = err;
-          }
-          expect(String(error)).toContain("openai-codex/gpt-5.4");
+          const resolved = await resolveApiKeyForProvider({
+            provider: "openai",
+            agentDir,
+          });
+          expect(resolved.apiKey).toBe(oauthFixture.access);
+          expect(resolved.profileId).toBe("openai-codex:default");
+          expect(resolved.mode).toBe("oauth");
+          expect(resolved.source).toContain("reused for openai");
+        },
+      );
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats openai-codex OAuth as available auth for openai", async () => {
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-auth-"));
+
+    try {
+      const agentDir = path.join(tempDir, "agent");
+      await withEnvAsync(
+        {
+          OPENAI_API_KEY: undefined,
+          OPENCLAW_STATE_DIR: tempDir,
+          OPENCLAW_AGENT_DIR: agentDir,
+          PI_CODING_AGENT_DIR: agentDir,
+        },
+        async () => {
+          const authProfilesPath = path.join(tempDir, "agent", "auth-profiles.json");
+          await fs.mkdir(path.dirname(authProfilesPath), {
+            recursive: true,
+            mode: 0o700,
+          });
+          await fs.writeFile(
+            authProfilesPath,
+            `${JSON.stringify(
+              {
+                version: 1,
+                profiles: {
+                  "openai-codex:default": {
+                    type: "oauth",
+                    provider: "openai-codex",
+                    ...oauthFixture,
+                  },
+                },
+              },
+              null,
+              2,
+            )}\n`,
+            "utf8",
+          );
+
+          await expect(
+            hasAvailableAuthForProvider({
+              provider: "openai",
+              agentDir,
+            }),
+          ).resolves.toBe(true);
         },
       );
     } finally {
