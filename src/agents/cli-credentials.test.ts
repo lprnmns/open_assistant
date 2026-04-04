@@ -292,4 +292,109 @@ describe("cli credentials", () => {
       expires: expSeconds * 1000,
     });
   });
+
+  it("prefers fresher Windows Codex auth when running under WSL", async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-codex-wsl-"));
+    const linuxUserHome = path.join(tempRoot, "linux-home");
+    const linuxCodexHome = path.join(linuxUserHome, ".codex");
+    const windowsUserHome = path.join(tempRoot, "windows-user");
+    const windowsCodexHome = path.join(windowsUserHome, ".codex");
+    const staleExpSeconds = Math.floor(Date.parse("2025-12-14T00:00:00Z") / 1000);
+    const freshExpSeconds = Math.floor(Date.parse("2026-04-05T00:00:00Z") / 1000);
+    execSyncMock.mockImplementation(() => {
+      throw new Error("keychain unavailable");
+    });
+
+    fs.mkdirSync(linuxCodexHome, { recursive: true });
+    fs.mkdirSync(windowsCodexHome, { recursive: true });
+    fs.writeFileSync(
+      path.join(linuxCodexHome, "auth.json"),
+      JSON.stringify({
+        tokens: {
+          access_token: createJwtWithExp(staleExpSeconds),
+          refresh_token: "stale-refresh",
+        },
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(windowsCodexHome, "auth.json"),
+      JSON.stringify({
+        tokens: {
+          access_token: createJwtWithExp(freshExpSeconds),
+          refresh_token: "fresh-refresh",
+        },
+      }),
+      "utf8",
+    );
+
+    const creds = readCodexCliCredentials({
+      platform: "linux",
+      execSync: execSyncMock,
+      env: {
+        HOME: linuxUserHome,
+        USERPROFILE: windowsUserHome,
+        WSL_DISTRO_NAME: "Ubuntu",
+      },
+    });
+
+    expect(creds).toMatchObject({
+      access: createJwtWithExp(freshExpSeconds),
+      refresh: "fresh-refresh",
+      provider: "openai-codex",
+      expires: freshExpSeconds * 1000,
+    });
+  });
+
+  it("keeps an explicit CODEX_HOME authoritative even under WSL", async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-codex-home-"));
+    const configuredCodexHome = path.join(tempRoot, "configured-home", ".codex");
+    const windowsUserHome = path.join(tempRoot, "windows-user");
+    const windowsCodexHome = path.join(windowsUserHome, ".codex");
+    const configuredExpSeconds = Math.floor(Date.parse("2026-04-06T00:00:00Z") / 1000);
+    const windowsExpSeconds = Math.floor(Date.parse("2026-04-07T00:00:00Z") / 1000);
+    execSyncMock.mockImplementation(() => {
+      throw new Error("keychain unavailable");
+    });
+
+    fs.mkdirSync(configuredCodexHome, { recursive: true });
+    fs.mkdirSync(windowsCodexHome, { recursive: true });
+    fs.writeFileSync(
+      path.join(configuredCodexHome, "auth.json"),
+      JSON.stringify({
+        tokens: {
+          access_token: createJwtWithExp(configuredExpSeconds),
+          refresh_token: "configured-refresh",
+        },
+      }),
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(windowsCodexHome, "auth.json"),
+      JSON.stringify({
+        tokens: {
+          access_token: createJwtWithExp(windowsExpSeconds),
+          refresh_token: "windows-refresh",
+        },
+      }),
+      "utf8",
+    );
+
+    const creds = readCodexCliCredentials({
+      platform: "linux",
+      execSync: execSyncMock,
+      env: {
+        CODEX_HOME: configuredCodexHome,
+        USERPROFILE: windowsUserHome,
+        WSL_DISTRO_NAME: "Ubuntu",
+      },
+    });
+
+    expect(creds).toMatchObject({
+      access: createJwtWithExp(configuredExpSeconds),
+      refresh: "configured-refresh",
+      provider: "openai-codex",
+      expires: configuredExpSeconds * 1000,
+    });
+  });
 });

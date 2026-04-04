@@ -87,6 +87,19 @@ type ClaudeCliWriteOptions = ClaudeCliFileOptions & {
 
 type ExecSyncFn = typeof execSync;
 type ExecFileSyncFn = typeof execFileSync;
+type CodexCliReadOptions = {
+  platform?: NodeJS.Platform;
+  execSync?: ExecSyncFn;
+  codexHome?: string;
+  env?: NodeJS.ProcessEnv;
+  authPaths?: string[];
+};
+type CodexCliFileCredential = {
+  credential: CodexCliCredential;
+  authPath: string;
+  mtimeMs: number;
+  freshnessMs: number;
+};
 
 function resolveClaudeCliCredentialsPath(homeDir?: string) {
   const baseDir = homeDir ?? resolveUserPath("~");
@@ -128,14 +141,106 @@ function resolveCodexCliAuthPath() {
   return path.join(resolveCodexHomePath(), CODEX_CLI_AUTH_FILENAME);
 }
 
-function resolveCodexHomePath() {
-  const configured = process.env.CODEX_HOME;
-  const home = configured ? resolveUserPath(configured) : resolveUserPath("~/.codex");
+function resolveCodexHomePath(
+  configuredHome?: string,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const configured = configuredHome ?? env.CODEX_HOME;
+  const home = configured ? resolveUserPath(configured, env) : resolveUserPath("~/.codex", env);
   try {
     return fs.realpathSync.native(home);
   } catch {
     return home;
   }
+}
+
+function resolveAccessiblePath(rawPath: string): string {
+  try {
+    return fs.realpathSync.native(rawPath);
+  } catch {
+    return rawPath;
+  }
+}
+
+function isWslPlatform(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): boolean {
+  if (platform !== "linux") {
+    return false;
+  }
+  if (typeof env.WSL_DISTRO_NAME === "string" || typeof env.WSL_INTEROP === "string") {
+    return true;
+  }
+  for (const probePath of ["/proc/version", "/proc/sys/kernel/osrelease"]) {
+    try {
+      if (/microsoft/i.test(fs.readFileSync(probePath, "utf8"))) {
+        return true;
+      }
+    } catch {
+      // Ignore probe failures and continue with the next signal.
+    }
+  }
+  return false;
+}
+
+function resolveWslWindowsHomePath(rawHome: string | undefined): string | null {
+  if (typeof rawHome !== "string" || rawHome.trim().length === 0) {
+    return null;
+  }
+  const trimmedHome = rawHome.trim();
+  if (fs.existsSync(trimmedHome)) {
+    return resolveAccessiblePath(trimmedHome);
+  }
+  if (trimmedHome.startsWith("/")) {
+    return trimmedHome;
+  }
+  const normalizedHome = trimmedHome.replaceAll("\\", "/");
+  const driveMatch = /^([A-Za-z]):\/(.*)$/.exec(normalizedHome);
+  if (!driveMatch) {
+    return null;
+  }
+  const [, driveLetter, remainder] = driveMatch;
+  const pathSegments = remainder.split("/").filter((segment) => segment.length > 0);
+  return path.posix.join(`/mnt/${driveLetter.toLowerCase()}`, ...pathSegments);
+}
+
+function resolveWslWindowsHomeCandidates(env: NodeJS.ProcessEnv): string[] {
+  const candidates = new Set<string>();
+  const combinedHome =
+    typeof env.HOMEDRIVE === "string" &&
+    env.HOMEDRIVE.length > 0 &&
+    typeof env.HOMEPATH === "string" &&
+    env.HOMEPATH.length > 0
+      ? `${env.HOMEDRIVE}${env.HOMEPATH}`
+      : undefined;
+  const inferredUsers = [env.USERPROFILE, combinedHome];
+  const usernames = [env.USER, env.USERNAME].filter(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+  for (const username of usernames) {
+    inferredUsers.push(path.posix.join("/mnt/c/Users", username));
+  }
+  for (const homeCandidate of inferredUsers) {
+    const resolvedCandidate = resolveWslWindowsHomePath(homeCandidate);
+    if (resolvedCandidate) {
+      candidates.add(resolvedCandidate);
+    }
+  }
+  return [...candidates];
+}
+
+function resolveCodexCliAuthCandidatePaths(options?: CodexCliReadOptions): string[] {
+  const platform = options?.platform ?? process.platform;
+  const env = options?.env ?? process.env;
+  const configuredHome = options?.codexHome ?? env.CODEX_HOME;
+  const candidates = new Set<string>([
+    path.join(resolveCodexHomePath(configuredHome, env), CODEX_CLI_AUTH_FILENAME),
+  ]);
+  if (configuredHome || !isWslPlatform(platform, env)) {
+    return [...candidates];
+  }
+  for (const windowsHome of resolveWslWindowsHomeCandidates(env)) {
+    candidates.add(path.posix.join(windowsHome, ".codex", CODEX_CLI_AUTH_FILENAME));
+  }
+  return [...candidates];
 }
 
 function resolveQwenCliCredentialsPath(homeDir?: string) {
@@ -169,17 +274,17 @@ function decodeJwtExpiryMs(token: string): number | null {
   }
 }
 
-function readCodexKeychainCredentials(options?: {
-  platform?: NodeJS.Platform;
-  execSync?: ExecSyncFn;
-}): CodexCliCredential | null {
+function readCodexKeychainCredentials(options?: CodexCliReadOptions): CodexCliCredential | null {
   const platform = options?.platform ?? process.platform;
   if (platform !== "darwin") {
     return null;
   }
   const execSyncImpl = options?.execSync ?? execSync;
 
-  const codexHome = resolveCodexHomePath();
+  const codexHome = resolveCodexHomePath(
+    options?.codexHome ?? options?.env?.CODEX_HOME,
+    options?.env,
+  );
   const account = computeCodexKeychainAccount(codexHome);
 
   try {
@@ -466,19 +571,7 @@ export function writeClaudeCliCredentials(
   return writeFile(newCredentials, { homeDir: options?.homeDir });
 }
 
-export function readCodexCliCredentials(options?: {
-  platform?: NodeJS.Platform;
-  execSync?: ExecSyncFn;
-}): CodexCliCredential | null {
-  const keychain = readCodexKeychainCredentials({
-    platform: options?.platform,
-    execSync: options?.execSync,
-  });
-  if (keychain) {
-    return keychain;
-  }
-
-  const authPath = resolveCodexCliAuthPath();
+function readCodexCliCredentialsFromAuthPath(authPath: string): CodexCliFileCredential | null {
   const raw = loadJsonFile(authPath);
   if (!raw || typeof raw !== "object") {
     return null;
@@ -500,33 +593,85 @@ export function readCodexCliCredentials(options?: {
     return null;
   }
 
-  let fallbackExpiry: number;
+  let mtimeMs = Date.now();
   try {
-    const stat = fs.statSync(authPath);
-    fallbackExpiry = stat.mtimeMs + 60 * 60 * 1000;
+    mtimeMs = fs.statSync(authPath).mtimeMs;
   } catch {
-    fallbackExpiry = Date.now() + 60 * 60 * 1000;
+    // Keep the current timestamp fallback when the file disappears between read and stat.
   }
-  const expires = decodeJwtExpiryMs(accessToken) ?? fallbackExpiry;
+  const expires = decodeJwtExpiryMs(accessToken) ?? mtimeMs + 60 * 60 * 1000;
 
   return {
-    type: "oauth",
-    provider: "openai-codex" as OAuthProvider,
-    access: accessToken,
-    refresh: refreshToken,
-    expires,
-    accountId: typeof tokens.account_id === "string" ? tokens.account_id : undefined,
+    authPath,
+    mtimeMs,
+    freshnessMs: Math.max(expires, mtimeMs),
+    credential: {
+      type: "oauth",
+      provider: "openai-codex" as OAuthProvider,
+      access: accessToken,
+      refresh: refreshToken,
+      expires,
+      accountId: typeof tokens.account_id === "string" ? tokens.account_id : undefined,
+    },
   };
+}
+
+function pickFreshestCodexCliCredential(authPaths: string[]): CodexCliFileCredential | null {
+  let freshestCredential: CodexCliFileCredential | null = null;
+  for (const authPath of authPaths) {
+    const candidateCredential = readCodexCliCredentialsFromAuthPath(authPath);
+    if (!candidateCredential) {
+      continue;
+    }
+    if (
+      !freshestCredential ||
+      candidateCredential.freshnessMs > freshestCredential.freshnessMs ||
+      (candidateCredential.freshnessMs === freshestCredential.freshnessMs &&
+        candidateCredential.mtimeMs > freshestCredential.mtimeMs)
+    ) {
+      freshestCredential = candidateCredential;
+    }
+  }
+  return freshestCredential;
+}
+
+export function readCodexCliCredentials(options?: CodexCliReadOptions): CodexCliCredential | null {
+  const keychain = readCodexKeychainCredentials({
+    platform: options?.platform,
+    execSync: options?.execSync,
+    codexHome: options?.codexHome,
+    env: options?.env,
+  });
+  if (keychain) {
+    return keychain;
+  }
+
+  const authPaths = options?.authPaths ?? resolveCodexCliAuthCandidatePaths(options);
+  const selectedCredential = pickFreshestCodexCliCredential(authPaths);
+  if (!selectedCredential) {
+    return null;
+  }
+  if (authPaths.length > 1 && selectedCredential.authPath !== authPaths[0]) {
+    log.info("selected fresher codex credentials from alternate auth file", {
+      authPath: selectedCredential.authPath,
+      expires: new Date(selectedCredential.credential.expires).toISOString(),
+    });
+  }
+  return selectedCredential.credential;
 }
 
 export function readCodexCliCredentialsCached(options?: {
   ttlMs?: number;
   platform?: NodeJS.Platform;
   execSync?: ExecSyncFn;
+  codexHome?: string;
+  env?: NodeJS.ProcessEnv;
+  authPaths?: string[];
 }): CodexCliCredential | null {
   const ttlMs = options?.ttlMs ?? 0;
   const now = Date.now();
-  const cacheKey = `${options?.platform ?? process.platform}|${resolveCodexCliAuthPath()}`;
+  const authPaths = options?.authPaths ?? resolveCodexCliAuthCandidatePaths(options);
+  const cacheKey = `${options?.platform ?? process.platform}|${authPaths.join("|")}`;
   if (
     ttlMs > 0 &&
     codexCliCache &&
@@ -538,6 +683,9 @@ export function readCodexCliCredentialsCached(options?: {
   const value = readCodexCliCredentials({
     platform: options?.platform,
     execSync: options?.execSync,
+    codexHome: options?.codexHome,
+    env: options?.env,
+    authPaths,
   });
   if (ttlMs > 0) {
     codexCliCache = { value, readAt: now, cacheKey };
