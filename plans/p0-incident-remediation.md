@@ -140,14 +140,19 @@ Ekleme noktaları:
 - `maybeStartConsciousnessLoop()` entry: `log.info("boot start", { sessionKey })`
 - `setConsciousnessRuntime()` sonrası (line 218): `log.info("boot ready", { sessionKey, brain: "wired", scheduler: "started" })`
 - `stop()` başında: `log.info("stopping")`
-- `onTickCallback`'de: `log.debug("tick", { wake: result.watchdogResult.wake })` (debug = spam yok)
+- `onTickCallback`'de — **seviye ayrımı:**
+  - `wake=false` (idle tick): `log.debug("tick", { wake: false })` — debug, çünkü her 60s+ tekrar eder
+  - `wake=true`: `log.info("wake", { reason: result.watchdogResult.reason })` — info, operatör görmeli
+- Proactive dispatch sonrası: `log.info("dispatch", { channelId, success })` — info
 - catch block'ta (line 219-221): `log.error("boot failed", { error: String(error) })`
 
-**Beklenen davranış değişimi:** Gateway journal'da:
+**Beklenen davranış değişimi:** Gateway journal'da (normal info seviyesi):
 - `[consciousness] boot start`
 - `[consciousness] boot ready {sessionKey: "..."}`
+- `[consciousness] wake {reason: "SILENCE_THRESHOLD"}` — her wake event'te
+- `[consciousness] dispatch {channelId: "...", success: true}` — her proactive dispatch'te
 - `[consciousness] stopping`
-- Debug mode'da: `[consciousness] tick {wake: false/true}`
+- Debug modunda ek olarak: `[consciousness] tick {wake: false}` — idle tick'ler
 
 #### WS-A Senaryo-C: Boot exception
 Exception kaynağına göre surgical fix. Genelleme yapılmaz.
@@ -163,18 +168,56 @@ Exception kaynağına göre surgical fix. Genelleme yapılmaz.
 
 **Problem 3 katman:**
 
-#### B.1: ENOENT spam kaynağını bul ve kapat
+#### B.1: ENOENT exact emitter attribution + fix
 
-ENOENT `/home/manas/.openclaw/workspace/memory/2025-02-13.md` log'unda:
-- `memory_search` tool execute → `getMemoryManagerContext()` → `getMemorySearchManager()` lazy import
-- "builtin" backend → file scan for `MEMORY.md` + `memory/*.md`
-- Var olmayan specific file (`2025-02-13.md`) read deneniyor
+**Canlı log prefix:** `[tools] read failed: ENOENT: ... /workspace/memory/2025-02-13.md`
 
-**Fix noktası:** `src/agents/tools/memory-tool.ts` veya `src/memory/internal.ts`
-- Spesifik file not found ENOENT'i warn yerine debug level'a düşür
-- Veya: scan'den önce glob-based existence check
+Bu log'un exact emitter'ı henüz kanıtlanmamış. 3 muhtemel kaynak var:
 
-**Verification:** `memory-tool.runtime.ts` ve `src/memory/internal.ts`'i oku; `console.warn`/`console.error`/`log.warn` çağrılarını bul.
+| # | Muhtemel emitter | Mekanizma | Nasıl kanıtlanır |
+|---|-----------------|-----------|-----------------|
+| 1 | Generic `read` tool | Agent, prompt yönlendirmesi sonucu `read(memory/2025-02-13.md)` çağırıyor | `[tools]` prefix + canlı log'da tool call trace (request id) |
+| 2 | `memory_search` backend | Builtin backend file scan sırasında ENOENT | `memory-tool.ts` → `internal.ts` → fs.readFile hatası |
+| 3 | QMD backend indexer | QMD'nin index'lediği ama silinmiş dosyayı sync etmeye çalışması | `qmd-manager.ts` veya `qmd-sync.ts` log'u |
+
+**B.1 ilk adım: attribution (kod yazmadan)**
+
+WSL'de canlı gateway'de veya test run'da:
+```bash
+# Canlı log'da ENOENT satırlarının tam prefix + context'ini yakala
+journalctl --user -u openclaw-gateway.service | grep -i "ENOENT.*memory" | head -5
+
+# İpucu: "[tools] read failed" ise generic read tool — agent prompt-driven dosya okuyor
+# "[memory]" veya "[search]" ise backend tarafı
+# stack trace varsa exact call site görünür
+```
+
+Repoda exact emitter'ı bul:
+```bash
+# [tools] prefix'ini kim üretiyor?
+grep -rn "read failed" src/agents/tools/ src/memory/ --include="*.ts"
+
+# ENOENT error handling
+grep -rn "ENOENT" src/agents/tools/ src/memory/ --include="*.ts"
+```
+
+Attribution sonucuna göre fix:
+
+**Eğer emitter generic `read` tool ise:**
+- Sorun prompt guidance — `memory-core/index.ts` agent'a "MEMORY.md + memory/*.md oku" diyor
+- Agent bu dosyaları explicit `read` tool'u ile deniyor
+- Fix: WS-B.2 prompt guidance düzeltmesi ile çözülür
+
+**Eğer emitter `memory_search` backend ise:**
+- `src/agents/tools/memory-tool.ts` veya `src/memory/internal.ts`'deki file scan
+- Fix: ENOENT'i catch et, debug'a düşür veya graceful empty dön
+- Exact dosya: `grep -rn "read failed" src/memory/internal.ts src/agents/tools/memory-tool.ts`
+
+**Eğer emitter QMD backend ise:**
+- `src/memory/qmd-manager.ts` indexer'ı silinmiş dosyayı sync ediyor
+- Fix: file existence check before read, veya ENOENT → skip
+
+**Fix yüzeyi yalnızca attribution sonrası belirlenir.** Tahminle kod yazılmaz.
 
 #### B.2: Legacy memory prompt guidance → consciousness-aware (boundary-safe)
 
@@ -358,10 +401,14 @@ journalctl --user -u openclaw-gateway.service | grep "ENOENT" | grep "memory"
 ```
 
 **G. Proactive/silence**
-Kısa silence threshold ile:
+Kısa silence threshold ile (`CONSCIOUSNESS_SILENCE_THRESHOLD_MS=60000`):
 ```bash
-journalctl | grep "\[consciousness\]" | grep -E "tick|wake|dispatch"
-# Beklenen: tick + wake=true görünüyor
+journalctl | grep "\[consciousness\]" | grep -E "wake|dispatch"
+# Beklenen (info seviyesinde, debug gerekmez):
+#   [consciousness] wake {reason: "SILENCE_THRESHOLD"}
+#   [consciousness] dispatch {channelId: "...", success: ...}
+# wake=true olan tick'ler info seviyesinde loglanır, idle tick'ler sadece debug'da görünür.
+# Bu gate SADECE wake + dispatch loglarını kontrol eder — idle tick görmek gerekmez.
 ```
 
 ---
@@ -405,8 +452,10 @@ Yukarıdaki WS-E bölümüne bakın (Section 4, WS-E). Her gate binary: PASS / F
 
 ## 8. Push Plan
 
-- Branch: `beta/p0-gateway-consciousness-wiring` (veya `beta/founder-incident-fix`)
-- Main'e dokunma
+- **Çalışma branch'i:** `p0/gateway-consciousness-wiring` (şu an mevcut ve bu planı barındırıyor)
+- Tüm implementation bu branch üzerinde yapılır
+- QA onayı sonrası `beta` branch'e merge edilir (fast-forward veya squash, QA kararıyla)
+- **Main'e dokunulmaz** — beta'dan main'e geçiş ayrı QA gate'i gerektirir
 - Her WS sonrası: `pnpm test` → tam suite
 - Son push öncesi: `pnpm build` + `pnpm tsgo`
 - Live smoke WS-E gates hepsi PASS → push
