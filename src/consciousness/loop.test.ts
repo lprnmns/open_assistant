@@ -321,6 +321,46 @@ describe("tick() — Watchdog returns wake:true", () => {
     const expectedNext = Math.min(Math.round(threshold * 1.5), cfg.maxSilenceThresholdMs);
     expect(result.state.lastSnapshot?.effectiveSilenceThresholdMs).toBe(expectedNext);
   });
+
+  it("enriches silence-threshold recalls and prompt context for founder-private follow-ups", async () => {
+    const recall = vi.fn().mockResolvedValue({ recent: [], recalled: [] });
+    const llmCall = vi.fn().mockResolvedValue({
+      content: '{"action":"STAY_SILENT"}',
+      usage: { promptTokens: 5, completionTokens: 2, totalTokens: 7 },
+      model: "claude-haiku",
+    });
+
+    const threshold = cfg.baseSilenceThresholdMs;
+    const snap = makeSnap({
+      activeChannelId: "+905075086027",
+      activeChannelType: "whatsapp",
+      lastUserInteractionAt: NOW - threshold - 1,
+      effectiveSilenceThresholdMs: threshold,
+    });
+
+    await tick(snap, makeInitialConsciousnessState(), {
+      recall: { recall },
+      sessionKey: "agent:main:whatsapp:direct:+905075086027",
+      llmCall,
+    });
+
+    expect(recall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: "agent:main:whatsapp:direct:+905075086027",
+        text: expect.stringContaining("Review recent unresolved owner requests"),
+      }),
+    );
+    expect(recall.mock.calls[0]?.[0]?.text).toContain("Active channel type: whatsapp");
+
+    const messages = llmCall.mock.calls[0]?.[0]?.messages as
+      | Array<{ role: string; content: string }>
+      | undefined;
+    expect(messages?.[0]?.content).toContain(
+      "silence-threshold wake happens in the owner's direct chat",
+    );
+    expect(messages?.[1]?.content).toContain("Active channel type: whatsapp");
+    expect(messages?.[1]?.content).toContain("Last user interaction:");
+  });
 });
 
 // ── tick() — LLM error fallback ───────────────────────────────────────────────

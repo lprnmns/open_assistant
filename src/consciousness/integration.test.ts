@@ -51,6 +51,7 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(true);
+    expect(result.outcome).toBe("sent");
     expect(ctx.sendToChannel).toHaveBeenCalledOnce();
     expect(ctx.sendToChannel).toHaveBeenCalledWith("telegram-123", "Hello!", "telegram");
     expect(ctx.appendNote).not.toHaveBeenCalled();
@@ -64,6 +65,7 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(false);
+    expect(result.outcome).toBe("no_active_channel");
     expect(result.error).toBeUndefined();
     expect(ctx.sendToChannel).not.toHaveBeenCalled();
   });
@@ -97,6 +99,7 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     });
 
     expect(result.dispatched).toBe(false);
+    expect(result.outcome).toBe("rate_limited");
     expect(ctx.sendToChannel).not.toHaveBeenCalled();
     expect(auditLog.list()).toEqual([
       expect.objectContaining({
@@ -125,6 +128,7 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     });
 
     expect(result.dispatched).toBe(true);
+    expect(result.outcome).toBe("sent");
     expect(ctx.sendToChannel).toHaveBeenCalledWith("telegram-123", "This proa...", "telegram");
     expect(auditLog.list()).toEqual([
       expect.objectContaining({
@@ -153,6 +157,7 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(true);
+    expect(result.outcome).toBe("sent");
     expect(ctx.proactiveState?.lastSentAt).toBe(NOW);
     expect(onProactiveSent).toHaveBeenCalledOnce();
     expect(onProactiveSent).toHaveBeenCalledWith(NOW);
@@ -176,6 +181,7 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     });
 
     expect(result.dispatched).toBe(false);
+    expect(result.outcome).toBe("rate_limited");
     expect(onProactiveSent).not.toHaveBeenCalled();
   });
 
@@ -191,6 +197,7 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(false);
+    expect(result.outcome).toBe("send_error");
     expect(result.error?.message).toBe("network error");
     expect(auditLog.list()).toEqual([
       expect.objectContaining({
@@ -215,6 +222,7 @@ describe("dispatchDecision — TAKE_NOTE", () => {
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(true);
+    expect(result.outcome).toBe("note_saved");
     expect(ctx.appendNote).toHaveBeenCalledOnce();
     expect(ctx.appendNote).toHaveBeenCalledWith("Remember this.");
     expect(ctx.sendToChannel).not.toHaveBeenCalled();
@@ -231,6 +239,7 @@ describe("dispatchDecision — TAKE_NOTE", () => {
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(false);
+    expect(result.outcome).toBe("note_error");
     expect(result.error?.message).toBe("disk full");
     expect(ctx.sendToChannel).not.toHaveBeenCalled();
   });
@@ -244,6 +253,7 @@ describe("dispatchDecision — TAKE_NOTE", () => {
 
     const result = await dispatchDecision(decision, snap, ctx);
 
+    expect(result.outcome).toBe("note_error");
     expect(result.error).toBeInstanceOf(Error);
     expect(result.error?.message).toBe("string error");
   });
@@ -260,6 +270,7 @@ describe("dispatchDecision — STAY_SILENT", () => {
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(false);
+    expect(result.outcome).toBe("stay_silent");
     expect(result.error).toBeUndefined();
     expect(ctx.sendToChannel).not.toHaveBeenCalled();
     expect(ctx.appendNote).not.toHaveBeenCalled();
@@ -277,6 +288,7 @@ describe("dispatchDecision — ENTER_SLEEP", () => {
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(false);
+    expect(result.outcome).toBe("enter_sleep");
     expect(result.error).toBeUndefined();
     expect(ctx.sendToChannel).not.toHaveBeenCalled();
     expect(ctx.appendNote).not.toHaveBeenCalled();

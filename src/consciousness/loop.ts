@@ -84,6 +84,21 @@ async function safeRecall(
   }
 }
 
+function buildRecallQuery(
+  snap: WorldSnapshot,
+  wakeResult: WatchdogResult & { wake: true },
+): string {
+  if (wakeResult.reason !== "SILENCE_THRESHOLD") {
+    return wakeResult.context;
+  }
+  return [
+    wakeResult.context,
+    "Review recent unresolved owner requests, promised follow-ups, pending work, code incidents, file requests, and next actions before deciding whether to send a short follow-up.",
+    `Active channel type: ${snap.activeChannelType ?? "(unknown)"}`,
+    `Active channel id: ${snap.activeChannelId ?? "(none)"}`,
+  ].join("\n");
+}
+
 // ── Prompt builder ────────────────────────────────────────────────────────────
 
 /** Maximum characters per note line in the memory context section of the prompt. */
@@ -118,7 +133,9 @@ function buildTickMessages(
       '  { "action": "STAY_SILENT" }',
       '  { "action": "ENTER_SLEEP" }',
       "Only use SEND_MESSAGE when you have something genuinely useful to say.",
-      "Prefer STAY_SILENT when uncertain.",
+      "When a silence-threshold wake happens in the owner's direct chat and there is unresolved work or a promised follow-up, prefer one short, concrete SEND_MESSAGE.",
+      "Do not send generic check-ins, duplicate nudges, or filler.",
+      "Prefer STAY_SILENT when the thread is clearly resolved or you do not have a concrete next step.",
       "Respond with raw JSON only — no markdown, no explanation.",
     ].join("\n"),
   };
@@ -157,6 +174,10 @@ function buildTickMessages(
   contextLines.push(`Current state:`);
   contextLines.push(`  Pending notes: ${snap.pendingNoteCount}`);
   contextLines.push(`  Active channel: ${snap.activeChannelId ?? "(none)"}`);
+  contextLines.push(`  Active channel type: ${snap.activeChannelType ?? "(unknown)"}`);
+  contextLines.push(
+    `  Last user interaction: ${snap.lastUserInteractionAt ? new Date(snap.lastUserInteractionAt).toISOString() : "never"}`,
+  );
   contextLines.push(
     `  Last tick: ${snap.lastTickAt ? new Date(snap.lastTickAt).toISOString() : "never"}`,
   );
@@ -343,7 +364,11 @@ export async function tick(
   let decision: TickDecision;
   try {
     // Recall memory BEFORE building the prompt — failure is fully swallowed by safeRecall
-    const memory = await safeRecall(ctx?.recall, watchdogResult.context, ctx?.sessionKey);
+    const memory = await safeRecall(
+      ctx?.recall,
+      buildRecallQuery(snap, watchdogResult),
+      ctx?.sessionKey,
+    );
     const messages = buildTickMessages(snap, watchdogResult, memory);
     const callFn = ctx?.llmCall ?? defaultProxyCall;
     const result = await callFn({ source: "consciousness", messages, maxTokens: 512 });

@@ -51,7 +51,7 @@ describe("createOpenClawCodingTools", () => {
       expect(values.size).toBeGreaterThanOrEqual(min);
     }
   });
-  it("enforces apply_patch availability and canonical names across model/provider constraints", () => {
+  it("enforces apply_patch availability and canonical names across config/model constraints", () => {
     expect(defaultTools.some((tool) => tool.name === "exec")).toBe(true);
     expect(defaultTools.some((tool) => tool.name === "process")).toBe(true);
     expect(defaultTools.some((tool) => tool.name === "apply_patch")).toBe(false);
@@ -75,7 +75,7 @@ describe("createOpenClawCodingTools", () => {
       modelProvider: "anthropic",
       modelId: "claude-opus-4-5",
     });
-    expect(anthropicTools.some((tool) => tool.name === "apply_patch")).toBe(false);
+    expect(anthropicTools.some((tool) => tool.name === "apply_patch")).toBe(true);
 
     const allowModelsConfig: OpenClawConfig = {
       tools: {
@@ -108,6 +108,13 @@ describe("createOpenClawCodingTools", () => {
     expect(names.has("write")).toBe(true);
     expect(names.has("edit")).toBe(true);
     expect(names.has("apply_patch")).toBe(false);
+
+    const oauthEnabledTools = createOpenClawCodingTools({
+      config: enabledConfig,
+      modelProvider: "anthropic",
+      modelAuthMode: "oauth",
+    });
+    expect(oauthEnabledTools.some((tool) => tool.name === "apply_patch")).toBe(true);
   });
   it("provides top-level object schemas for all tools", () => {
     const tools = createOpenClawCodingTools();

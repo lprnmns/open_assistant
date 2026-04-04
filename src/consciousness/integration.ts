@@ -16,9 +16,12 @@
  * Inbound messages must be handled by the gateway reply path only.
  */
 
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { createDispatchAuditEntry, type ConsciousnessAuditLog } from "./audit.js";
 import type { ConsciousnessConfig, TickDecision, WorldSnapshot } from "./types.js";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
+
+const consciousnessLog = createSubsystemLogger("consciousness");
 
 // ── Dispatch context (injected by caller) ─────────────────────────────────────
 
@@ -72,6 +75,16 @@ export type DispatchContext = {
 export type DispatchResult = {
   /** True when a side-effect was successfully executed. */
   dispatched: boolean;
+  /** Machine-readable outcome for tests and runtime observability. */
+  outcome:
+    | "sent"
+    | "rate_limited"
+    | "send_error"
+    | "no_active_channel"
+    | "note_saved"
+    | "note_error"
+    | "stay_silent"
+    | "enter_sleep";
   /**
    * Set when dispatch failed (callback threw, no active channel, etc.).
    * Presence of `error` does NOT mean the Loop should stop — callers should
@@ -104,7 +117,8 @@ export async function dispatchDecision(
     case "SEND_MESSAGE": {
       if (!snap.activeChannelId) {
         // No active channel — drop silently, never broadcast to an unknown surface
-        return { dispatched: false };
+        consciousnessLog.info("dispatch dropped", { reason: "no_active_channel" });
+        return { dispatched: false, outcome: "no_active_channel" };
       }
       const now = Date.now();
       const lastSentAt = ctx.proactiveState?.lastSentAt;
@@ -123,7 +137,12 @@ export async function dispatchDecision(
             decision: "rate_limited",
           }),
         );
-        return { dispatched: false };
+        consciousnessLog.info("dispatch rate_limited", {
+          channelId: snap.activeChannelId,
+          channelType: snap.activeChannelType ?? "(unknown)",
+          minIntervalMs,
+        });
+        return { dispatched: false, outcome: "rate_limited" };
       }
 
       const content = capProactiveContent(
@@ -145,7 +164,7 @@ export async function dispatchDecision(
             decision: "sent",
           }),
         );
-        return { dispatched: true };
+        return { dispatched: true, outcome: "sent" };
       } catch (err) {
         ctx.auditLog?.append(
           createDispatchAuditEntry({
@@ -156,8 +175,14 @@ export async function dispatchDecision(
             decision: "send_error",
           }),
         );
+        consciousnessLog.error("dispatch send_error", {
+          channelId: snap.activeChannelId,
+          channelType: snap.activeChannelType ?? "(unknown)",
+          error: err instanceof Error ? err.message : String(err),
+        });
         return {
           dispatched: false,
+          outcome: "send_error",
           error: err instanceof Error ? err : new Error(String(err)),
         };
       }
@@ -166,20 +191,27 @@ export async function dispatchDecision(
     case "TAKE_NOTE": {
       try {
         await ctx.appendNote(decision.noteContent);
-        return { dispatched: true };
+        return { dispatched: true, outcome: "note_saved" };
       } catch (err) {
         // Dispatch failure must not propagate — loop stays alive
         return {
           dispatched: false,
+          outcome: "note_error",
           error: err instanceof Error ? err : new Error(String(err)),
         };
       }
     }
 
-    case "STAY_SILENT":
+    case "STAY_SILENT": {
+      consciousnessLog.info("stay_silent", {
+        reasoning: decision.reasoning ? decision.reasoning.slice(0, 160) : undefined,
+      });
+      return { dispatched: false, outcome: "stay_silent" };
+    }
     case "ENTER_SLEEP":
+      consciousnessLog.info("enter_sleep");
       // No side-effect; phase transition is handled by the Loop Engine
-      return { dispatched: false };
+      return { dispatched: false, outcome: "enter_sleep" };
   }
 }
 

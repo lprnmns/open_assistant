@@ -35,7 +35,19 @@ function ensureSymlink(targetValue, targetPath, type) {
 }
 
 function symlinkPath(sourcePath, targetPath, type) {
-  ensureSymlink(relativeSymlinkTarget(sourcePath, targetPath), targetPath, type);
+  try {
+    ensureSymlink(relativeSymlinkTarget(sourcePath, targetPath), targetPath, type);
+    return;
+  } catch (error) {
+    if (error?.code !== "EPERM") {
+      throw error;
+    }
+  }
+
+  // Windows shells without symlink privilege should still be able to stage
+  // the runtime overlay by copying immutable asset files.
+  removePathIfExists(targetPath);
+  fs.copyFileSync(sourcePath, targetPath);
 }
 
 function shouldWrapRuntimeJsFile(sourcePath) {
@@ -113,7 +125,21 @@ function linkPluginNodeModules(params) {
   if (!fs.existsSync(params.sourcePluginNodeModulesDir)) {
     return;
   }
-  ensureSymlink(params.sourcePluginNodeModulesDir, runtimeNodeModulesDir, symlinkType());
+  try {
+    ensureSymlink(params.sourcePluginNodeModulesDir, runtimeNodeModulesDir, symlinkType());
+    return;
+  } catch (error) {
+    if (error?.code !== "EPERM") {
+      throw error;
+    }
+  }
+
+  // Fall back to copying on Windows environments that can read but not create
+  // symlinks (common without Developer Mode or elevated privileges).
+  fs.cpSync(params.sourcePluginNodeModulesDir, runtimeNodeModulesDir, {
+    recursive: true,
+    force: true,
+  });
 }
 
 export function stageBundledPluginRuntime(params = {}) {

@@ -4,6 +4,7 @@ import type { ModelCompatConfig } from "../config/types.models.js";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
 import { resolveMergedSafeBinProfileFixtures } from "../infra/exec-safe-bin-runtime-policy.js";
 import { logWarn } from "../logger.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
@@ -64,20 +65,58 @@ import {
 } from "./tool-policy.js";
 import { resolveWorkspaceRoot } from "./workspace-dir.js";
 
-function isOpenAIProvider(provider?: string) {
-  const normalized = provider?.trim().toLowerCase();
-  return normalized === "openai" || normalized === "openai-codex";
-}
+const toolsLog = createSubsystemLogger("agents/tools");
 
 const TOOL_DENY_BY_MESSAGE_PROVIDER: Readonly<Record<string, readonly string[]>> = {
   voice: ["tts"],
 };
 const TOOL_DENY_FOR_XAI_PROVIDERS = new Set(["web_search"]);
 const MEMORY_FLUSH_ALLOWED_TOOL_NAMES = new Set(["read", "write"]);
+const CORE_CAPABILITY_TOOL_NAMES = ["read", "write", "edit", "exec", "process", "apply_patch"];
 
 function normalizeMessageProvider(messageProvider?: string): string | undefined {
   const normalized = messageProvider?.trim().toLowerCase();
   return normalized && normalized.length > 0 ? normalized : undefined;
+}
+
+function logToolAvailabilitySnapshot(params: {
+  profile?: string;
+  providerProfile?: string;
+  messageProvider?: string;
+  modelProvider?: string;
+  modelId?: string;
+  tools: ReadonlyArray<Pick<AnyAgentTool, "name">>;
+  requiresHuman: ReadonlySet<string>;
+  actFirstEnabled: boolean;
+  approvalSurfacePresent: boolean;
+  applyPatchConfigured: boolean;
+  applyPatchEnabled: boolean;
+}) {
+  const availableNames = new Set(params.tools.map((tool) => tool.name));
+  const availability = Object.fromEntries(
+    CORE_CAPABILITY_TOOL_NAMES.map((name) => [name, availableNames.has(name)]),
+  );
+  const requiresHuman = CORE_CAPABILITY_TOOL_NAMES.filter((name) =>
+    params.requiresHuman.has(name),
+  );
+  const payload = {
+    profile: params.profile ?? "(default)",
+    providerProfile: params.providerProfile ?? "(default)",
+    messageProvider: params.messageProvider ?? "(none)",
+    modelProvider: params.modelProvider ?? "(none)",
+    modelId: params.modelId ?? "(none)",
+    actFirstEnabled: params.actFirstEnabled,
+    approvalSurfacePresent: params.approvalSurfacePresent,
+    applyPatchConfigured: params.applyPatchConfigured,
+    applyPatchEnabled: params.applyPatchEnabled,
+    available: availability,
+    requiresHuman,
+  };
+  if (params.messageProvider || params.applyPatchConfigured || params.approvalSurfacePresent) {
+    toolsLog.info("tool availability", payload);
+    return;
+  }
+  toolsLog.debug("tool availability", payload);
 }
 
 function isActFirstEnabled(explicit?: boolean): boolean {
@@ -374,7 +413,6 @@ export function createOpenClawCodingTools(options?: {
   const applyPatchWorkspaceOnly = workspaceOnly || applyPatchConfig?.workspaceOnly !== false;
   const applyPatchEnabled =
     !!applyPatchConfig?.enabled &&
-    isOpenAIProvider(options?.modelProvider) &&
     isApplyPatchAllowedForModel({
       modelProvider: options?.modelProvider,
       modelId: options?.modelId,
@@ -623,6 +661,19 @@ export function createOpenClawCodingTools(options?: {
       { policy: sandbox?.tools, label: "sandbox tools.allow" },
       { policy: subagentPolicy, label: "subagent tools.allow" },
     ],
+  });
+  logToolAvailabilitySnapshot({
+    profile,
+    providerProfile,
+    messageProvider: options?.messageProvider,
+    modelProvider: options?.modelProvider,
+    modelId: options?.modelId,
+    tools: subagentFiltered.tools,
+    requiresHuman: subagentFiltered.meta.requiresHuman,
+    actFirstEnabled,
+    approvalSurfacePresent: !!options?.approvalSurface,
+    applyPatchConfigured: !!applyPatchConfig?.enabled,
+    applyPatchEnabled,
   });
   // Always normalize tool JSON Schemas before handing them to pi-agent/pi-ai.
   // Without this, some providers (notably OpenAI) will reject root-level union schemas.
