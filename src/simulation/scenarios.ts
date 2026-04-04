@@ -362,9 +362,6 @@ export async function simulateChronoSpatialScenario(
         .sort((left, right) => right.createdAt - left.createdAt)
         .slice(0, k);
     },
-    async listByType() {
-      return [];
-    },
     async close() {},
   };
 

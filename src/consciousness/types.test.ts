@@ -181,11 +181,8 @@ describe("TickDecision (discriminated union)", () => {
   it("STAY_SILENT requires no payload fields", () => {
     const decision: TickDecision = { action: "STAY_SILENT" };
     expect(decision.action).toBe("STAY_SILENT");
-    // Narrowed type has no messageContent or noteContent
-    if (decision.action === "SEND_MESSAGE") {
-      // unreachable — proves TS narrows correctly
-      expect(decision.messageContent).toBeTruthy();
-    }
+    expect("messageContent" in decision).toBe(false);
+    expect("noteContent" in decision).toBe(false);
   });
 
   it("ENTER_SLEEP can carry suggestedNextTickDelayMs", () => {
