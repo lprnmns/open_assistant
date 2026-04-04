@@ -106,6 +106,14 @@ export type ConsciousnessPhase =
   | "SLEEPING"
   | "PAUSED";
 
+/**
+ * Scheduler-owned event buffer attached to a WorldSnapshot.
+ *
+ * The current loop wiring only passes this through as opaque state; no caller
+ * dereferences buffer methods from the shared snapshot contract yet.
+ */
+export interface EventBuffer {}
+
 // ── World snapshot ────────────────────────────────────────────────────────────
 
 /**
