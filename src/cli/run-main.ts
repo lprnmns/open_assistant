@@ -129,6 +129,7 @@ export async function runCli(argv: string[] = process.argv) {
 
   // Declared before try so the finally block can call stop().
   let consciousnessLifecycle: { stop: () => Promise<void> } | null = null;
+  let interactionPersistenceLifecycle: { stop: () => Promise<void> } | null = null;
 
   try {
     if (shouldUseRootHelpFastPath(normalizedArgv)) {
@@ -160,6 +161,11 @@ export async function runCli(argv: string[] = process.argv) {
     // ── Consciousness Loop (feature-flagged) ─────────────────────────────────
     // CONSCIOUSNESS_ENABLED=1 activates the background tick loop.
     // The lifecycle handle is kept for graceful shutdown in the finally block.
+    const { maybeStartInteractionPersistence } = await import(
+      "../consciousness/interaction-persistence.js"
+    );
+    interactionPersistenceLifecycle = maybeStartInteractionPersistence();
+
     const { maybeStartConsciousnessLoop } = await import(
       "../consciousness/boot-lifecycle.js"
     );
@@ -201,6 +207,7 @@ export async function runCli(argv: string[] = process.argv) {
     await program.parseAsync(parseArgv);
   } finally {
     await consciousnessLifecycle?.stop();
+    await interactionPersistenceLifecycle?.stop();
     await closeCliMemoryManagers();
   }
 }

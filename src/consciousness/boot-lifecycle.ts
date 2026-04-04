@@ -29,10 +29,9 @@ import {
   getActiveChannelId,
   getActiveChannelType,
   getLastUserInteractionAt,
-  seedInteractionTracker,
-  setInteractionStore,
 } from "./interaction-tracker.js";
-import { FileInteractionStore } from "./interaction-store.js";
+import type { FileInteractionStore } from "./interaction-store.js";
+import { maybeStartInteractionPersistence } from "./interaction-persistence.js";
 import type { TickResult } from "./loop.js";
 import { PendingReflectionQueue } from "./reflection-queue.js";
 import { setConsciousnessRuntime } from "./runtime.js";
@@ -83,17 +82,9 @@ export async function maybeStartConsciousnessLoop(
   const createProductionBrainFn =
     deps.createProductionBrain ?? createProductionBrain;
 
-  const interactionStorePath = resolveInteractionStorePath(env);
-  const interactionStore = interactionStorePath
-    ? new FileInteractionStore({ filePath: interactionStorePath })
-    : undefined;
-  const loaded = interactionStore ? interactionStore.loadSync() : null;
-  if (loaded) {
-    seedInteractionTracker(loaded);
-  }
-  if (interactionStore) {
-    setInteractionStore(interactionStore);
-  }
+  const interactionPersistence = maybeStartInteractionPersistence(env);
+  const interactionStore = interactionPersistence?.interactionStore;
+  const loaded = interactionPersistence?.loadedState ?? null;
 
   const envThreshold = resolvePositiveIntEnv(
     env.CONSCIOUSNESS_SILENCE_THRESHOLD_MS,
@@ -157,9 +148,8 @@ export async function maybeStartConsciousnessLoop(
     setConsciousnessRuntime(null);
 
     const closes: Promise<unknown>[] = [];
-    if (interactionStore) {
-      setInteractionStore(null);
-      closes.push(interactionStore.close());
+    if (interactionPersistence) {
+      closes.push(interactionPersistence.stop());
     }
     if (brain) {
       closes.push(brain.close());
@@ -317,13 +307,6 @@ function describeErrorMessage(error: unknown): string {
     return error.message || String(error);
   }
   return String(error);
-}
-
-function resolveInteractionStorePath(env: NodeJS.ProcessEnv): string | undefined {
-  const configured = env.CONSCIOUSNESS_STATE_PATH?.trim();
-  if (configured) return configured;
-  if (env.CONSCIOUSNESS_STATE_PATH === "") return undefined;
-  return "data/consciousness-state.json";
 }
 
 function resolveBrainDbPath(env: NodeJS.ProcessEnv): string {
