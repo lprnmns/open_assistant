@@ -1787,6 +1787,10 @@ export async function runEmbeddedAttempt(
       turnSourceAccountId: params.agentAccountId,
       turnSourceThreadId: params.messageThreadId,
     });
+    // Keep core tools and bundled runtimes on the same act-first/approval path.
+    // Without this, exec/edit/apply_patch can lose approval routing even though
+    // MCP/LSP tools still receive it.
+    const actFirstEnabled = process.env.OPENCLAW_ACT_FIRST?.trim() === "1";
     const externalLoopDetection = resolveToolLoopDetectionConfig({
       cfg: params.config,
       agentId: sessionAgentId,
@@ -1841,6 +1845,8 @@ export async function runEmbeddedAttempt(
           requireExplicitMessageTarget:
             params.requireExplicitMessageTarget ?? isSubagentSessionKey(params.sessionKey),
           disableMessageTool: params.disableMessageTool,
+          actFirstEnabled,
+          approvalSurface: externalApprovalSurface,
           onYield: (message) => {
             yieldDetected = true;
             yieldMessage = message;
@@ -1886,6 +1892,7 @@ export async function runEmbeddedAttempt(
       modelId: params.modelId,
       modelCompat: params.model.compat,
       abortSignal: runAbortController.signal,
+      actFirstEnabled,
       approvalSurface: externalApprovalSurface,
       loopDetection: externalLoopDetection,
     });
@@ -1899,6 +1906,7 @@ export async function runEmbeddedAttempt(
       modelId: params.modelId,
       modelCompat: params.model.compat,
       abortSignal: runAbortController.signal,
+      actFirstEnabled,
       approvalSurface: externalApprovalSurface,
       loopDetection: externalLoopDetection,
     });
