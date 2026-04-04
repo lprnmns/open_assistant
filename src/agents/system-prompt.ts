@@ -3,6 +3,7 @@ import type { ReasoningLevel, ThinkLevel } from "../auto-reply/thinking.js";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
 import type { CognitiveMode } from "../consciousness/cognitive-load.js";
+import { getConsciousnessRuntime } from "../consciousness/runtime.js";
 import { buildMemoryPromptSection } from "../memory/prompt-section.js";
 import { listDeliverableMessageChannels } from "../utils/message-channel.js";
 import type { ResolvedTimeFormat } from "./date-time.js";
@@ -48,6 +49,7 @@ function buildMemorySection(params: {
   return buildMemoryPromptSection({
     availableTools: params.availableTools,
     citationsMode: params.citationsMode,
+    hasPrimaryRecallContext: Boolean(getConsciousnessRuntime()),
   });
 }
 

@@ -4,6 +4,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 export const buildPromptSection: MemoryPromptSectionBuilder = ({
   availableTools,
   citationsMode,
+  hasPrimaryRecallContext,
 }) => {
   const hasMemorySearch = availableTools.has("memory_search");
   const hasMemoryGet = availableTools.has("memory_get");
@@ -13,7 +14,18 @@ export const buildPromptSection: MemoryPromptSectionBuilder = ({
   }
 
   let toolGuidance: string;
-  if (hasMemorySearch && hasMemoryGet) {
+  if (hasPrimaryRecallContext) {
+    if (hasMemorySearch && hasMemoryGet) {
+      toolGuidance =
+        "Primary recall is already loaded into active context automatically. Use memory_search only when you need to look up a specific note or memory file, then use memory_get to pull just the supporting lines you still need.";
+    } else if (hasMemorySearch) {
+      toolGuidance =
+        "Primary recall is already loaded into active context automatically. Use memory_search only when you need to look up a specific note or memory file that is not already covered.";
+    } else {
+      toolGuidance =
+        "Primary recall is already loaded into active context automatically. Use memory_get only when you already know the exact memory file or note you still need to inspect.";
+    }
+  } else if (hasMemorySearch && hasMemoryGet) {
     toolGuidance =
       "Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.";
   } else if (hasMemorySearch) {

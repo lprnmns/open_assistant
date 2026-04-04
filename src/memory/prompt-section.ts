@@ -7,6 +7,7 @@ import type { MemoryCitationsMode } from "../config/types.memory.js";
 export type MemoryPromptSectionBuilder = (params: {
   availableTools: Set<string>;
   citationsMode?: MemoryCitationsMode;
+  hasPrimaryRecallContext?: boolean;
 }) => string[];
 
 // Module-level singleton — only one memory plugin can be active (exclusive slot).
@@ -19,6 +20,7 @@ export function registerMemoryPromptSection(builder: MemoryPromptSectionBuilder)
 export function buildMemoryPromptSection(params: {
   availableTools: Set<string>;
   citationsMode?: MemoryCitationsMode;
+  hasPrimaryRecallContext?: boolean;
 }): string[] {
   return _builder?.(params) ?? [];
 }

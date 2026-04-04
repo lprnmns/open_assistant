@@ -42,6 +42,15 @@ describe("buildPromptSection", () => {
       "Citations are disabled: do not mention file paths or line numbers in replies unless the user explicitly asks.",
     );
   });
+
+  it("switches to context-first guidance when primary recall is already loaded", () => {
+    const result = buildPromptSection({
+      availableTools: new Set(["memory_search", "memory_get"]),
+      hasPrimaryRecallContext: true,
+    });
+    expect(result[1]).toContain("Primary recall is already loaded into active context automatically.");
+    expect(result[1]).not.toContain("MEMORY.md + memory/*.md");
+  });
 });
 
 describe("plugin registration", () => {

@@ -14,6 +14,7 @@
 import process from "node:process";
 import { resolveSessionAgentId } from "../agents/agent-scope.js";
 import { loadConfig, type OpenClawConfig } from "../config/config.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import {
   clearGlobalConsciousnessAuditLog,
   ConsciousnessAuditLog,
@@ -38,6 +39,9 @@ import { setConsciousnessRuntime } from "./runtime.js";
 import { buildRealWorldSnapshot } from "./snapshot.js";
 import { ingestConversationTurn } from "./turn-ingestion.js";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
+
+const consciousnessLog = createSubsystemLogger("consciousness");
+const consciousnessDispatchLog = consciousnessLog.child("dispatch");
 
 export type ConsciousnessLifecycle = {
   stop: () => Promise<void>;
@@ -65,6 +69,15 @@ export async function maybeStartConsciousnessLoop(
   if (!isTruthy(env.CONSCIOUSNESS_ENABLED)) {
     return null;
   }
+
+  const sessionKey = resolveBrainSessionKey(env);
+  const auditLogPath = resolveAuditLogPath(env) ?? "(disabled)";
+  const brainDbPath = resolveBrainDbPath(env) ?? "(default)";
+  consciousnessLog.info("boot start", {
+    sessionKey,
+    dbPath: brainDbPath,
+    auditLogPath,
+  });
 
   const loadConfigFn = deps.loadConfig ?? loadConfig;
   const createProductionBrainFn =
@@ -108,6 +121,17 @@ export async function maybeStartConsciousnessLoop(
 
   const onTickCallback = (result: TickResult): void => {
     lastTickAtRef.value = Date.now();
+    if (result.watchdogResult.wake) {
+      consciousnessLog.info("wake", {
+        reason: result.watchdogResult.reason,
+        context: result.watchdogResult.context,
+        nextDelayMs: result.nextDelayMs,
+      });
+    } else if (consciousnessLog.isEnabled("debug")) {
+      consciousnessLog.debug("tick idle", {
+        nextDelayMs: result.nextDelayMs,
+      });
+    }
     if (
       result.watchdogResult.wake === true &&
       result.watchdogResult.reason === "SILENCE_THRESHOLD" &&
@@ -143,11 +167,11 @@ export async function maybeStartConsciousnessLoop(
     if (closes.length > 0) {
       await Promise.allSettled(closes);
     }
+    consciousnessLog.info("stopped");
   };
 
   try {
     const cfg = loadConfigFn();
-    const sessionKey = resolveBrainSessionKey(env);
     brain = await createProductionBrainFn({
       cfg,
       dbPath: resolveBrainDbPath(env),
@@ -175,34 +199,57 @@ export async function maybeStartConsciousnessLoop(
           content: string,
           channelType?: string,
         ) => {
+          consciousnessDispatchLog.info("dispatch attempt", {
+            channelId,
+            channelType: channelType ?? "(unknown)",
+          });
           const { isRoutableChannel, routeReply } = await import(
             "../auto-reply/reply/route-reply.js"
           );
 
           if (!channelType || !isRoutableChannel(channelType)) {
-            throw new Error(
+            const error = new Error(
               `Active channel is not routable for consciousness dispatch: ${String(channelType ?? "(unknown)")}`,
             );
+            consciousnessDispatchLog.error("dispatch send_error", {
+              channelId,
+              channelType: channelType ?? "(unknown)",
+              error: error.message,
+            });
+            throw error;
           }
 
-          const result = await routeReply({
-            payload: { text: content },
-            channel: channelType,
-            to: channelId,
-            cfg: loadConfigFn(),
-            mirror: false,
-          });
-          if (!result.ok) {
-            throw new Error(
-              result.error ??
-                `Failed to route proactive message to ${channelType}`,
-            );
+          try {
+            const result = await routeReply({
+              payload: { text: content },
+              channel: channelType,
+              to: channelId,
+              cfg: loadConfigFn(),
+              mirror: false,
+            });
+            if (!result.ok) {
+              throw new Error(
+                result.error ??
+                  `Failed to route proactive message to ${channelType}`,
+              );
+            }
+            await ingestConversationTurn({
+              direction: "assistant/proactive",
+              sessionKey: activeBrain.sessionKey,
+              text: content,
+            });
+            consciousnessDispatchLog.info("dispatch sent", {
+              channelId,
+              channelType,
+            });
+          } catch (error) {
+            consciousnessDispatchLog.error("dispatch send_error", {
+              channelId,
+              channelType,
+              error: describeErrorMessage(error),
+            });
+            throw error;
           }
-          await ingestConversationTurn({
-            direction: "assistant/proactive",
-            sessionKey: activeBrain.sessionKey,
-            text: content,
-          });
         },
         proactiveState,
         onProactiveSent: onProactiveSentCallback,
@@ -216,7 +263,13 @@ export async function maybeStartConsciousnessLoop(
       },
     });
     setConsciousnessRuntime({ brain: activeBrain });
+    consciousnessLog.info("boot ready", {
+      sessionKey: activeBrain.sessionKey,
+      dbPath: activeBrain.dbPath,
+      auditLogPath,
+    });
   } catch (error) {
+    consciousnessLog.error("boot failed", { error: describeErrorMessage(error) });
     await stop();
     throw error;
   }
@@ -257,6 +310,13 @@ function resolvePositiveIntEnv(value: string | undefined): number | undefined {
   if (!value?.trim()) return undefined;
   const n = Number(value.trim());
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : undefined;
+}
+
+function describeErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message || String(error);
+  }
+  return String(error);
 }
 
 function resolveInteractionStorePath(env: NodeJS.ProcessEnv): string | undefined {

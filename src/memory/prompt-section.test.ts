@@ -45,6 +45,19 @@ describe("memory prompt section registry", () => {
     ).toEqual(["citations: off"]);
   });
 
+  it("passes hasPrimaryRecallContext to the builder", () => {
+    registerMemoryPromptSection(({ hasPrimaryRecallContext }) => {
+      return [`primaryRecall: ${String(hasPrimaryRecallContext ?? false)}`];
+    });
+
+    expect(
+      buildMemoryPromptSection({
+        availableTools: new Set(),
+        hasPrimaryRecallContext: true,
+      }),
+    ).toEqual(["primaryRecall: true"]);
+  });
+
   it("last registration wins", () => {
     registerMemoryPromptSection(() => ["first"]);
     registerMemoryPromptSection(() => ["second"]);

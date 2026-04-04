@@ -290,14 +290,16 @@ export function applyToolPolicyPipeline(params: {
           isKnownCoreToolId(entry),
         );
         const otherEntries = resolved.unknownAllowlist.filter((entry) => !isKnownCoreToolId(entry));
-        const suffix = describeUnknownAllowlistSuffix({
-          strippedAllowlist: resolved.strippedAllowlist,
-          hasGatedCoreEntries: gatedCoreEntries.length > 0,
-          hasOtherEntries: otherEntries.length > 0,
-        });
-        params.warn(
-          `tools: ${step.label} allowlist contains unknown entries (${entries}). ${suffix}`,
-        );
+        if (otherEntries.length > 0) {
+          const suffix = describeUnknownAllowlistSuffix({
+            strippedAllowlist: resolved.strippedAllowlist,
+            hasGatedCoreEntries: gatedCoreEntries.length > 0,
+            hasOtherEntries: true,
+          });
+          params.warn(
+            `tools: ${step.label} allowlist contains unknown entries (${entries}). ${suffix}`,
+          );
+        }
       }
       policy = resolved.policy;
     }

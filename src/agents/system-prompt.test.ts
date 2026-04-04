@@ -1,10 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
+import { setConsciousnessRuntime } from "../consciousness/runtime.js";
+import { clearMemoryPromptSection, registerMemoryPromptSection } from "../memory/prompt-section.js";
 import { typedCases } from "../test-utils/typed-cases.js";
 import { buildSubagentSystemPrompt } from "./subagent-announce.js";
 import { buildAgentSystemPrompt, buildRuntimeLine } from "./system-prompt.js";
 
 describe("buildAgentSystemPrompt", () => {
+  afterEach(() => {
+    clearMemoryPromptSection();
+    setConsciousnessRuntime(null);
+  });
+
   it("formats owner section for plain, hash, and missing owner lists", () => {
     const cases = typedCases<{
       name: string;
@@ -168,6 +175,20 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).not.toContain("## Heartbeats");
     expect(prompt).not.toContain("HEARTBEAT_OK");
     expect(prompt).not.toContain("Read HEARTBEAT.md");
+  });
+
+  it("tells memory prompt builders when consciousness recall is already loaded", () => {
+    registerMemoryPromptSection(({ hasPrimaryRecallContext }) => [
+      hasPrimaryRecallContext ? "memory-context: loaded" : "memory-context: legacy",
+    ]);
+    setConsciousnessRuntime({ brain: {} as never });
+
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["memory_search"],
+    });
+
+    expect(prompt).toContain("memory-context: loaded");
   });
 
   it("includes safety guardrails in full prompts", () => {

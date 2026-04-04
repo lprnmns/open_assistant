@@ -1,3 +1,7 @@
+import path from "node:path";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+
 type CanvasModule = typeof import("@napi-rs/canvas");
 type PdfJsModule = typeof import("pdfjs-dist/legacy/build/pdf.mjs");
 
@@ -49,7 +53,16 @@ export async function extractPdfContent(params: {
 }): Promise<PdfExtractedContent> {
   const { buffer, maxPages, maxPixels, minTextChars, pageNumbers, onImageExtractionError } = params;
   const { getDocument } = await loadPdfJsModule();
-  const pdf = await getDocument({ data: new Uint8Array(buffer), disableWorker: true }).promise;
+  const require = createRequire(import.meta.url);
+  const pdfJsEntry = require.resolve("pdfjs-dist/legacy/build/pdf.mjs");
+  const standardFontDataUrl =
+    `${pathToFileURL(path.resolve(path.dirname(pdfJsEntry), "..", "..", "standard_fonts")).href}/`;
+  const documentParams = {
+    data: new Uint8Array(buffer),
+    disableWorker: true,
+    standardFontDataUrl,
+  } as Parameters<typeof getDocument>[0];
+  const pdf = await getDocument(documentParams).promise;
 
   const effectivePages: number[] = pageNumbers
     ? pageNumbers.filter((p) => p >= 1 && p <= pdf.numPages).slice(0, maxPages)

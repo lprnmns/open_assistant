@@ -48,7 +48,7 @@ describe("tool-policy-pipeline — filtering", () => {
     expect(warnings[0]).toContain("unknown entries (wat)");
   });
 
-  test("warns gated core tools as unavailable instead of plugin-only unknowns", () => {
+  test("does not warn when unknown allowlist entries are only gated core tools", () => {
     const warnings: string[] = [];
     run(
       [{ name: "exec" }],
@@ -61,12 +61,27 @@ describe("tool-policy-pipeline — filtering", () => {
       ],
       (msg) => warnings.push(msg),
     );
+    expect(warnings).toEqual([]);
+  });
+
+  test("still warns when allowlist mixes gated core tools with truly unknown entries", () => {
+    const warnings: string[] = [];
+    run(
+      [{ name: "exec" }],
+      [
+        {
+          policy: { allow: ["apply_patch", "wat"] },
+          label: "tools.profile (coding)",
+          stripPluginOnlyAllowlist: true,
+        },
+      ],
+      (msg) => warnings.push(msg),
+    );
     expect(warnings.length).toBe(1);
-    expect(warnings[0]).toContain("unknown entries (apply_patch)");
+    expect(warnings[0]).toContain("unknown entries (apply_patch, wat)");
     expect(warnings[0]).toContain(
       "shipped core tools but unavailable in the current runtime/provider/model/config",
     );
-    expect(warnings[0]).not.toContain("unless the plugin is enabled");
   });
 
   test("applies allowlist filtering when core tools are explicitly listed", () => {
