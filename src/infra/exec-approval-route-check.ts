@@ -94,7 +94,7 @@ async function probeForwardingRoute(params: {
 }): Promise<boolean> {
   const forwarder = createExecApprovalForwarder({
     getConfig: () => params.cfg,
-    deliver: async () => {},
+    deliver: async () => [],
   });
   try {
     return await forwarder.handleRequested(params.request);

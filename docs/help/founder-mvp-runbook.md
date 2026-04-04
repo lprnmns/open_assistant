@@ -59,18 +59,18 @@ Notes:
 
 ## Approval preflight
 
-Run the preflight before any demo that includes `calendar.cancel`, `email.send`, or other approval-gated tools.
+Run the full founder preflight before any live demo. It validates the Node version, consciousness storage paths, required MCP-backed tools, and approval routing in one report.
 
 Basic form:
 
 ```bash
-pnpm tsx scripts/check-approval-routes.ts --channel telegram --to <chat-id> --account-id <account-id>
+pnpm tsx scripts/check-founder-mvp.ts --channel telegram --to <chat-id> --account-id <account-id>
 ```
 
 If your forwarding mode uses the origin session, give the real session key too:
 
 ```bash
-pnpm tsx scripts/check-approval-routes.ts \
+pnpm tsx scripts/check-founder-mvp.ts \
   --channel telegram \
   --to <chat-id> \
   --account-id <account-id> \
@@ -89,16 +89,15 @@ What a blocked result means:
 
 Do not demo irreversible tools while this script reports `BLOCKED`.
 
+If you only need the narrow approval-route diagnosis, keep using `pnpm tsx scripts/check-approval-routes.ts ...`.
+
 ## Startup sequence
 
 1. Start or restart the gateway.
 2. Run `openclaw doctor`.
 3. Run `openclaw channels status --probe`.
-4. Run `pnpm tsx scripts/check-approval-routes.ts ...` for the real founder channel.
-5. Confirm these files exist and are writable:
-   - `data/consciousness-state.json`
-   - `data/consciousness.db`
-   - `data/consciousness-audit.jsonl`
+4. Run `pnpm tsx scripts/check-founder-mvp.ts ...` for the real founder channel.
+5. Confirm the report says `READY`.
 
 ## Live acceptance
 
