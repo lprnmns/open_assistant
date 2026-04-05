@@ -1,4 +1,5 @@
 import { SessionManager, type SessionEntry as PiSessionEntry } from "@mariozechner/pi-coding-agent";
+import { stripInboundMetadata } from "../auto-reply/reply/strip-inbound-meta.js";
 import {
   resolveDefaultSessionStorePath,
 } from "../config/sessions/paths.js";
@@ -81,7 +82,15 @@ export function formatReactiveRecallSection(
     transcriptGroundTruth?: string;
   } = {},
 ): string | undefined {
+  const transcriptInstruction = options.transcriptGroundTruth
+    ? [
+        "Exact timestamp rule:",
+        "- If transcript ground truth below identifies the event, answer with that exact local timestamp and timezone.",
+        "- Do not claim the exact time is unavailable while a matching transcript timestamp is listed below.",
+      ].join("\n")
+    : undefined;
   const sections = [
+    transcriptInstruction,
     options.transcriptGroundTruth,
     result.warning ? `Temporal recall warning: ${result.warning}` : undefined,
     formatMemoryList("Recent conversation:", result.recent),
@@ -141,7 +150,8 @@ async function buildTranscriptGroundTruthSection(params: {
   sessionKey: string;
   storePath?: string;
 }): Promise<string | undefined> {
-  if (!looksLikeTemporalQuery(params.text)) {
+  const isTemporalQuery = looksLikeTemporalQuery(params.text);
+  if (!isTemporalQuery) {
     return undefined;
   }
 
@@ -159,6 +169,11 @@ async function buildTranscriptGroundTruthSection(params: {
     }))
     .filter((item) => item.score > 0)
     .sort((left, right) => {
+      const leftTemporal = looksLikeTemporalQuery(left.entry.text);
+      const rightTemporal = looksLikeTemporalQuery(right.entry.text);
+      if (leftTemporal !== rightTemporal) {
+        return leftTemporal ? 1 : -1;
+      }
       if (right.score !== left.score) {
         return right.score - left.score;
       }
@@ -263,11 +278,17 @@ function normalizeTranscriptRole(role: unknown): "user" | "assistant" | undefine
 }
 
 function extractTranscriptText(content: unknown): string {
+  const finalizeText = (value: string): string => {
+    const stripped = stripInboundMetadata(value).trim();
+    return stripped || value.trim();
+  };
+
   if (typeof content === "string") {
-    return content.trim();
+    return finalizeText(content);
   }
   if (Array.isArray(content)) {
-    return content
+    return finalizeText(
+      content
       .map((item) => {
         if (typeof item === "string") {
           return item.trim();
@@ -286,15 +307,16 @@ function extractTranscriptText(content: unknown): string {
       })
       .filter(Boolean)
       .join(" ")
-      .trim();
+      .trim(),
+    );
   }
   if (content && typeof content === "object") {
     const record = content as { text?: unknown; content?: unknown };
     if (typeof record.text === "string") {
-      return record.text.trim();
+      return finalizeText(record.text);
     }
     if (typeof record.content === "string") {
-      return record.content.trim();
+      return finalizeText(record.content);
     }
   }
   return "";

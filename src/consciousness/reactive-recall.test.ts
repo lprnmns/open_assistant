@@ -135,15 +135,58 @@ describe("reactive-recall", () => {
     const sessionManager = SessionManager.create(sessionsDir, sessionsDir);
     sessionManager.appendMessage({
       role: "user",
-      content: "kod patladı acil bak",
+      content: [
+        {
+          type: "text",
+          text: [
+            "Conversation info (untrusted metadata):",
+            "```json",
+            JSON.stringify(
+              {
+                message_id: "ACB3952074F035F479BA013380F019E2",
+                sender_id: "+905075086027",
+                sender: "Alperen",
+              },
+              null,
+              2,
+            ),
+            "```",
+            "",
+            "Sender (untrusted metadata):",
+            "```json",
+            JSON.stringify(
+              {
+                label: "Alperen (+905075086027)",
+                id: "+905075086027",
+                name: "Alperen",
+              },
+              null,
+              2,
+            ),
+            "```",
+            "",
+            "kod patladi acil bak",
+          ].join("\n"),
+        },
+      ],
       timestamp: Date.parse("2026-04-04T15:27:42.000Z"),
     });
     sessionManager.appendMessage(
       makeAgentAssistantMessage({
-        content: [{ type: "text", text: "Ne patladı tam olarak?" }],
+        content: [{ type: "text", text: "Ne patladi tam olarak?" }],
         timestamp: Date.parse("2026-04-04T15:28:00.000Z"),
       }),
     );
+    sessionManager.appendMessage({
+      role: "user",
+      content: "su kodun patlama ani neydi",
+      timestamp: Date.parse("2026-04-05T08:08:42.000Z"),
+    });
+    sessionManager.appendMessage({
+      role: "user",
+      content: "su kodun patlama anini demistim ne zamandi o tarih saat hatirliyor musun",
+      timestamp: Date.parse("2026-04-05T08:37:39.000Z"),
+    });
 
     const sessionFile = sessionManager.getSessionFile();
     if (!sessionFile) {
@@ -165,16 +208,19 @@ describe("reactive-recall", () => {
 
     const brain = makeFakeBrain();
     const section = await buildReactiveRecallSection({
-      text: "şu kodun patlama anı neydi",
+      text: "su kodun patlama ani neydi",
       sessionKey: "agent:main:whatsapp:direct:+905075086027",
       runtime: { brain },
       storePath,
     });
 
     expect(section).toContain("Transcript ground truth (prefer this for exact dates/times):");
-    expect(section).toContain("kod patladı acil bak");
+    expect(section).toContain("Exact timestamp rule:");
+    expect(section).toContain("kod patladi acil bak");
+    expect(section).not.toContain("Conversation info (untrusted metadata):");
     expect(section).toContain("2026-04-04 18:27:42");
     expect(section).toContain(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    expect(section).not.toContain("su kodun patlama ani neydi");
     expect(section?.indexOf("Transcript ground truth")).toBeLessThan(
       section?.indexOf("Recent conversation:") ?? Number.POSITIVE_INFINITY,
     );

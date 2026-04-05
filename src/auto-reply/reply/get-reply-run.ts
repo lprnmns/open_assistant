@@ -303,6 +303,7 @@ export async function runPreparedReply(
       ctx.Body ??
       "",
     sessionKey,
+    storePath,
   });
   const extraSystemPromptParts = [
     inboundMetaPrompt,
