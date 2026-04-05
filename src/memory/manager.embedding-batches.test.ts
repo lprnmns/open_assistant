@@ -27,6 +27,16 @@ const fx = installEmbeddingManagerFixture({
 });
 
 describe("memory embedding batches", () => {
+  function getEmbeddingMethods(manager: unknown): {
+    embedBatchWithRetry: (texts: string[]) => Promise<number[][]>;
+    embedQueryWithTimeout: (text: string) => Promise<number[]>;
+  } {
+    return manager as {
+      embedBatchWithRetry: (texts: string[]) => Promise<number[][]>;
+      embedQueryWithTimeout: (text: string) => Promise<number[]>;
+    };
+  }
+
   async function expectSyncWithFastTimeouts(manager: {
     sync: (params: { reason: string }) => Promise<void>;
   }) {
@@ -37,6 +47,72 @@ describe("memory embedding batches", () => {
       restoreFastTimeouts();
     }
   }
+
+  it("serializes concurrent batch embedding calls", async () => {
+    const managerSmall = getEmbeddingMethods(fx.getManagerSmall());
+    let releaseFirst: (() => void) | undefined;
+    let resolveFirstStarted: (() => void) | undefined;
+    const firstStarted = new Promise<void>((resolve) => {
+      resolveFirstStarted = resolve;
+    });
+
+    fx.embedBatch.mockImplementationOnce(async (texts: string[]) => {
+      resolveFirstStarted?.();
+      await new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      return texts.map(() => [0, 1, 0]);
+    });
+
+    const first = managerSmall.embedBatchWithRetry(["first"]);
+    await firstStarted;
+    const second = managerSmall.embedBatchWithRetry(["second"]);
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(fx.embedBatch).toHaveBeenCalledTimes(1);
+
+    releaseFirst?.();
+    await Promise.all([first, second]);
+
+    expect(fx.embedBatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not block query embeddings behind the batch retry lock", async () => {
+    const managerSmall = getEmbeddingMethods(fx.getManagerSmall());
+    let releaseBatch: (() => void) | undefined;
+    let resolveBatchStarted: (() => void) | undefined;
+    const batchStarted = new Promise<void>((resolve) => {
+      resolveBatchStarted = resolve;
+    });
+
+    fx.embedBatch.mockImplementationOnce(async (texts: string[]) => {
+      resolveBatchStarted?.();
+      await new Promise<void>((resolve) => {
+        releaseBatch = resolve;
+      });
+      return texts.map(() => [0, 1, 0]);
+    });
+    fx.embedQuery.mockResolvedValueOnce([9, 9, 9]);
+
+    const batchPromise = managerSmall.embedBatchWithRetry(["index me"]);
+    await batchStarted;
+
+    try {
+      const queryResult = await Promise.race([
+        managerSmall.embedQueryWithTimeout("ping"),
+        new Promise<number[]>((_, reject) => {
+          setTimeout(() => reject(new Error("query embedding was blocked")), 100);
+        }),
+      ]);
+
+      expect(queryResult).toEqual([9, 9, 9]);
+      expect(fx.embedQuery).toHaveBeenCalledWith("ping");
+    } finally {
+      releaseBatch?.();
+      await batchPromise;
+    }
+  });
 
   it("splits large files across multiple embedding batches", async () => {
     const memoryDir = fx.getMemoryDir();

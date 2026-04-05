@@ -27,6 +27,7 @@ export function installEmbeddingManagerFixture(opts: {
   let managerLarge: MemoryIndexManager | undefined;
   let managerSmall: MemoryIndexManager | undefined;
   let embedBatch: Mock<(texts: string[]) => Promise<number[][]>> | undefined;
+  let embedQuery: Mock<(text: string) => Promise<number[]>> | undefined;
   let getMemorySearchManager: MemoryIndexModule["getMemorySearchManager"];
   let resetEmbeddingMocks: EmbeddingTestMocksModule["resetEmbeddingMocks"];
 
@@ -60,6 +61,7 @@ export function installEmbeddingManagerFixture(opts: {
     await import("./embedding.test-mocks.js");
     const embeddingMocks = await import("./embedding.test-mocks.js");
     embedBatch = embeddingMocks.getEmbedBatchMock();
+    embedQuery = embeddingMocks.getEmbedQueryMock();
     resetEmbeddingMocks = embeddingMocks.resetEmbeddingMocks;
     ({ getMemorySearchManager } = await import("./index.js"));
     fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), opts.fixturePrefix));
@@ -78,6 +80,9 @@ export function installEmbeddingManagerFixture(opts: {
       }),
       agentId: "main",
     });
+    if (!large.manager) {
+      throw new Error(`managerLarge missing: ${large.error ?? "unknown error"}`);
+    }
     expect(large.manager).not.toBeNull();
     managerLarge = requireIndexManager(large.manager, "managerLarge");
 
@@ -89,6 +94,9 @@ export function installEmbeddingManagerFixture(opts: {
       }),
       agentId: "main",
     });
+    if (!small.manager) {
+      throw new Error(`managerSmall missing: ${small.error ?? "unknown error"}`);
+    }
     expect(small.manager).not.toBeNull();
     managerSmall = requireIndexManager(small.manager, "managerSmall");
   });
@@ -124,6 +132,9 @@ export function installEmbeddingManagerFixture(opts: {
   return {
     get embedBatch() {
       return requireValue(embedBatch, "embedBatch");
+    },
+    get embedQuery() {
+      return requireValue(embedQuery, "embedQuery");
     },
     getFixtureRoot: () => requireValue(fixtureRoot, "fixtureRoot"),
     getWorkspaceDir: () => requireValue(workspaceDir, "workspaceDir"),

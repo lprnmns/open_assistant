@@ -51,6 +51,8 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
   protected abstract batchFailureLastError?: string;
   protected abstract batchFailureLastProvider?: string;
   protected abstract batchFailureLock: Promise<void>;
+  protected abstract embeddingBatchRetryLock: Promise<void>;
+  protected abstract embeddingBatchRetryWarned: boolean;
 
   private buildEmbeddingBatches(chunks: MemoryChunk[]): MemoryChunk[][] {
     const batches: MemoryChunk[][] = [];
@@ -528,31 +530,38 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
     if (!this.provider) {
       throw new Error("Cannot embed batch in FTS-only mode (no embedding provider)");
     }
-    let attempt = 0;
-    let delayMs = EMBEDDING_RETRY_BASE_DELAY_MS;
-    while (true) {
+    const provider = this.provider;
+    return await this.withEmbeddingBatchRetryLock(async () => {
+      let attempt = 0;
+      let delayMs = EMBEDDING_RETRY_BASE_DELAY_MS;
       try {
-        const timeoutMs = this.resolveEmbeddingTimeout("batch");
-        log.debug("memory embeddings: batch start", {
-          provider: this.provider.id,
-          items: texts.length,
-          timeoutMs,
-        });
-        return await this.withTimeout(
-          this.provider.embedBatch(texts),
-          timeoutMs,
-          `memory embeddings batch timed out after ${Math.round(timeoutMs / 1000)}s`,
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (!this.isRetryableEmbeddingError(message) || attempt >= EMBEDDING_RETRY_MAX_ATTEMPTS) {
-          throw err;
+        while (true) {
+          try {
+            const timeoutMs = this.resolveEmbeddingTimeout("batch");
+            log.debug("memory embeddings: batch start", {
+              provider: provider.id,
+              items: texts.length,
+              timeoutMs,
+            });
+            return await this.withTimeout(
+              provider.embedBatch(texts),
+              timeoutMs,
+              `memory embeddings batch timed out after ${Math.round(timeoutMs / 1000)}s`,
+            );
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (!this.isRetryableEmbeddingError(message) || attempt >= EMBEDDING_RETRY_MAX_ATTEMPTS) {
+              throw err;
+            }
+            await this.waitForEmbeddingRetry(delayMs, "retrying");
+            delayMs *= 2;
+            attempt += 1;
+          }
         }
-        await this.waitForEmbeddingRetry(delayMs, "retrying");
-        delayMs *= 2;
-        attempt += 1;
+      } finally {
+        this.embeddingBatchRetryWarned = false;
       }
-    }
+    });
   }
 
   protected async embedBatchInputsWithRetry(inputs: EmbeddingInput[]): Promise<number[][]> {
@@ -562,31 +571,39 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
     if (!this.provider?.embedBatchInputs) {
       return await this.embedBatchWithRetry(inputs.map((input) => input.text));
     }
-    let attempt = 0;
-    let delayMs = EMBEDDING_RETRY_BASE_DELAY_MS;
-    while (true) {
+    const provider = this.provider;
+    const embedBatchInputs = this.provider.embedBatchInputs;
+    return await this.withEmbeddingBatchRetryLock(async () => {
+      let attempt = 0;
+      let delayMs = EMBEDDING_RETRY_BASE_DELAY_MS;
       try {
-        const timeoutMs = this.resolveEmbeddingTimeout("batch");
-        log.debug("memory embeddings: structured batch start", {
-          provider: this.provider.id,
-          items: inputs.length,
-          timeoutMs,
-        });
-        return await this.withTimeout(
-          this.provider.embedBatchInputs(inputs),
-          timeoutMs,
-          `memory embeddings batch timed out after ${Math.round(timeoutMs / 1000)}s`,
-        );
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (!this.isRetryableEmbeddingError(message) || attempt >= EMBEDDING_RETRY_MAX_ATTEMPTS) {
-          throw err;
+        while (true) {
+          try {
+            const timeoutMs = this.resolveEmbeddingTimeout("batch");
+            log.debug("memory embeddings: structured batch start", {
+              provider: provider.id,
+              items: inputs.length,
+              timeoutMs,
+            });
+            return await this.withTimeout(
+              embedBatchInputs(inputs),
+              timeoutMs,
+              `memory embeddings batch timed out after ${Math.round(timeoutMs / 1000)}s`,
+            );
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (!this.isRetryableEmbeddingError(message) || attempt >= EMBEDDING_RETRY_MAX_ATTEMPTS) {
+              throw err;
+            }
+            await this.waitForEmbeddingRetry(delayMs, "retrying structured batch");
+            delayMs *= 2;
+            attempt += 1;
+          }
         }
-        await this.waitForEmbeddingRetry(delayMs, "retrying structured batch");
-        delayMs *= 2;
-        attempt += 1;
+      } finally {
+        this.embeddingBatchRetryWarned = false;
       }
-    }
+    });
   }
 
   private async waitForEmbeddingRetry(delayMs: number, action: string): Promise<void> {
@@ -594,7 +611,13 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
       EMBEDDING_RETRY_MAX_DELAY_MS,
       Math.round(delayMs * (1 + Math.random() * 0.2)),
     );
-    log.warn(`memory embeddings rate limited; ${action} in ${waitMs}ms`);
+    const message = `memory embeddings rate limited; ${action} in ${waitMs}ms`;
+    if (this.embeddingBatchRetryWarned) {
+      log.debug(message);
+    } else {
+      this.embeddingBatchRetryWarned = true;
+      log.warn(message);
+    }
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
 
@@ -650,6 +673,20 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
     let release: () => void;
     const wait = this.batchFailureLock;
     this.batchFailureLock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await wait;
+    try {
+      return await fn();
+    } finally {
+      release!();
+    }
+  }
+
+  private async withEmbeddingBatchRetryLock<T>(fn: () => Promise<T>): Promise<T> {
+    let release: () => void;
+    const wait = this.embeddingBatchRetryLock;
+    this.embeddingBatchRetryLock = new Promise<void>((resolve) => {
       release = resolve;
     });
     await wait;

@@ -103,6 +103,8 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
   protected batchFailureLastError?: string;
   protected batchFailureLastProvider?: string;
   protected batchFailureLock: Promise<void> = Promise.resolve();
+  protected embeddingBatchRetryLock: Promise<void> = Promise.resolve();
+  protected embeddingBatchRetryWarned = false;
   protected db: DatabaseSync;
   protected readonly sources: Set<MemorySource>;
   protected providerKey: string;

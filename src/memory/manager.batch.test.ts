@@ -130,6 +130,9 @@ describe("memory indexing with OpenAI batches", () => {
     await fs.mkdir(memoryDir, { recursive: true });
 
     const result = await getMemorySearchManager({ cfg: createBatchCfg(), agentId: "main" });
+    if (!result.manager) {
+      throw new Error(`manager missing: ${result.error ?? "unknown error"}`);
+    }
     expect(result.manager).not.toBeNull();
     if (!result.manager) {
       throw new Error("manager missing");
