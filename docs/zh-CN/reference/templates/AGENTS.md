@@ -25,8 +25,8 @@ x-i18n:
 
 1. 阅读 `SOUL.md` — 这是你的身份
 2. 阅读 `USER.md` — 这是你要帮助的人
-3. 阅读 `memory/YYYY-MM-DD.md`（今天 + 昨天）获取近期上下文
-4. **如果在主会话中**（与你的人类直接对话）：还要阅读 `MEMORY.md`
+3. 获取近期上下文：如果有 `memory_search` 工具，直接调用它，**不要**读取原始 `memory/` 文件。只有在 `memory_search` **不可用**时，才读取 `memory/YYYY-MM-DD.md`（今天 + 昨天）。
+4. **如果在主会话中**（与你的人类直接对话）且没有 `memory_search` 工具：还要阅读 `MEMORY.md`
 
 不要请求许可。直接做。
 

@@ -54,7 +54,8 @@ cp docs/reference/AGENTS.default.md ~/.openclaw/workspace/AGENTS.md
 
 ## 会话开始（必需）
 
-- 读取 `SOUL.md`、`USER.md`、`memory.md`，以及 `memory/` 中的今天和昨天的文件。
+- 读取 `SOUL.md` 和 `USER.md`。
+- 获取近期上下文：如果有 `memory_search` 工具，使用它——**不要**读取原始 `memory/` 文件。只有在 `memory_search` **不可用**时，才读取 `memory/YYYY-MM-DD.md`（今天 + 昨天）和 `MEMORY.md`（如果存在）。
 - 在回复之前完成此操作。
 
 ## Soul（必需）
@@ -72,7 +73,7 @@ cp docs/reference/AGENTS.default.md ~/.openclaw/workspace/AGENTS.md
 
 - 每日日志：`memory/YYYY-MM-DD.md`（如需要请创建 `memory/`）。
 - 长期记忆：`memory.md` 用于持久的事实、偏好和决定。
-- 会话开始时，读取今天 + 昨天 + `memory.md`（如果存在）。
+- 会话开始时：优先使用 `memory_search`；只有在 `memory_search` 不可用时才直接读取今天 + 昨天 + `memory.md`。
 - 捕获：决定、偏好、约束、待办事项。
 - 除非明确要求，否则避免存储密钥。
 
