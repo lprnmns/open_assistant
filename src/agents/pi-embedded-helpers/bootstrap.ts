@@ -195,6 +195,12 @@ export async function ensureSessionHeader(params: {
   await fs.writeFile(file, `${JSON.stringify(entry)}\n`, "utf-8");
 }
 
+const MEMORY_BOOTSTRAP_FILENAMES = new Set(["MEMORY.md", "memory.md"]);
+
+function isMissingMemoryBootstrapFile(name: string): boolean {
+  return MEMORY_BOOTSTRAP_FILENAMES.has(name);
+}
+
 export function buildBootstrapContextFiles(
   files: WorkspaceBootstrapFile[],
   opts?: { warn?: (message: string) => void; maxChars?: number; totalMaxChars?: number },
@@ -218,6 +224,13 @@ export function buildBootstrapContextFiles(
       continue;
     }
     if (file.missing) {
+      // Suppress [MISSING] marker for memory files — when MEMORY.md / memory.md
+      // do not exist the marker prompts the model to read them with the generic
+      // read tool, which produces noisy ENOENT failures.  Memory recall is
+      // handled by memory_search / memory_get tools when configured.
+      if (isMissingMemoryBootstrapFile(file.name)) {
+        continue;
+      }
       const missingText = `[MISSING] Expected at: ${pathValue}`;
       const cappedMissingText = clampToBudget(missingText, remainingTotalChars);
       if (!cappedMissingText) {
