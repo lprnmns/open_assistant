@@ -452,6 +452,24 @@ describe("deliverReplies", () => {
     );
   });
 
+  it("sanitizes final Telegram text sends when executive mode is enabled", async () => {
+    const { runtime, sendMessage, bot } = createSendMessageHarness();
+
+    await deliverWith({
+      replies: [
+        {
+          text: "Tabii ki \u{1F60C} :wave:\nDeploy failed.\n\nBa\u015fka bir \u015fey var m\u0131?",
+        },
+      ],
+      runtime,
+      bot,
+      executiveMode: true,
+    });
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage.mock.calls[0]?.[1]).toBe("Deploy failed.");
+  });
+
   it("includes message_thread_id for DM topics", async () => {
     const { runtime, sendMessage, bot } = createSendMessageHarness();
 

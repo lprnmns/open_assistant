@@ -193,6 +193,18 @@ describe("normalizeReplyPayload", () => {
       ],
     });
   });
+
+  it("enforces executive mode cleanup when requested", () => {
+    const result = normalizeReplyPayload(
+      {
+        text: "Hemen bak\u0131yorum \u{1F60C} :wave:\nDeploy failed.",
+      },
+      { executiveMode: true },
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.text).toBe("Deploy failed.");
+  });
 });
 
 describe("typing controller", () => {

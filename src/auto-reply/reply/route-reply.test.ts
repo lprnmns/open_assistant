@@ -414,6 +414,30 @@ describe("routeReply", () => {
     );
   });
 
+  it("sanitizes founder-private Telegram DMs before outbound delivery", async () => {
+    mocks.deliverOutboundPayloads.mockClear();
+    mocks.deliverOutboundPayloads.mockResolvedValue([]);
+    await routeReply({
+      payload: { text: "Hemen bakıyorum 😌\nDeploy failed." },
+      channel: "telegram",
+      to: "telegram:123",
+      accountId: "default",
+      cfg: {
+        channels: {
+          telegram: {
+            dmPolicy: "allowlist",
+            allowFrom: ["123"],
+          },
+        },
+      } as unknown as OpenClawConfig,
+    });
+    expect(mocks.deliverOutboundPayloads).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payloads: [expect.objectContaining({ text: "Deploy failed." })],
+      }),
+    );
+  });
+
   it("preserves audioAsVoice on routed outbound payloads", async () => {
     mocks.deliverOutboundPayloads.mockClear();
     mocks.deliverOutboundPayloads.mockResolvedValue([]);

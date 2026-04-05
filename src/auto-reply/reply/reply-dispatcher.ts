@@ -44,6 +44,7 @@ export type ReplyDispatcherOptions = {
   deliver: ReplyDispatchDeliverer;
   responsePrefix?: string;
   enableSlackInteractiveReplies?: boolean;
+  executiveMode?: boolean;
   /** Static context for response prefix template interpolation. */
   responsePrefixContext?: ResponsePrefixContext;
   /** Dynamic context provider for response prefix template interpolation.
@@ -87,6 +88,7 @@ type NormalizeReplyPayloadInternalOptions = Pick<
   ReplyDispatcherOptions,
   | "responsePrefix"
   | "enableSlackInteractiveReplies"
+  | "executiveMode"
   | "responsePrefixContext"
   | "responsePrefixContextProvider"
   | "onHeartbeatStrip"
@@ -104,6 +106,7 @@ function normalizeReplyPayloadInternal(
   return normalizeReplyPayload(payload, {
     responsePrefix: opts.responsePrefix,
     enableSlackInteractiveReplies: opts.enableSlackInteractiveReplies,
+    executiveMode: opts.executiveMode,
     responsePrefixContext: prefixContext,
     onHeartbeatStrip: opts.onHeartbeatStrip,
     onSkip: opts.onSkip,
@@ -136,6 +139,7 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
     const normalized = normalizeReplyPayloadInternal(payload, {
       responsePrefix: options.responsePrefix,
       enableSlackInteractiveReplies: options.enableSlackInteractiveReplies,
+      executiveMode: options.executiveMode,
       responsePrefixContext: options.responsePrefixContext,
       responsePrefixContextProvider: options.responsePrefixContextProvider,
       onHeartbeatStrip: options.onHeartbeatStrip,

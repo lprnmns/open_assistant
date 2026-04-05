@@ -11,6 +11,11 @@ import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveEffectiveMessagesConfig } from "../../agents/identity.js";
 import { getChannelPlugin, normalizeChannelId } from "../../channels/plugins/index.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import type {
+  TelegramAccountConfig,
+  TelegramConfig,
+  TelegramDirectConfig,
+} from "../../config/types.telegram.js";
 import { buildOutboundSessionContext } from "../../infra/outbound/session-context.js";
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
@@ -65,6 +70,33 @@ export type RouteReplyResult = {
   error?: string;
 };
 
+function shouldUseTelegramExecutiveMode(params: {
+  cfg: OpenClawConfig;
+  channel: OriginatingChannelType;
+  accountId?: string;
+  isGroup?: boolean;
+  to: string;
+}): boolean {
+  if (normalizeChannelId(params.channel) !== "telegram" || params.isGroup) {
+    return false;
+  }
+  const telegramCfg = params.cfg.channels?.telegram;
+  if (!telegramCfg) {
+    return false;
+  }
+  const accountCfg = params.accountId ? telegramCfg.accounts?.[params.accountId] : undefined;
+  const chatId = params.to.startsWith("telegram:")
+    ? params.to.slice("telegram:".length)
+    : params.to;
+  const directCfg =
+    accountCfg?.direct?.[chatId] ??
+    accountCfg?.direct?.["*"] ??
+    telegramCfg.direct?.[chatId] ??
+    telegramCfg.direct?.["*"];
+  const dmPolicy = directCfg?.dmPolicy ?? accountCfg?.dmPolicy ?? telegramCfg.dmPolicy ?? "pairing";
+  return dmPolicy === "allowlist";
+}
+
 /**
  * Routes a reply payload to the specified channel.
  *
@@ -103,6 +135,13 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
     enableSlackInteractiveReplies: plugin?.messaging?.enableInteractiveReplies?.({
       cfg,
       accountId,
+    }),
+    executiveMode: shouldUseTelegramExecutiveMode({
+      cfg,
+      channel,
+      accountId,
+      isGroup: params.isGroup,
+      to,
     }),
   });
   if (!normalized) {

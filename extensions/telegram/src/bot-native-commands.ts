@@ -74,6 +74,7 @@ import {
   resolveTelegramConversationRoute,
 } from "./conversation-route.js";
 import { shouldSuppressLocalTelegramExecApprovalPrompt } from "./exec-approvals.js";
+import { resolveTelegramExecutiveMode } from "./executive-mode.js";
 import type { TelegramTransport } from "./fetch.js";
 import {
   evaluateTelegramGroupBaseAccess,
@@ -569,6 +570,7 @@ export const registerTelegramNativeCommands = ({
     tableMode: ReturnType<typeof resolveMarkdownTableMode>;
     chunkMode: ReturnType<typeof resolveChunkMode>;
     linkPreview?: boolean;
+    executiveMode?: boolean;
   }) => ({
     chatId: String(params.chatId),
     accountId: params.accountId,
@@ -585,6 +587,7 @@ export const registerTelegramNativeCommands = ({
     tableMode: params.tableMode,
     chunkMode: params.chunkMode,
     linkPreview: params.linkPreview,
+    executiveMode: params.executiveMode,
   });
 
   if (commandsToRegister.length > 0 || pluginCatalog.commands.length > 0) {
@@ -735,6 +738,11 @@ export const registerTelegramNativeCommands = ({
             tableMode,
             chunkMode,
             linkPreview: runtimeTelegramCfg.linkPreview,
+            executiveMode: resolveTelegramExecutiveMode({
+              isGroup,
+              telegramCfg: runtimeTelegramCfg,
+              groupConfig,
+            }),
           });
           const conversationLabel = isGroup
             ? msg.chat.title
@@ -805,6 +813,7 @@ export const registerTelegramNativeCommands = ({
             cfg: runtimeCfg,
             dispatcherOptions: {
               ...replyPipeline,
+              executiveMode: deliveryBaseOptions.executiveMode,
               deliver: async (payload, _info) => {
                 if (
                   shouldSuppressLocalTelegramExecApprovalPrompt({
@@ -915,6 +924,11 @@ export const registerTelegramNativeCommands = ({
             tableMode,
             chunkMode,
             linkPreview: runtimeTelegramCfg.linkPreview,
+            executiveMode: resolveTelegramExecutiveMode({
+              isGroup,
+              telegramCfg: runtimeTelegramCfg,
+              groupConfig: auth.groupConfig,
+            }),
           });
           const from = isGroup
             ? buildTelegramGroupFrom(chatId, threadSpec.id)

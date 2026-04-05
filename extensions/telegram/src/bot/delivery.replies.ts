@@ -20,6 +20,7 @@ import { danger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { loadWebMedia } from "openclaw/plugin-sdk/web-media";
 import type { TelegramInlineButtons } from "../button-types.js";
 import { splitTelegramCaption } from "../caption.js";
+import { sanitizeTelegramExecutiveReplyPayload } from "../executive-mode.js";
 import {
   markdownToTelegramChunks,
   markdownToTelegramHtml,
@@ -588,6 +589,8 @@ export async function deliverReplies(params: {
   replyQuoteText?: string;
   /** Override media loader (tests). */
   mediaLoader?: typeof loadWebMedia;
+  /** Force founder-private executive output cleanup before Telegram send. */
+  executiveMode?: boolean;
 }): Promise<{ delivered: boolean }> {
   const progress: DeliveryProgress = {
     hasReplied: false,
@@ -604,7 +607,10 @@ export async function deliverReplies(params: {
     tableMode: params.tableMode,
   });
   for (const originalReply of params.replies) {
-    let reply = originalReply;
+    let reply =
+      params.executiveMode === true
+        ? sanitizeTelegramExecutiveReplyPayload(originalReply)
+        : originalReply;
     const mediaList = reply?.mediaUrls?.length
       ? reply.mediaUrls
       : reply?.mediaUrl

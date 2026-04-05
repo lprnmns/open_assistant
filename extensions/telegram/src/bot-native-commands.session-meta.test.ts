@@ -483,6 +483,34 @@ describe("registerTelegramNativeCommands — session metadata", () => {
     expect(deliveredPayload?.["channelData"]).toBeUndefined();
   });
 
+  it("enables executive mode for allowlist Telegram native-command DMs", async () => {
+    const { handler } = registerAndResolveStatusHandler({
+      cfg: {
+        channels: {
+          telegram: {
+            dmPolicy: "allowlist",
+            allowFrom: ["12345"],
+          },
+        },
+      },
+      telegramCfg: {
+        dmPolicy: "allowlist",
+        allowFrom: ["12345"],
+      },
+    });
+
+    await handler(createTelegramPrivateCommandContext());
+
+    const call = replyMocks.dispatchReplyWithBufferedBlockDispatcher.mock.calls[0]?.[0] as
+      | DispatchReplyWithBufferedBlockDispatcherParams
+      | undefined;
+    expect(call?.dispatcherOptions).toEqual(
+      expect.objectContaining({
+        executiveMode: true,
+      }),
+    );
+  });
+
   it("suppresses local structured exec approval replies for native commands", async () => {
     replyMocks.dispatchReplyWithBufferedBlockDispatcher.mockImplementationOnce(
       async ({ dispatcherOptions }: DispatchReplyWithBufferedBlockDispatcherParams) => {

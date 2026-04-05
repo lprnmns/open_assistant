@@ -144,6 +144,7 @@ async function dispatchHarnessReplies(
     },
     responsePrefix: params.dispatcherOptions.responsePrefix,
     enableSlackInteractiveReplies: params.dispatcherOptions.enableSlackInteractiveReplies,
+    executiveMode: params.dispatcherOptions.executiveMode,
     responsePrefixContextProvider: params.dispatcherOptions.responsePrefixContextProvider,
     responsePrefixContext: params.dispatcherOptions.responsePrefixContext,
     onHeartbeatStrip: params.dispatcherOptions.onHeartbeatStrip,

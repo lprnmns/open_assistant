@@ -1,4 +1,5 @@
 import { sanitizeUserFacingText } from "../../agents/pi-embedded-helpers.js";
+import { sanitizeExecutiveOutput } from "../../consciousness/executive-sanitizer.js";
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { stripHeartbeatToken } from "../heartbeat.js";
 import {
@@ -20,6 +21,7 @@ export type NormalizeReplySkipReason = "empty" | "silent" | "heartbeat";
 export type NormalizeReplyOptions = {
   responsePrefix?: string;
   enableSlackInteractiveReplies?: boolean;
+  executiveMode?: boolean;
   /** Context for template variable interpolation in responsePrefix */
   responsePrefixContext?: ResponsePrefixContext;
   onHeartbeatStrip?: () => void;
@@ -87,6 +89,9 @@ export function normalizeReplyPayload(
 
   if (text) {
     text = sanitizeUserFacingText(text, { errorContext: Boolean(payload.isError) });
+    if (opts.executiveMode) {
+      text = sanitizeExecutiveOutput(text);
+    }
   }
   if (!hasContent(text)) {
     opts.onSkip?.("empty");

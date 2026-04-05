@@ -273,6 +273,34 @@ describe("dispatchTelegramMessage draft streaming", () => {
     });
   }
 
+  it("enables executive mode for allowlist Telegram DMs", async () => {
+    const context = createContext();
+    await dispatchWithContext({
+      context,
+      cfg: {
+        channels: {
+          telegram: {
+            dmPolicy: "allowlist",
+            allowFrom: ["123"],
+          },
+        },
+      } as never,
+      telegramCfg: {
+        dmPolicy: "allowlist",
+        allowFrom: ["123"],
+      } as never,
+      streamMode: "off",
+    });
+
+    expect(dispatchReplyWithBufferedBlockDispatcher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dispatcherOptions: expect.objectContaining({
+          executiveMode: true,
+        }),
+      }),
+    );
+  });
+
   it("streams drafts in private threads and forwards thread id", async () => {
     const draftStream = createDraftStream();
     createTelegramDraftStream.mockReturnValue(draftStream);

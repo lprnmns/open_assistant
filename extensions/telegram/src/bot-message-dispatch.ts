@@ -40,6 +40,7 @@ import type { TelegramStreamMode } from "./bot/types.js";
 import type { TelegramInlineButtons } from "./button-types.js";
 import { createTelegramDraftStream } from "./draft-stream.js";
 import { shouldSuppressLocalTelegramExecApprovalPrompt } from "./exec-approvals.js";
+import { resolveTelegramExecutiveMode } from "./executive-mode.js";
 import { renderTelegramHtmlText } from "./format.js";
 import {
   type ArchivedPreview,
@@ -472,6 +473,11 @@ export const dispatchTelegramMessage = async ({
     linkPreview: telegramCfg.linkPreview,
     replyQuoteText,
   };
+  const executiveMode = resolveTelegramExecutiveMode({
+    isGroup,
+    telegramCfg,
+    groupConfig,
+  });
   const silentErrorReplies = telegramCfg.silentErrorReplies === true;
   const applyTextToPayload = (payload: ReplyPayload, text: string): ReplyPayload => {
     if (payload.text === text) {
@@ -483,6 +489,7 @@ export const dispatchTelegramMessage = async ({
     const result = await (telegramDeps.deliverReplies ?? deliverReplies)({
       ...deliveryBaseOptions,
       replies: [payload],
+      executiveMode,
       onVoiceRecording: sendRecordVoice,
       silent: silentErrorReplies && payload.isError === true,
       mediaLoader: telegramDeps.loadWebMedia,
@@ -595,6 +602,7 @@ export const dispatchTelegramMessage = async ({
       cfg,
       dispatcherOptions: {
         ...replyPipeline,
+        executiveMode,
         deliver: async (payload, info) => {
           if (payload.isError === true) {
             hadErrorReplyFailureOrSkip = true;
@@ -875,6 +883,7 @@ export const dispatchTelegramMessage = async ({
     const result = await (telegramDeps.deliverReplies ?? deliverReplies)({
       replies: [{ text: fallbackText }],
       ...deliveryBaseOptions,
+      executiveMode,
       silent: silentErrorReplies && (dispatchError != null || hadErrorReplyFailureOrSkip),
       mediaLoader: telegramDeps.loadWebMedia,
     });
