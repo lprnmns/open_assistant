@@ -35,6 +35,29 @@ describe("buildBootstrapContextFiles", () => {
       },
     ]);
   });
+  it("suppresses missing marker for MEMORY.md", () => {
+    const files = [
+      makeFile({ name: "MEMORY.md", path: "/tmp/MEMORY.md", missing: true, content: undefined }),
+    ];
+    expect(buildBootstrapContextFiles(files)).toEqual([]);
+  });
+
+  it("suppresses missing marker for memory.md", () => {
+    const files = [
+      makeFile({ name: "memory.md", path: "/tmp/memory.md", missing: true, content: undefined }),
+    ];
+    expect(buildBootstrapContextFiles(files)).toEqual([]);
+  });
+
+  it("still includes existing MEMORY.md content", () => {
+    const files = [
+      makeFile({ name: "MEMORY.md", path: "/tmp/MEMORY.md", content: "my notes", missing: false }),
+    ];
+    const result = buildBootstrapContextFiles(files);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.content).toBe("my notes");
+  });
+
   it("skips empty or whitespace-only content", () => {
     const files = [makeFile({ content: "   \n  " })];
     expect(buildBootstrapContextFiles(files)).toEqual([]);
