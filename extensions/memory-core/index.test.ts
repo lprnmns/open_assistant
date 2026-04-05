@@ -13,6 +13,8 @@ describe("buildPromptSection", () => {
     expect(result[0]).toBe("## Memory Recall");
     expect(result[1]).toContain("run memory_search");
     expect(result[1]).toContain("then use memory_get");
+    expect(result[1]).toContain("do not probe memory files with generic file tools");
+    expect(result[1]).not.toContain("MEMORY.md + memory/*.md");
     expect(result).toContain(
       "Citations: include Source: <path#line> when it helps the user verify memory snippets.",
     );
@@ -24,6 +26,7 @@ describe("buildPromptSection", () => {
     expect(result[0]).toBe("## Memory Recall");
     expect(result[1]).toContain("run memory_search");
     expect(result[1]).not.toContain("then use memory_get");
+    expect(result[1]).toContain("memory_search as the memory interface");
   });
 
   it("limits the guidance to memory_get when only get is available", () => {
@@ -31,6 +34,7 @@ describe("buildPromptSection", () => {
     expect(result[0]).toBe("## Memory Recall");
     expect(result[1]).toContain("run memory_get");
     expect(result[1]).not.toContain("run memory_search");
+    expect(result[1]).toContain("memory_get as the memory interface");
   });
 
   it("includes citations-off instruction when citationsMode is off", () => {
@@ -50,6 +54,7 @@ describe("buildPromptSection", () => {
     });
     expect(result[1]).toContain("Primary recall is already loaded into active context automatically.");
     expect(result[1]).not.toContain("MEMORY.md + memory/*.md");
+    expect(result[1]).toContain("Do not probe memory files with generic file tools");
   });
 });
 
