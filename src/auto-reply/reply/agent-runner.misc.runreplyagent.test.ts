@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionEntry } from "../../config/sessions.js";
+import { loadSessionStore, saveSessionStore } from "../../config/sessions.js";
 import type { ProductionBrain } from "../../consciousness/brain/brain-factory.js";
 import { setConsciousnessRuntime } from "../../consciousness/runtime.js";
-import { loadSessionStore, saveSessionStore } from "../../config/sessions.js";
 import { onAgentEvent } from "../../infra/agent-events.js";
 import { peekSystemEvents, resetSystemEventsForTest } from "../../infra/system-events.js";
 import type { TemplateContext } from "../templating.js";
@@ -78,6 +78,16 @@ vi.mock("../../cron/store.js", async () => {
   };
 });
 
+const callGatewayMock = vi.fn();
+vi.mock("../../gateway/call.js", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../gateway/call.js")>("../../gateway/call.js");
+  return {
+    ...actual,
+    callGateway: (params: unknown) => callGatewayMock(params),
+  };
+});
+
 import { runReplyAgent } from "./agent-runner.js";
 
 type RunWithModelFallbackParams = {
@@ -121,8 +131,10 @@ beforeEach(() => {
   runWithModelFallbackMock.mockClear();
   runtimeErrorMock.mockClear();
   loadCronStoreMock.mockClear();
+  callGatewayMock.mockClear();
   // Default: no cron jobs in store.
   loadCronStoreMock.mockResolvedValue({ version: 1, jobs: [] });
+  callGatewayMock.mockResolvedValue({ id: "auto-reminder-job" });
   resetSystemEventsForTest();
 
   // Default: no provider switch; execute the chosen provider+model.
@@ -199,6 +211,7 @@ describe("runReplyAgent onAgentRunStart", () => {
       opts: params?.opts,
       typing,
       sessionCtx,
+      sessionKey: "main",
       defaultModel: `${provider}/${model}`,
       resolvedVerboseLevel: "off",
       isNewSession: false,
@@ -267,10 +280,12 @@ describe("runReplyAgent onAgentRunStart", () => {
     });
 
     expect(result).toMatchObject({ text: "assistant says hi" });
-    expect(brain.ingestion.ingest).toHaveBeenCalledWith({
-      content: "[assistant]: assistant says hi",
-      sessionKey: "main",
-    });
+    expect(brain.ingestion.ingest.mock.calls).toContainEqual([
+      {
+        content: "[assistant]: assistant says hi",
+        sessionKey: "main",
+      },
+    ]);
   });
 });
 
@@ -1486,6 +1501,42 @@ describe("runReplyAgent reminder commitment guard", () => {
     });
   });
 
+  it("auto-schedules short Turkish reminder commitments through cron.add", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-05T14:00:00.000Z"));
+
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "Tamam, 1 dk sonra yoklarım." }],
+      meta: {},
+      successfulCronAdds: 0,
+    });
+
+    const result = await createRun();
+    expect(result).toMatchObject({
+      text: "Tamam, 1 dk sonra yoklarım.",
+    });
+    expect(callGatewayMock).toHaveBeenCalledTimes(1);
+    expect(callGatewayMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "cron.add",
+        params: expect.objectContaining({
+          sessionKey: "main",
+          sessionTarget: "main",
+          wakeMode: "now",
+          deleteAfterRun: true,
+          payload: expect.objectContaining({
+            kind: "systemEvent",
+          }),
+        }),
+      }),
+    );
+    const gatewayCall = callGatewayMock.mock.calls[0]?.[0] as
+      | { params?: { schedule?: { at?: string } } }
+      | undefined;
+    const schedule = gatewayCall?.params?.schedule;
+    expect(schedule?.at).toBe("2026-04-05T14:01:00.000Z");
+  });
+
   it("keeps reminder commitment unchanged when cron.add succeeded", async () => {
     runEmbeddedPiAgentMock.mockResolvedValueOnce({
       payloads: [{ text: "I'll remind you tomorrow morning." }],
@@ -1496,6 +1547,20 @@ describe("runReplyAgent reminder commitment guard", () => {
     const result = await createRun();
     expect(result).toMatchObject({
       text: "I'll remind you tomorrow morning.",
+    });
+  });
+
+  it("falls back to the guard note when automatic reminder scheduling fails", async () => {
+    callGatewayMock.mockRejectedValueOnce(new Error("cron offline"));
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "Tamam, 1 dk sonra yoklarım." }],
+      meta: {},
+      successfulCronAdds: 0,
+    });
+
+    const result = await createRun();
+    expect(result).toMatchObject({
+      text: "Tamam, 1 dk sonra yoklarım.\n\nNote: I did not schedule a reminder in this turn, so this will not trigger automatically.",
     });
   });
 

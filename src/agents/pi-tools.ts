@@ -8,9 +8,9 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
-import type { ApprovalSurface } from "./approval-surface.js";
 import { resolveAgentConfig } from "./agent-scope.js";
 import { createApplyPatchTool } from "./apply-patch.js";
+import type { ApprovalSurface } from "./approval-surface.js";
 import {
   createExecTool,
   createProcessTool,
@@ -50,19 +50,22 @@ import type { AnyAgentTool } from "./pi-tools.types.js";
 import type { SandboxContext } from "./sandbox.js";
 import { createToolFsPolicy, resolveToolFsConfig } from "./tool-fs-policy.js";
 import { wrapToolWithEnforcement } from "./tool-policy-enforce.js";
-import { getSessionRateLimitStore, InMemoryRateLimitStore } from "./tool-policy-rate-limit-store.js";
-import { getDefaultUndoRegistry } from "./undo-registry.js";
 import {
   applyToolPolicyPipeline,
   buildDefaultActFirstToolPolicyMeta,
   buildDefaultToolPolicyPipelineSteps,
 } from "./tool-policy-pipeline.js";
 import {
+  getSessionRateLimitStore,
+  InMemoryRateLimitStore,
+} from "./tool-policy-rate-limit-store.js";
+import {
   applyOwnerOnlyToolPolicy,
   collectExplicitAllowlist,
   mergeAlsoAllowPolicy,
   resolveToolProfilePolicy,
 } from "./tool-policy.js";
+import { getDefaultUndoRegistry } from "./undo-registry.js";
 import { resolveWorkspaceRoot } from "./workspace-dir.js";
 
 const toolsLog = createSubsystemLogger("agents/tools");
@@ -96,9 +99,7 @@ function logToolAvailabilitySnapshot(params: {
   const availability = Object.fromEntries(
     CORE_CAPABILITY_TOOL_NAMES.map((name) => [name, availableNames.has(name)]),
   );
-  const requiresHuman = CORE_CAPABILITY_TOOL_NAMES.filter((name) =>
-    params.requiresHuman.has(name),
-  );
+  const requiresHuman = CORE_CAPABILITY_TOOL_NAMES.filter((name) => params.requiresHuman.has(name));
   const payload = {
     profile: params.profile ?? "(default)",
     providerProfile: params.providerProfile ?? "(default)",
@@ -445,6 +446,8 @@ export function createOpenClawCodingTools(options?: {
       const wrapped = createOpenClawReadTool(freshReadTool, {
         modelContextWindowTokens: options?.modelContextWindowTokens,
         imageSanitization,
+        workspaceRoot,
+        projectFallbackRoot: process.cwd(),
       });
       return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
     }
@@ -698,7 +701,7 @@ export function createOpenClawCodingTools(options?: {
       actFirstEnabled,
       approvalSurface: options?.approvalSurface,
       undoRegistry: actFirstEnabled ? getDefaultUndoRegistry() : undefined,
-      undoScopeKey: actFirstEnabled ? options?.sessionKey ?? agentId ?? undefined : undefined,
+      undoScopeKey: actFirstEnabled ? (options?.sessionKey ?? agentId ?? undefined) : undefined,
     }),
   );
   const withHooks = withEnforcement.map((tool) =>

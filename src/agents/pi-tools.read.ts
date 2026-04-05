@@ -50,6 +50,8 @@ const MAX_ADAPTIVE_READ_PAGES = 8;
 type OpenClawReadToolOptions = {
   modelContextWindowTokens?: number;
   imageSanitization?: ImageSanitizationLimits;
+  workspaceRoot?: string;
+  projectFallbackRoot?: string;
 };
 
 type ReadTruncationDetails = {
@@ -88,6 +90,60 @@ function formatBytes(bytes: number): string {
     return `${Math.round(bytes / 1024)}KB`;
   }
   return `${bytes}B`;
+}
+
+function normalizeFallbackRelativePath(filePath: string): string | null {
+  const trimmed = filePath.trim();
+  if (!trimmed || trimmed.startsWith("file://") || trimmed.startsWith("~")) {
+    return null;
+  }
+  if (path.isAbsolute(trimmed)) {
+    return null;
+  }
+  const normalized = path.normalize(trimmed);
+  if (
+    normalized === ".." ||
+    normalized.startsWith(`..${path.sep}`) ||
+    normalized.includes(`${path.sep}..${path.sep}`)
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    const stat = await fs.stat(filePath);
+    return stat.isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function resolveProjectFallbackPath(
+  filePath: string,
+  options?: OpenClawReadToolOptions,
+): Promise<string | null> {
+  const workspaceRoot = options?.workspaceRoot?.trim();
+  const projectFallbackRoot = options?.projectFallbackRoot?.trim();
+  if (!workspaceRoot || !projectFallbackRoot) {
+    return null;
+  }
+  const resolvedWorkspaceRoot = path.resolve(workspaceRoot);
+  const resolvedFallbackRoot = path.resolve(projectFallbackRoot);
+  if (resolvedWorkspaceRoot === resolvedFallbackRoot) {
+    return null;
+  }
+  const relativePath = normalizeFallbackRelativePath(filePath);
+  if (!relativePath) {
+    return null;
+  }
+  const workspaceCandidate = path.resolve(resolvedWorkspaceRoot, relativePath);
+  if (await fileExists(workspaceCandidate)) {
+    return null;
+  }
+  const fallbackCandidate = path.resolve(resolvedFallbackRoot, relativePath);
+  return (await fileExists(fallbackCandidate)) ? fallbackCandidate : null;
 }
 
 function getToolResultText(result: AgentToolResult<unknown>): string | undefined {
@@ -646,14 +702,23 @@ export function createOpenClawReadTool(
         normalized ??
         (params && typeof params === "object" ? (params as Record<string, unknown>) : undefined);
       assertRequiredParams(record, CLAUDE_PARAM_GROUPS.read, base.name);
+      const args = { ...((normalized ?? params ?? {}) as Record<string, unknown>) };
+      const requestedPath = typeof record?.path === "string" ? String(record.path) : "<unknown>";
+      const fallbackPath =
+        typeof record?.path === "string"
+          ? await resolveProjectFallbackPath(record.path, options)
+          : null;
+      if (fallbackPath) {
+        args.path = fallbackPath;
+      }
       const result = await executeReadWithAdaptivePaging({
         base,
         toolCallId,
-        args: (normalized ?? params ?? {}) as Record<string, unknown>,
+        args,
         signal,
         maxBytes: resolveAdaptiveReadMaxBytes(options),
       });
-      const filePath = typeof record?.path === "string" ? String(record.path) : "<unknown>";
+      const filePath = fallbackPath ?? requestedPath;
       const strippedDetailsResult = stripReadTruncationContentDetails(result);
       const normalizedResult = await normalizeReadImageResult(strippedDetailsResult, filePath);
       return sanitizeToolResultImages(

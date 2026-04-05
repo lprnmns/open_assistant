@@ -15,12 +15,12 @@ import {
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
+import { ingestAssistantPayloads } from "../../consciousness/turn-ingestion.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
 import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import { generateSecureUuid } from "../../infra/secure-random.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { defaultRuntime } from "../../runtime.js";
-import { ingestAssistantPayloads } from "../../consciousness/turn-ingestion.js";
 import { estimateUsageCost, resolveModelCostConfig } from "../../utils/usage-format.js";
 import {
   buildFallbackClearedNotice,
@@ -41,6 +41,7 @@ import {
 import { runMemoryFlushIfNeeded } from "./agent-runner-memory.js";
 import { buildReplyPayloads } from "./agent-runner-payloads.js";
 import {
+  autoScheduleReminderCommitment,
   appendUnscheduledReminderNote,
   hasSessionRelatedCronJobs,
   hasUnbackedReminderCommitment,
@@ -561,23 +562,38 @@ export async function runReplyAgent(params: {
     }
 
     const successfulCronAdds = runResult.successfulCronAdds ?? 0;
+    let effectiveCronAdds = successfulCronAdds;
     const hasReminderCommitment = replyPayloads.some(
       (payload) =>
         !payload.isError &&
         typeof payload.text === "string" &&
         hasUnbackedReminderCommitment(payload.text),
     );
+    if (hasReminderCommitment && effectiveCronAdds === 0) {
+      try {
+        effectiveCronAdds += await autoScheduleReminderCommitment({
+          payloads: replyPayloads,
+          cfg,
+          sessionKey,
+          agentId:
+            followupRun.run.agentId ??
+            (sessionKey ? resolveAgentIdFromSessionKey(sessionKey) : undefined),
+        });
+      } catch (error) {
+        defaultRuntime.error(`Automatic reminder scheduling failed: ${String(error)}`);
+      }
+    }
     // Suppress the guard note when an existing cron job (created in a prior
     // turn) already covers the commitment — avoids false positives (#32228).
     const coveredByExistingCron =
-      hasReminderCommitment && successfulCronAdds === 0
+      hasReminderCommitment && effectiveCronAdds === 0
         ? await hasSessionRelatedCronJobs({
             cronStorePath: cfg.cron?.store,
             sessionKey,
           })
         : false;
     const guardedReplyPayloads =
-      hasReminderCommitment && successfulCronAdds === 0 && !coveredByExistingCron
+      hasReminderCommitment && effectiveCronAdds === 0 && !coveredByExistingCron
         ? appendUnscheduledReminderNote(replyPayloads)
         : replyPayloads;
 
