@@ -23,6 +23,7 @@ import { formatConfigIssueLines } from "../config/issue-format.js";
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
 import { clearAgentRunContext, onAgentEvent } from "../infra/agent-events.js";
+import { setConsciousnessDeliveryTargetSender } from "../consciousness/delivery-runtime.js";
 import {
   ensureControlUiAssetsBuilt,
   isPackageProvenControlUiRootSync,
@@ -83,6 +84,7 @@ import {
 import { ExecApprovalManager } from "./exec-approval-manager.js";
 import { startGatewayModelPricingRefresh } from "./model-pricing-cache.js";
 import { NodeRegistry } from "./node-registry.js";
+import { createNodeProactiveDeliverySender } from "./proactive-node-delivery.js";
 import type { startBrowserControlServerIfEnabled } from "./server-browser.js";
 import { createChannelManager } from "./server-channels.js";
 import {
@@ -724,6 +726,7 @@ export async function startGatewayServer(
   });
   let bonjourStop: (() => Promise<void>) | null = null;
   const nodeRegistry = new NodeRegistry();
+  setConsciousnessDeliveryTargetSender(createNodeProactiveDeliverySender(nodeRegistry));
   const nodePresenceTimers = new Map<string, ReturnType<typeof setInterval>>();
   const nodeSubscriptions = createNodeSubscriptionManager();
   const sessionEventSubscribers = createSessionEventSubscriberRegistry();
@@ -1350,6 +1353,7 @@ export async function startGatewayServer(
       browserAuthRateLimiter.dispose();
       stopModelPricingRefresh();
       channelHealthMonitor?.stop();
+      setConsciousnessDeliveryTargetSender(null);
       clearSecretsRuntimeSnapshot();
       await close(opts);
     },

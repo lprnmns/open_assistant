@@ -25,6 +25,7 @@ import {
   createProductionBrain,
   type ProductionBrain,
 } from "./brain/brain-factory.js";
+import { createBootDeliveryTargetSender } from "./boot-delivery.js";
 import {
   getActiveDeliveryTarget,
   getLastUserInteractionAt,
@@ -40,7 +41,6 @@ import type { TickResult } from "./loop.js";
 import { PendingReflectionQueue } from "./reflection-queue.js";
 import { setConsciousnessRuntime } from "./runtime.js";
 import { buildRealWorldSnapshot } from "./snapshot.js";
-import { ingestConversationTurn } from "./turn-ingestion.js";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 
 const consciousnessLog = createSubsystemLogger("consciousness");
@@ -176,6 +176,10 @@ export async function maybeStartConsciousnessLoop(
     const activeBrain = brain;
     const getCurrentDeliveryTarget = (): DeliveryTarget | undefined =>
       getActiveDeliveryTarget();
+    const defaultSendToTarget = createBootDeliveryTargetSender({
+      loadConfig: loadConfigFn,
+      sessionKey: activeBrain.sessionKey,
+    });
     const sendToTarget =
       deps.sendToTarget ??
       (async (target: DeliveryTarget, content: string) => {
@@ -186,54 +190,8 @@ export async function maybeStartConsciousnessLoop(
           targetId,
           channelType: channelType ?? "(unknown)",
         });
-        const { isRoutableChannel, routeReply } = await import(
-          "../auto-reply/reply/route-reply.js"
-        );
-
-        if (target.kind !== "channel") {
-          const error = new Error(
-            `Default consciousness boot transport cannot route target kind "${target.kind}"`,
-          );
-          consciousnessDispatchLog.error("dispatch send_error", {
-            targetKind: target.kind,
-            targetId,
-            error: error.message,
-          });
-          throw error;
-        }
-
-        if (!channelType || !isRoutableChannel(channelType)) {
-          const error = new Error(
-            `Active channel is not routable for consciousness dispatch: ${String(channelType ?? "(unknown)")}`,
-          );
-          consciousnessDispatchLog.error("dispatch send_error", {
-            targetKind: target.kind,
-            targetId,
-            channelType: channelType ?? "(unknown)",
-            error: error.message,
-          });
-          throw error;
-        }
-
         try {
-          const result = await routeReply({
-            payload: { text: content },
-            channel: channelType,
-            to: target.id,
-            cfg: loadConfigFn(),
-            mirror: false,
-          });
-          if (!result.ok) {
-            throw new Error(
-              result.error ??
-                `Failed to route proactive message to ${channelType}`,
-            );
-          }
-          await ingestConversationTurn({
-            direction: "assistant/proactive",
-            sessionKey: activeBrain.sessionKey,
-            text: content,
-          });
+          await defaultSendToTarget(target, content);
           consciousnessDispatchLog.info("dispatch sent", {
             targetKind: target.kind,
             targetId,
