@@ -40,6 +40,18 @@ describe("cron tool", () => {
     return call.params;
   }
 
+  function readToolResultText(result: unknown): string {
+    const content =
+      result &&
+      typeof result === "object" &&
+      "content" in result &&
+      Array.isArray((result as { content?: unknown[] }).content)
+        ? ((result as { content: Array<{ type?: string; text?: string }> }).content ?? [])
+        : [];
+    const textEntry = content.find((entry) => entry?.type === "text");
+    return textEntry?.text ?? "";
+  }
+
   function buildReminderAgentTurnJob(overrides: Record<string, unknown> = {}): {
     name: string;
     schedule: { at: string };
@@ -166,6 +178,14 @@ describe("cron tool", () => {
 
   it("normalizes cron.add job payloads", async () => {
     const tool = createTestCronTool();
+    callGatewayMock
+      .mockResolvedValueOnce({
+        id: "cron-1",
+        name: "wake-up",
+        schedule: { kind: "at", at: new Date(123).toISOString() },
+        payload: { kind: "systemEvent", text: "hello" },
+      })
+      .mockResolvedValueOnce({ nodes: [] });
     await tool.execute("call2", {
       action: "add",
       job: {
@@ -177,7 +197,11 @@ describe("cron tool", () => {
       },
     });
 
-    const params = expectSingleGatewayCallMethod("cron.add");
+    expect(callGatewayMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ method: "cron.add" }),
+    );
+    const params = readGatewayCall(0).params;
     expect(params).toEqual({
       name: "wake-up",
       enabled: true,
@@ -187,6 +211,91 @@ describe("cron tool", () => {
       wakeMode: "now",
       payload: { kind: "systemEvent", text: "hello" },
     });
+  });
+
+  it("relays one-shot systemEvent cron jobs to connected reminder-capable nodes", async () => {
+    const tool = createTestCronTool();
+    callGatewayMock
+      .mockResolvedValueOnce({
+        id: "cron-1",
+        name: "Exam reminder",
+        schedule: { kind: "at", at: new Date(Date.now() + 2 * 60 * 60 * 1_000).toISOString() },
+        payload: { kind: "systemEvent", text: "Bring your calculator." },
+      })
+      .mockResolvedValueOnce({
+        nodes: [
+          {
+            nodeId: "android-1",
+            connected: true,
+            commands: ["reminder.schedule"],
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    await tool.execute("call-reminder-relay", {
+      action: "add",
+      job: {
+        name: "Exam reminder",
+        schedule: { kind: "at", at: new Date(Date.now() + 2 * 60 * 60 * 1_000).toISOString() },
+        payload: { kind: "systemEvent", text: "Bring your calculator." },
+      },
+    });
+
+    expect(callGatewayMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ method: "node.list", params: {} }),
+    );
+    expect(callGatewayMock).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        method: "node.invoke",
+        params: expect.objectContaining({
+          nodeId: "android-1",
+          command: "reminder.schedule",
+          params: expect.objectContaining({
+            id: "cron-1",
+            title: "Exam reminder",
+            body: "Bring your calculator.",
+            precision: "exact",
+            priority: "active",
+            cronJobId: "cron-1",
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("does not fail cron.add when the device reminder relay errors", async () => {
+    const tool = createTestCronTool();
+    callGatewayMock
+      .mockResolvedValueOnce({
+        id: "cron-1",
+        name: "Exam reminder",
+        schedule: { kind: "at", at: new Date(Date.now() + 2 * 60 * 60 * 1_000).toISOString() },
+        payload: { kind: "systemEvent", text: "Bring your calculator." },
+      })
+      .mockResolvedValueOnce({
+        nodes: [
+          {
+            nodeId: "android-1",
+            connected: true,
+            commands: ["reminder.schedule"],
+          },
+        ],
+      })
+      .mockRejectedValueOnce(new Error("node invoke failed"));
+
+    const result = await tool.execute("call-reminder-relay-error", {
+      action: "add",
+      job: {
+        name: "Exam reminder",
+        schedule: { kind: "at", at: new Date(Date.now() + 2 * 60 * 60 * 1_000).toISOString() },
+        payload: { kind: "systemEvent", text: "Bring your calculator." },
+      },
+    });
+    expect(readToolResultText(result)).toContain('"id": "cron-1"');
+    expect(callGatewayMock).toHaveBeenCalledTimes(3);
   });
 
   it("does not default agentId when job.agentId is null", async () => {
@@ -244,7 +353,7 @@ describe("cron tool", () => {
 
     await executeAddWithContextMessages("call3", 3);
 
-    expect(callGatewayMock).toHaveBeenCalledTimes(2);
+    expect(callGatewayMock).toHaveBeenCalledTimes(3);
     const historyCall = readGatewayCall(0);
     expect(historyCall.method).toBe("chat.history");
 
@@ -255,6 +364,7 @@ describe("cron tool", () => {
     expect(text).toContain("User: Discussed Q2 budget");
     expect(text).toContain("Assistant: We agreed to review on Tuesday.");
     expect(text).toContain("User: Remind me about the thing at 2pm");
+    expect(readGatewayCall(2).method).toBe("node.list");
   });
 
   it("caps contextMessages at 10", async () => {
@@ -266,7 +376,7 @@ describe("cron tool", () => {
 
     await executeAddWithContextMessages("call5", 20);
 
-    expect(callGatewayMock).toHaveBeenCalledTimes(2);
+    expect(callGatewayMock).toHaveBeenCalledTimes(3);
     const historyCall = readGatewayCall(0);
     expect(historyCall.method).toBe("chat.history");
     const historyParams = historyCall.params as { limit?: number } | undefined;
@@ -277,6 +387,7 @@ describe("cron tool", () => {
     expect(text).not.toMatch(/Message 2\\b/);
     expect(text).toContain("Message 3");
     expect(text).toContain("Message 12");
+    expect(readGatewayCall(2).method).toBe("node.list");
   });
 
   it("does not add context when contextMessages is 0 (default)", async () => {
@@ -292,12 +403,13 @@ describe("cron tool", () => {
       },
     });
 
-    // Should only call cron.add, not chat.history
-    expect(callGatewayMock).toHaveBeenCalledTimes(1);
+    // Should call cron.add and the reminder relay probe, but not chat.history.
+    expect(callGatewayMock).toHaveBeenCalledTimes(2);
     const cronCall = readGatewayCall(0);
     expect(cronCall.method).toBe("cron.add");
     const text = readCronPayloadText(0);
     expect(text).not.toContain("Recent context:");
+    expect(readGatewayCall(1).method).toBe("node.list");
   });
 
   it("preserves explicit agentId null on add", async () => {

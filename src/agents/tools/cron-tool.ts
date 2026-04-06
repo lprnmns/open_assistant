@@ -26,6 +26,19 @@ const REMINDER_CONTEXT_MESSAGES_MAX = 10;
 const REMINDER_CONTEXT_PER_MESSAGE_MAX = 220;
 const REMINDER_CONTEXT_TOTAL_MAX = 700;
 const REMINDER_CONTEXT_MARKER = "\n\nRecent context:\n";
+const DEVICE_REMINDER_BODY_MAX = 220;
+const DEVICE_REMINDER_EXACT_THRESHOLD_MS = 4 * 60 * 60 * 1000;
+
+type ConnectedNodeSummary = {
+  nodeId?: string;
+  connected?: boolean;
+  commands?: string[];
+  caps?: string[];
+};
+
+type NodeListResult = {
+  nodes?: ConnectedNodeSummary[];
+};
 
 // Flattened schema: runtime validates per-action requirements.
 const CronToolSchema = Type.Object(
@@ -205,6 +218,94 @@ function inferDeliveryFromSessionKey(agentSessionKey?: string): CronDelivery | n
     delivery.channel = channel;
   }
   return delivery;
+}
+
+function findConnectedReminderNode(nodes: ConnectedNodeSummary[]): string | null {
+  for (const node of nodes) {
+    if (!node.connected || typeof node.nodeId !== "string" || !node.nodeId.trim()) {
+      continue;
+    }
+    const commands = Array.isArray(node.commands) ? node.commands : [];
+    const caps = Array.isArray(node.caps) ? node.caps : [];
+    if (commands.includes("reminder.schedule") || caps.includes("reminder")) {
+      return node.nodeId.trim();
+    }
+  }
+  return null;
+}
+
+function buildDeviceReminderFromCronAdd(params: {
+  job: unknown;
+  createdJob: unknown;
+  nowMs?: number;
+}) {
+  if (!isRecord(params.job) || !isRecord(params.createdJob)) {
+    return null;
+  }
+  const schedule = isRecord(params.job.schedule) ? params.job.schedule : null;
+  const payload = isRecord(params.job.payload) ? params.job.payload : null;
+  if (schedule?.kind !== "at" || typeof schedule.at !== "string") {
+    return null;
+  }
+  if (payload?.kind !== "systemEvent" || typeof payload.text !== "string") {
+    return null;
+  }
+  const dueAtMs = Date.parse(schedule.at);
+  if (!Number.isFinite(dueAtMs)) {
+    return null;
+  }
+  const id =
+    typeof params.createdJob.id === "string" && params.createdJob.id.trim()
+      ? params.createdJob.id.trim()
+      : `cron-reminder-${dueAtMs}`;
+  const title =
+    typeof params.job.name === "string" && params.job.name.trim()
+      ? params.job.name.trim()
+      : "OpenClaw reminder";
+  const body = truncateText(
+    stripExistingContext(payload.text).replace(/\s+/g, " "),
+    DEVICE_REMINDER_BODY_MAX,
+  );
+  const nowMs = params.nowMs ?? Date.now();
+  return {
+    id,
+    title,
+    body,
+    dueAtMs,
+    precision: dueAtMs - nowMs < DEVICE_REMINDER_EXACT_THRESHOLD_MS ? "exact" : "soft",
+    priority: "active",
+    cronJobId: id,
+  } as const;
+}
+
+async function maybeRelayCronAddReminderToNode(params: {
+  job: unknown;
+  createdJob: unknown;
+  gatewayOpts: GatewayCallOptions;
+  callGatewayTool: GatewayToolCaller;
+}) {
+  const reminder = buildDeviceReminderFromCronAdd({
+    job: params.job,
+    createdJob: params.createdJob,
+  });
+  if (!reminder) {
+    return false;
+  }
+  const nodeList = await params.callGatewayTool<NodeListResult>(
+    "node.list",
+    params.gatewayOpts,
+    {},
+  );
+  const nodeId = findConnectedReminderNode(Array.isArray(nodeList?.nodes) ? nodeList.nodes : []);
+  if (!nodeId) {
+    return false;
+  }
+  await params.callGatewayTool("node.invoke", params.gatewayOpts, {
+    nodeId,
+    command: "reminder.schedule",
+    params: reminder,
+  });
+  return true;
 }
 
 export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): AnyAgentTool {
@@ -445,7 +546,18 @@ Use jobId as the canonical identifier; id is accepted for compatibility. Use con
               }
             }
           }
-          return jsonResult(await callGateway("cron.add", gatewayOpts, job));
+          const createdJob = await callGateway("cron.add", gatewayOpts, job);
+          try {
+            await maybeRelayCronAddReminderToNode({
+              job,
+              createdJob,
+              gatewayOpts,
+              callGatewayTool: callGateway,
+            });
+          } catch {
+            // Cron remains authoritative; node relay failure should not fail job creation.
+          }
+          return jsonResult(createdJob);
         }
         case "update": {
           const id = readStringParam(params, "jobId") ?? readStringParam(params, "id");
