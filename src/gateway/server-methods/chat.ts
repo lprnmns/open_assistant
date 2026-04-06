@@ -473,6 +473,121 @@ function sanitizeChatHistoryContentBlock(block: unknown): { block: unknown; chan
   return { block: changed ? entry : block, changed };
 }
 
+function resolveChatHistoryFieldArray(
+  entry: Record<string, unknown>,
+  pluralKey: string,
+  singularKey: string,
+): string[] {
+  if (Array.isArray(entry[pluralKey])) {
+    const values = entry[pluralKey]
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+    if (values.length > 0) {
+      return values;
+    }
+  }
+  if (typeof entry[singularKey] === "string") {
+    const value = entry[singularKey].trim();
+    if (value.length > 0) {
+      return [value];
+    }
+  }
+  return [];
+}
+
+function inferChatHistoryAttachmentType(mimeType: string | undefined): "document" | "file" | "image" {
+  const normalized = mimeType?.trim().toLowerCase() ?? "";
+  if (normalized === "application/pdf") {
+    return "document";
+  }
+  if (normalized.startsWith("image/")) {
+    return "image";
+  }
+  return "file";
+}
+
+function extractChatHistoryFileName(filePath: string): string {
+  const trimmed = filePath.trim();
+  if (!trimmed) {
+    return "attachment";
+  }
+  return trimmed.split(/[\\/]/).at(-1) || "attachment";
+}
+
+function buildChatHistoryAttachmentKey(params: {
+  fileName?: string;
+  mimeType?: string;
+  type?: string;
+}): string {
+  return [
+    params.type?.trim().toLowerCase() ?? "",
+    params.fileName?.trim().toLowerCase() ?? "",
+    params.mimeType?.trim().toLowerCase() ?? "",
+  ].join("\u001f");
+}
+
+function synthesizeChatHistoryAttachmentContent(
+  entry: Record<string, unknown>,
+): { content: unknown; changed: boolean } {
+  const mediaPaths = resolveChatHistoryFieldArray(entry, "MediaPaths", "MediaPath");
+  if (mediaPaths.length === 0) {
+    return { content: entry.content, changed: false };
+  }
+
+  const mediaTypes = resolveChatHistoryFieldArray(entry, "MediaTypes", "MediaType");
+  const existingBlocks = Array.isArray(entry.content) ? [...entry.content] : [];
+  const existingKeys = new Set(
+    existingBlocks.flatMap((block) => {
+      if (!block || typeof block !== "object") {
+        return [];
+      }
+      const typed = block as { fileName?: unknown; mimeType?: unknown; type?: unknown };
+      return [
+        buildChatHistoryAttachmentKey({
+          fileName: typeof typed.fileName === "string" ? typed.fileName : undefined,
+          mimeType: typeof typed.mimeType === "string" ? typed.mimeType : undefined,
+          type: typeof typed.type === "string" ? typed.type : undefined,
+        }),
+      ];
+    }),
+  );
+
+  const synthesized = mediaPaths.flatMap((rawPath, index) => {
+    const mimeType = mediaTypes[index] || mediaTypes[0] || "application/octet-stream";
+    const type = inferChatHistoryAttachmentType(mimeType);
+    const fileName = extractChatHistoryFileName(rawPath);
+    const key = buildChatHistoryAttachmentKey({ fileName, mimeType, type });
+    if (existingKeys.has(key)) {
+      return [];
+    }
+    existingKeys.add(key);
+    return [{ type, fileName, mimeType }];
+  });
+
+  if (synthesized.length === 0) {
+    return { content: entry.content, changed: false };
+  }
+
+  if (Array.isArray(entry.content)) {
+    return { content: [...entry.content, ...synthesized], changed: true };
+  }
+
+  if (typeof entry.content === "string") {
+    const blocks =
+      entry.content.length > 0 ? [{ type: "text", text: entry.content }, ...synthesized] : synthesized;
+    return { content: blocks, changed: true };
+  }
+
+  if (typeof entry.text === "string") {
+    const blocks =
+      entry.text.length > 0 ? [{ type: "text", text: entry.text }, ...synthesized] : synthesized;
+    return { content: blocks, changed: true };
+  }
+
+  return { content: synthesized, changed: true };
+}
+
 /**
  * Validate that a value is a finite number, returning undefined otherwise.
  */
@@ -598,6 +713,12 @@ function sanitizeChatHistoryMessage(message: unknown): { message: unknown; chang
     const res = truncateChatHistoryText(stripped.text);
     entry.text = res.text;
     changed ||= stripped.changed || res.truncated;
+  }
+
+  const normalizedAttachmentContent = synthesizeChatHistoryAttachmentContent(entry);
+  if (normalizedAttachmentContent.changed) {
+    entry.content = normalizedAttachmentContent.content;
+    changed = true;
   }
 
   return { message: changed ? entry : message, changed };

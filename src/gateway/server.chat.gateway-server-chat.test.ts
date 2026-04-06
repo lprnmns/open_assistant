@@ -680,9 +680,76 @@ describe("gateway server chat", () => {
       if (typeof mediaPath !== "string") {
         return;
       }
+      expect(Array.isArray(entry.content)).toBe(true);
+      const contentBlocks = Array.isArray(entry.content) ? entry.content : [];
+      const attachmentBlock = contentBlocks.find((block) => {
+        if (!block || typeof block !== "object") {
+          return false;
+        }
+        const typed = block as {
+          type?: unknown;
+          fileName?: unknown;
+          mimeType?: unknown;
+        };
+        return (
+          typed.type === "document" &&
+          typeof typed.fileName === "string" &&
+          typed.mimeType === "application/pdf"
+        );
+      });
+      expect(attachmentBlock).toBeTruthy();
       const persisted = await fs.readFile(mediaPath);
       expect(persisted.subarray(0, 8).toString("utf-8")).toContain("%PDF-1.4");
     });
+  });
+
+  test("chat.history does not duplicate synthesized attachment blocks", async () => {
+    const history = await loadChatHistoryWithMessages([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "review this pdf" },
+          {
+            type: "document",
+            fileName: "exam.pdf",
+            mimeType: "application/pdf",
+          },
+        ],
+        MediaPath: "/tmp/exam.pdf",
+        MediaPaths: ["/tmp/exam.pdf"],
+        MediaType: "application/pdf",
+        MediaTypes: ["application/pdf"],
+        timestamp: 1,
+      },
+    ]);
+
+    const userMessage = history.find((message) => {
+      if (!message || typeof message !== "object") {
+        return false;
+      }
+      const entry = message as { role?: unknown; content?: unknown };
+      return entry.role === "user" && extractFirstTextBlock(message) === "review this pdf";
+    });
+    expect(userMessage).toBeTruthy();
+
+    const entry = userMessage as Record<string, unknown>;
+    expect(Array.isArray(entry.content)).toBe(true);
+    const attachmentBlocks = (Array.isArray(entry.content) ? entry.content : []).filter((block) => {
+      if (!block || typeof block !== "object") {
+        return false;
+      }
+      const typed = block as {
+        type?: unknown;
+        fileName?: unknown;
+        mimeType?: unknown;
+      };
+      return (
+        typed.type === "document" &&
+        typed.fileName === "exam.pdf" &&
+        typed.mimeType === "application/pdf"
+      );
+    });
+    expect(attachmentBlocks).toHaveLength(1);
   });
 
   test("routes /btw replies through side-result events without transcript injection", async () => {
