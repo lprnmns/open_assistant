@@ -20,8 +20,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +71,7 @@ fun ChatSheetContent(viewModel: MainViewModel) {
   val scope = rememberCoroutineScope()
 
   val attachments = remember { mutableStateListOf<PendingChatAttachment>() }
+  var attachmentError by rememberSaveable { mutableStateOf<String?>(null) }
 
   val pickImages =
     rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
@@ -75,15 +79,24 @@ fun ChatSheetContent(viewModel: MainViewModel) {
       scope.launch(Dispatchers.IO) {
         val remainingSlots = (8 - attachments.size).coerceAtLeast(0)
         if (remainingSlots == 0) return@launch
+        var nextError: String? = null
         val next =
           uris.take(remainingSlots).mapNotNull { uri ->
             try {
               loadSizedImageAttachment(resolver, uri)
-            } catch (_: Throwable) {
+            } catch (error: Throwable) {
+              if (nextError == null) {
+                nextError = attachmentLoadErrorMessage(error)
+              }
               null
             }
           }
         withContext(Dispatchers.Main) {
+          if (next.isNotEmpty()) {
+            attachmentError = null
+          } else if (nextError != null) {
+            attachmentError = nextError
+          }
           attachments.addAll(next)
         }
       }
@@ -94,15 +107,20 @@ fun ChatSheetContent(viewModel: MainViewModel) {
       if (uri == null) return@rememberLauncherForActivityResult
       if (attachments.size >= 8) return@rememberLauncherForActivityResult
       scope.launch(Dispatchers.IO) {
+        var nextError: String? = null
         val next =
           try {
             loadPdfAttachment(resolver, uri)
-          } catch (_: Throwable) {
+          } catch (error: Throwable) {
+            nextError = attachmentLoadErrorMessage(error)
             null
           }
-        if (next != null) {
-          withContext(Dispatchers.Main) {
+        withContext(Dispatchers.Main) {
+          if (next != null) {
+            attachmentError = null
             attachments.add(next)
+          } else if (nextError != null) {
+            attachmentError = nextError
           }
         }
       }
@@ -124,6 +142,9 @@ fun ChatSheetContent(viewModel: MainViewModel) {
 
     if (!errorText.isNullOrBlank()) {
       ChatErrorRail(errorText = errorText!!)
+    }
+    if (!attachmentError.isNullOrBlank()) {
+      ChatErrorRail(errorText = attachmentError!!)
     }
 
     ChatMessageListCard(
@@ -162,6 +183,7 @@ fun ChatSheetContent(viewModel: MainViewModel) {
             }
           viewModel.sendChat(message = text, thinking = thinkingLevel, attachments = outgoing)
           attachments.clear()
+          attachmentError = null
         },
       )
     }
