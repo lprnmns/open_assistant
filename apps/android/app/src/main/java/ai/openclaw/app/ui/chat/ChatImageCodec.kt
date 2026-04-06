@@ -23,8 +23,8 @@ private val decodedBitmapCache =
     override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount.coerceAtLeast(1)
   }
 
-internal fun loadSizedImageAttachment(resolver: ContentResolver, uri: Uri): PendingImageAttachment {
-  val fileName = normalizeAttachmentFileName((uri.lastPathSegment ?: "image").substringAfterLast('/'))
+internal fun loadSizedImageAttachment(resolver: ContentResolver, uri: Uri): PendingChatAttachment {
+  val fileName = normalizeAttachmentFileName(extractAttachmentLeafName(uri.lastPathSegment ?: "image"))
   val bitmap = decodeScaledBitmap(resolver, uri, maxDimension = CHAT_ATTACHMENT_MAX_WIDTH)
   if (bitmap == null) {
     throw IllegalStateException("unsupported attachment")
@@ -58,8 +58,9 @@ internal fun loadSizedImageAttachment(resolver: ContentResolver, uri: Uri): Pend
       },
     )
   val base64 = Base64.encodeToString(encoded.bytes, Base64.NO_WRAP)
-  return PendingImageAttachment(
-    id = uri.toString() + "#" + System.currentTimeMillis().toString(),
+  return PendingChatAttachment(
+    id = buildPendingAttachmentId(uri),
+    type = "image",
     fileName = fileName,
     mimeType = "image/jpeg",
     base64 = base64,
@@ -109,6 +110,10 @@ internal fun normalizeAttachmentFileName(raw: String): String {
   if (trimmed.isEmpty()) return "image.jpg"
   val stem = trimmed.substringBeforeLast('.', missingDelimiterValue = trimmed).ifEmpty { "image" }
   return "$stem.jpg"
+}
+
+internal fun extractAttachmentLeafName(raw: String): String {
+  return raw.substringAfterLast('/').substringAfterLast('\\')
 }
 
 private fun decodeScaledBitmap(

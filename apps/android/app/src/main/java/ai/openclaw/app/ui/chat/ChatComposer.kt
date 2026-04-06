@@ -19,6 +19,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
@@ -60,12 +64,13 @@ import ai.openclaw.app.ui.mobileTextSecondary
 import ai.openclaw.app.ui.mobileTextTertiary
 
 @Composable
-fun ChatComposer(
+internal fun ChatComposer(
   healthOk: Boolean,
   thinkingLevel: String,
   pendingRunCount: Int,
-  attachments: List<PendingImageAttachment>,
+  attachments: List<PendingChatAttachment>,
   onPickImages: () -> Unit,
+  onPickDocument: () -> Unit,
   onRemoveAttachment: (id: String) -> Unit,
   onSetThinkingLevel: (level: String) -> Unit,
   onRefresh: () -> Unit,
@@ -74,6 +79,7 @@ fun ChatComposer(
 ) {
   var input by rememberSaveable { mutableStateOf("") }
   var showThinkingMenu by remember { mutableStateOf(false) }
+  var showAttachmentMenu by remember { mutableStateOf(false) }
 
   val canSend = pendingRunCount == 0 && (input.trim().isNotEmpty() || attachments.isNotEmpty()) && healthOk
   val sendBusy = pendingRunCount > 0
@@ -87,7 +93,7 @@ fun ChatComposer(
       value = input,
       onValueChange = { input = it },
       modifier = Modifier.fillMaxWidth(),
-      placeholder = { Text("Type a message…", style = mobileBodyStyle(), color = mobileTextTertiary) },
+      placeholder = { Text("Type a message...", style = mobileBodyStyle(), color = mobileTextTertiary) },
       minLines = 2,
       maxLines = 5,
       textStyle = mobileBodyStyle().copy(color = mobileText),
@@ -144,13 +150,42 @@ fun ChatComposer(
         }
       }
 
-      SecondaryActionButton(
-        label = "Attach",
-        icon = Icons.Default.AttachFile,
-        enabled = true,
-        compact = true,
-        onClick = onPickImages,
-      )
+      Box {
+        SecondaryActionButton(
+          label = "Attach",
+          icon = Icons.Default.AttachFile,
+          enabled = true,
+          compact = true,
+          onClick = { showAttachmentMenu = true },
+        )
+
+        DropdownMenu(
+          expanded = showAttachmentMenu,
+          onDismissRequest = { showAttachmentMenu = false },
+          shape = RoundedCornerShape(16.dp),
+          containerColor = mobileCardSurface,
+          tonalElevation = 0.dp,
+          shadowElevation = 8.dp,
+          border = BorderStroke(1.dp, mobileBorder),
+        ) {
+          DropdownMenuItem(
+            text = { Text("Photo", style = mobileCallout, color = mobileText) },
+            leadingIcon = { Icon(Icons.Default.Image, contentDescription = null, tint = mobileTextSecondary) },
+            onClick = {
+              showAttachmentMenu = false
+              onPickImages()
+            },
+          )
+          DropdownMenuItem(
+            text = { Text("PDF", style = mobileCallout, color = mobileText) },
+            leadingIcon = { Icon(Icons.Default.Description, contentDescription = null, tint = mobileTextSecondary) },
+            onClick = {
+              showAttachmentMenu = false
+              onPickDocument()
+            },
+          )
+        }
+      }
 
       SecondaryActionButton(
         label = "Refresh",
@@ -256,7 +291,7 @@ private fun ThinkingMenuItem(
     },
     trailingIcon = {
       if (value == current.trim().lowercase()) {
-        Text("✓", style = mobileCallout, color = mobileAccent)
+        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp), tint = mobileAccent)
       } else {
         Spacer(modifier = Modifier.width(10.dp))
       }
@@ -275,7 +310,7 @@ private fun thinkingLabel(raw: String): String {
 
 @Composable
 private fun AttachmentsStrip(
-  attachments: List<PendingImageAttachment>,
+  attachments: List<PendingChatAttachment>,
   onRemoveAttachment: (id: String) -> Unit,
 ) {
   Row(
@@ -285,6 +320,7 @@ private fun AttachmentsStrip(
     for (att in attachments) {
       AttachmentChip(
         fileName = att.fileName,
+        typeLabel = if (att.type == "document") "PDF" else "IMG",
         onRemove = { onRemoveAttachment(att.id) },
       )
     }
@@ -292,7 +328,7 @@ private fun AttachmentsStrip(
 }
 
 @Composable
-private fun AttachmentChip(fileName: String, onRemove: () -> Unit) {
+private fun AttachmentChip(fileName: String, typeLabel: String, onRemove: () -> Unit) {
   Surface(
     shape = RoundedCornerShape(999.dp),
     color = mobileAccentSoft,
@@ -303,6 +339,11 @@ private fun AttachmentChip(fileName: String, onRemove: () -> Unit) {
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+      Text(
+        text = typeLabel,
+        style = mobileCaption1.copy(fontWeight = FontWeight.Bold),
+        color = mobileTextSecondary,
+      )
       Text(
         text = fileName,
         style = mobileCaption1,
@@ -316,11 +357,11 @@ private fun AttachmentChip(fileName: String, onRemove: () -> Unit) {
         color = mobileCardSurface,
         border = BorderStroke(1.dp, mobileBorderStrong),
       ) {
-        Text(
-          text = "×",
-          style = mobileCaption1.copy(fontWeight = FontWeight.Bold),
-          color = mobileTextSecondary,
-          modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+        Icon(
+          Icons.Default.Close,
+          contentDescription = "Remove attachment",
+          modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp).size(14.dp),
+          tint = mobileTextSecondary,
         )
       }
     }

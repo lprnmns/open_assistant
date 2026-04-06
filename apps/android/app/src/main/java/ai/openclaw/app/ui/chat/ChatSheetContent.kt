@@ -34,16 +34,14 @@ import ai.openclaw.app.chat.ChatSessionEntry
 import ai.openclaw.app.chat.OutgoingAttachment
 import ai.openclaw.app.ui.mobileAccent
 import ai.openclaw.app.ui.mobileAccentBorderStrong
-import ai.openclaw.app.ui.mobileBorder
 import ai.openclaw.app.ui.mobileBorderStrong
 import ai.openclaw.app.ui.mobileCallout
-import ai.openclaw.app.ui.mobileCardSurface
 import ai.openclaw.app.ui.mobileCaption1
 import ai.openclaw.app.ui.mobileCaption2
+import ai.openclaw.app.ui.mobileCardSurface
 import ai.openclaw.app.ui.mobileDanger
 import ai.openclaw.app.ui.mobileDangerSoft
 import ai.openclaw.app.ui.mobileText
-import ai.openclaw.app.ui.mobileTextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,14 +67,16 @@ fun ChatSheetContent(viewModel: MainViewModel) {
   val resolver = context.contentResolver
   val scope = rememberCoroutineScope()
 
-  val attachments = remember { mutableStateListOf<PendingImageAttachment>() }
+  val attachments = remember { mutableStateListOf<PendingChatAttachment>() }
 
   val pickImages =
     rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
       if (uris.isNullOrEmpty()) return@rememberLauncherForActivityResult
       scope.launch(Dispatchers.IO) {
+        val remainingSlots = (8 - attachments.size).coerceAtLeast(0)
+        if (remainingSlots == 0) return@launch
         val next =
-          uris.take(8).mapNotNull { uri ->
+          uris.take(remainingSlots).mapNotNull { uri ->
             try {
               loadSizedImageAttachment(resolver, uri)
             } catch (_: Throwable) {
@@ -85,6 +85,25 @@ fun ChatSheetContent(viewModel: MainViewModel) {
           }
         withContext(Dispatchers.Main) {
           attachments.addAll(next)
+        }
+      }
+    }
+
+  val pickDocument =
+    rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+      if (uri == null) return@rememberLauncherForActivityResult
+      if (attachments.size >= 8) return@rememberLauncherForActivityResult
+      scope.launch(Dispatchers.IO) {
+        val next =
+          try {
+            loadPdfAttachment(resolver, uri)
+          } catch (_: Throwable) {
+            null
+          }
+        if (next != null) {
+          withContext(Dispatchers.Main) {
+            attachments.add(next)
+          }
         }
       }
     }
@@ -123,6 +142,7 @@ fun ChatSheetContent(viewModel: MainViewModel) {
         pendingRunCount = pendingRunCount,
         attachments = attachments,
         onPickImages = { pickImages.launch("image/*") },
+        onPickDocument = { pickDocument.launch("application/pdf") },
         onRemoveAttachment = { id -> attachments.removeAll { it.id == id } },
         onSetThinkingLevel = { level -> viewModel.setChatThinkingLevel(level) },
         onRefresh = {
@@ -134,7 +154,7 @@ fun ChatSheetContent(viewModel: MainViewModel) {
           val outgoing =
             attachments.map { att ->
               OutgoingAttachment(
-                type = "image",
+                type = att.type,
                 mimeType = att.mimeType,
                 fileName = att.fileName,
                 base64 = att.base64,
@@ -193,7 +213,7 @@ private fun ChatErrorRail(errorText: String) {
     modifier = Modifier.fillMaxWidth(),
     color = mobileDangerSoft,
     shape = RoundedCornerShape(12.dp),
-    border = androidx.compose.foundation.BorderStroke(1.dp, mobileDanger),
+    border = BorderStroke(1.dp, mobileDanger),
   ) {
     Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
       Text(
@@ -205,10 +225,3 @@ private fun ChatErrorRail(errorText: String) {
     }
   }
 }
-
-data class PendingImageAttachment(
-  val id: String,
-  val fileName: String,
-  val mimeType: String,
-  val base64: String,
-)
