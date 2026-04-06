@@ -397,6 +397,7 @@ export const registerTelegramHandlers = ({
           allMedia.push({
             path: media.path,
             contentType: media.contentType,
+            placeholder: media.placeholder,
             stickerMetadata: media.stickerMetadata,
           });
         }
@@ -499,6 +500,7 @@ export const registerTelegramHandlers = ({
         {
           path: media.path,
           contentType: media.contentType,
+          placeholder: media.placeholder,
           stickerMetadata: media.stickerMetadata,
         },
       ];

@@ -57,6 +57,33 @@ export type TelegramInboundBodyResult = {
   locationData?: NormalizedLocation;
 };
 
+function resolveFallbackMediaPlaceholder(allMedia: TelegramMediaRef[]): string {
+  const count = allMedia.length;
+  const explicit = allMedia.map((media) => media.placeholder).find(Boolean);
+  if (explicit) {
+    return explicit;
+  }
+  const hasAudio = allMedia.some((media) => media.contentType?.startsWith("audio/"));
+  if (hasAudio) {
+    return "<media:audio>";
+  }
+  const hasVideo = allMedia.some((media) => media.contentType?.startsWith("video/"));
+  if (hasVideo) {
+    return `<media:video>${count > 1 ? ` (${count} videos)` : ""}`;
+  }
+  const hasDocument = allMedia.some((media) => {
+    const contentType = media.contentType?.toLowerCase();
+    if (!contentType) {
+      return false;
+    }
+    return !contentType.startsWith("image/");
+  });
+  if (hasDocument) {
+    return `<media:document>${count > 1 ? ` (${count} files)` : ""}`;
+  }
+  return `<media:image>${count > 1 ? ` (${count} images)` : ""}`;
+}
+
 async function resolveStickerVisionSupport(params: {
   cfg: OpenClawConfig;
   agentId?: string;
@@ -154,6 +181,10 @@ export async function resolveTelegramInboundBody(params: {
     placeholder = `[Sticker${stickerContext ? ` ${stickerContext}` : ""}] ${cachedStickerDescription}`;
   }
 
+  if (!placeholder && allMedia.length > 0) {
+    placeholder = resolveFallbackMediaPlaceholder(allMedia);
+  }
+
   const locationData = extractTelegramLocation(msg);
   const locationText = locationData ? formatLocationText(locationData) : undefined;
   const rawText = expandTextLinks(messageTextParts.text, messageTextParts.entities).trim();
@@ -206,11 +237,10 @@ export async function resolveTelegramInboundBody(params: {
   }
 
   if (!bodyText && allMedia.length > 0) {
-    if (hasAudio) {
-      bodyText = preflightTranscript || "<media:audio>";
-    } else {
-      bodyText = `<media:image>${allMedia.length > 1 ? ` (${allMedia.length} images)` : ""}`;
-    }
+    bodyText =
+      hasAudio && preflightTranscript
+        ? preflightTranscript
+        : resolveFallbackMediaPlaceholder(allMedia);
   }
 
   const hasAnyMention = messageTextParts.entities.some((ent) => ent.type === "mention");

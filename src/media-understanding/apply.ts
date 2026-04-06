@@ -17,6 +17,7 @@ import {
   formatAudioTranscripts,
   formatMediaUnderstandingBody,
 } from "./format.js";
+import { extractPdfImageFallbackText } from "./pdf-ocr.js";
 import { resolveConcurrency } from "./resolve.js";
 import {
   type ActiveMediaModel,
@@ -318,9 +319,12 @@ async function extractFileBlocks(params: {
   attachments: ReturnType<typeof normalizeMediaAttachments>;
   cache: ReturnType<typeof createMediaAttachmentCache>;
   limits: ReturnType<typeof resolveFileLimits>;
+  cfg: OpenClawConfig;
+  agentDir?: string;
+  activeModel?: ActiveMediaModel;
   skipAttachmentIndexes?: Set<number>;
 }): Promise<string[]> {
-  const { attachments, cache, limits, skipAttachmentIndexes } = params;
+  const { attachments, cache, limits, cfg, agentDir, activeModel, skipAttachmentIndexes } = params;
   if (!attachments || attachments.length === 0) {
     return [];
   }
@@ -429,7 +433,13 @@ async function extractFileBlocks(params: {
     let blockText = text;
     if (!blockText) {
       if (extracted?.images && extracted.images.length > 0) {
-        blockText = "[PDF content rendered to images; images not forwarded to model]";
+        const ocrText = await extractPdfImageFallbackText({
+          images: extracted.images,
+          cfg,
+          agentDir,
+          activeModel,
+        });
+        blockText = ocrText ?? "[Scanned PDF detected, but OCR fallback did not produce text]";
       } else {
         blockText = "[No extractable text]";
       }
@@ -537,6 +547,9 @@ export async function applyMediaUnderstanding(params: {
       attachments,
       cache,
       limits: resolveFileLimits(cfg),
+      cfg,
+      agentDir: params.agentDir,
+      activeModel: params.activeModel,
       skipAttachmentIndexes: audioAttachmentIndexes.size > 0 ? audioAttachmentIndexes : undefined,
     });
     if (fileBlocks.length > 0) {

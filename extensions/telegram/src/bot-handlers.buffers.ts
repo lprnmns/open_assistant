@@ -179,6 +179,7 @@ export function createTelegramInboundBufferRuntime(params: {
         {
           path: media.path,
           contentType: media.contentType,
+          placeholder: media.placeholder,
           stickerMetadata: media.stickerMetadata,
         },
       ];
@@ -215,6 +216,7 @@ export function createTelegramInboundBufferRuntime(params: {
           allMedia.push({
             path: media.path,
             contentType: media.contentType,
+            placeholder: media.placeholder,
             stickerMetadata: media.stickerMetadata,
           });
         }

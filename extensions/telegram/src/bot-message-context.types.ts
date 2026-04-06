@@ -12,6 +12,7 @@ import type { StickerMetadata, TelegramContext } from "./bot/types.js";
 export type TelegramMediaRef = {
   path: string;
   contentType?: string;
+  placeholder?: string;
   stickerMetadata?: StickerMetadata;
 };
 
