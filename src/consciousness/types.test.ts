@@ -130,11 +130,17 @@ describe("WorldSnapshot", () => {
       dueCronExpressions: [],
       externalWorldEvents: [],
       activeChannelId: "web-chat",
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "web-chat",
+        channelType: "webchat",
+      },
       lastTickAt: undefined,
       effectiveSilenceThresholdMs: 1_800_000,
     };
     expect(snap.pendingNoteCount).toBe(2);
     expect(snap.lastTickAt).toBeUndefined();
+    expect(snap.activeDeliveryTarget?.id).toBe("web-chat");
   });
 
   it("lastUserInteractionAt may be undefined for brand-new agents", () => {
@@ -151,6 +157,7 @@ describe("WorldSnapshot", () => {
     };
     expect(snap.lastUserInteractionAt).toBeUndefined();
     expect(snap.activeChannelId).toBeUndefined();
+    expect(snap.activeDeliveryTarget).toBeUndefined();
   });
 });
 

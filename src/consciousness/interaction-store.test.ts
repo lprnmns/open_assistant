@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileInteractionStore, type PersistedInteractionState } from "./interaction-store.js";
 import {
   _resetInteractionTrackerForTest,
+  getActiveDeliveryTarget,
   getActiveChannelId,
   getActiveChannelType,
   getLastUserInteractionAt,
@@ -80,7 +81,14 @@ describe("FileInteractionStore", () => {
       activeChannelType: "telegram",
     };
     const store = makeStore({ readReturn: JSON.stringify(state) });
-    expect(store.loadSync()).toEqual(state);
+    expect(store.loadSync()).toEqual({
+      ...state,
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "telegram:123",
+        channelType: "telegram",
+      },
+    });
   });
 
   it("save + close flushes state via writer", async () => {
@@ -92,6 +100,10 @@ describe("FileInteractionStore", () => {
     const parsed = JSON.parse(writes[0]!.data) as PersistedInteractionState;
     expect(parsed.lastUserInteractionAt).toBe(42);
     expect(parsed.activeChannelId).toBe("slack:C1");
+    expect(parsed.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "slack:C1",
+    });
   });
 
   it("partial saves shallow-merge: earlier fields not in a later partial are preserved", async () => {
@@ -117,6 +129,11 @@ describe("FileInteractionStore", () => {
     expect(parsed.lastUserInteractionAt).toBe(1_700_001_000_000);
     expect(parsed.activeChannelId).toBe("telegram:42");
     expect(parsed.activeChannelType).toBe("telegram");
+    expect(parsed.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "telegram:42",
+      channelType: "telegram",
+    });
   });
 
   it("later partial overwrites only the fields it supplies", async () => {
@@ -130,6 +147,10 @@ describe("FileInteractionStore", () => {
     expect(parsed.activeChannelId).toBe("telegram:99");
     // effectiveSilenceThresholdMs must still be present
     expect(parsed.effectiveSilenceThresholdMs).toBe(1_000);
+    expect(parsed.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "telegram:99",
+    });
   });
 
   it("debounce collapses rapid saves: only last state is written", async () => {
@@ -148,6 +169,10 @@ describe("FileInteractionStore", () => {
     expect(writes).toHaveLength(1);
     const parsed = JSON.parse(writes[0]!.data) as PersistedInteractionState;
     expect(parsed.activeChannelId).toBe("third");
+    expect(parsed.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "third",
+    });
   });
 
   it("close is idempotent — second call does nothing", async () => {
@@ -207,7 +232,14 @@ describe("FileInteractionStore real fs (atomic write)", () => {
 
     // A fresh store instance can read it back
     const reader = new FileInteractionStore({ filePath, debounceMs: 0 });
-    expect(reader.loadSync()).toEqual(state);
+    expect(reader.loadSync()).toEqual({
+      ...state,
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "telegram:456",
+        channelType: "telegram",
+      },
+    });
   });
 
   it("leaves no .tmp file on disk when write succeeds", async () => {
@@ -233,6 +265,11 @@ describe("seedInteractionTracker + setInteractionStore integration", () => {
       activeChannelType: "telegram",
     });
     expect(getLastUserInteractionAt()).toBe(1_234_567);
+    expect(getActiveDeliveryTarget()).toEqual({
+      kind: "channel",
+      id: "telegram:99",
+      channelType: "telegram",
+    });
     expect(getActiveChannelId()).toBe("telegram:99");
     expect(getActiveChannelType()).toBe("telegram");
   });
@@ -243,6 +280,11 @@ describe("seedInteractionTracker + setInteractionStore integration", () => {
     // Partial seed — only activeChannelId present
     seedInteractionTracker({ activeChannelId: "slack:C2" });
     expect(getLastUserInteractionAt()).toBe(1_000);
+    expect(getActiveDeliveryTarget()).toEqual({
+      kind: "channel",
+      id: "slack:C2",
+      channelType: undefined,
+    });
     expect(getActiveChannelId()).toBe("slack:C2");
   });
 
@@ -256,6 +298,11 @@ describe("seedInteractionTracker + setInteractionStore integration", () => {
 
     expect(writes).toHaveLength(1);
     const parsed = JSON.parse(writes[0]!.data) as PersistedInteractionState;
+    expect(parsed.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "telegram:77",
+      channelType: "telegram",
+    });
     expect(parsed.activeChannelId).toBe("telegram:77");
     expect(parsed.activeChannelType).toBe("telegram");
     expect(typeof parsed.lastUserInteractionAt).toBe("number");
@@ -282,6 +329,11 @@ describe("seedInteractionTracker + setInteractionStore integration", () => {
     // Tracker fields written by recordUserInteraction
     expect(parsed.activeChannelId).toBe("telegram:77");
     expect(parsed.activeChannelType).toBe("telegram");
+    expect(parsed.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "telegram:77",
+      channelType: "telegram",
+    });
     expect(typeof parsed.lastUserInteractionAt).toBe("number");
 
     // WS-1.2/1.3 fields must NOT have been wiped
@@ -327,6 +379,11 @@ describe("seedInteractionTracker + setInteractionStore integration", () => {
     // Tracker fields
     expect(parsed.activeChannelId).toBe("telegram:77");
     expect(parsed.activeChannelType).toBe("telegram");
+    expect(parsed.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "telegram:77",
+      channelType: "telegram",
+    });
     expect(typeof parsed.lastUserInteractionAt).toBe("number");
 
     // WS-1.2/1.3 fields from first process must NOT have been wiped

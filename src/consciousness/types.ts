@@ -1,4 +1,5 @@
 import type { OriginatingChannelType } from "../auto-reply/templating.js";
+import type { DeliveryTarget } from "./delivery-target.js";
 
 /**
  * src/consciousness/types.ts — Consciousness Loop shared type definitions
@@ -168,6 +169,12 @@ export type WorldSnapshot = {
    * Needed for provider-aware transport routing of proactive messages.
    */
   activeChannelType?: OriginatingChannelType | undefined;
+
+  /**
+   * Canonical delivery target abstraction for proactive routing.
+   * Legacy activeChannel* fields remain during the migration window.
+   */
+  activeDeliveryTarget?: DeliveryTarget | undefined;
 
   /**
    * Buffered events from external surfaces (owner channel + third-party contacts).

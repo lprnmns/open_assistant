@@ -41,6 +41,11 @@ describe("buildRealWorldSnapshot", () => {
     expect(snap.firedTriggerIds).toEqual(["trigger-abc"]);
     expect(snap.activeChannelId).toBe("channel-1");
     expect(snap.activeChannelType).toBe("slack");
+    expect(snap.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "channel-1",
+      channelType: "slack",
+    });
     expect(snap.lastTickAt).toBe(now - 5_000);
     expect(snap.effectiveSilenceThresholdMs).toBe(120_000);
     expect(snap.dueCronExpressions).toEqual([]);
@@ -58,6 +63,11 @@ describe("buildRealWorldSnapshot", () => {
     expect(snap.firedTriggerIds).toEqual(["async-trigger"]);
     expect(snap.activeChannelId).toBe("async-channel");
     expect(snap.activeChannelType).toBe("telegram");
+    expect(snap.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "async-channel",
+      channelType: "telegram",
+    });
   });
 
   it("includes optional adapters when provided", async () => {
@@ -96,6 +106,7 @@ describe("buildRealWorldSnapshot", () => {
     }));
     expect(snap.activeChannelId).toBeUndefined();
     expect(snap.activeChannelType).toBeUndefined();
+    expect(snap.activeDeliveryTarget).toBeUndefined();
   });
 
   it("substitutes safe defaults when an async adapter throws", async () => {
@@ -110,8 +121,29 @@ describe("buildRealWorldSnapshot", () => {
     expect(snap.firedTriggerIds).toEqual([]);
     expect(snap.activeChannelId).toBeUndefined();
     expect(snap.activeChannelType).toBeUndefined();
+    expect(snap.activeDeliveryTarget).toBeUndefined();
     // Other fields still populated from working adapters
     expect(typeof snap.capturedAt).toBe("number");
+  });
+
+  it("prefers an explicit delivery target adapter when provided", async () => {
+    const snap = await buildRealWorldSnapshot(makeAdapters({
+      getActiveDeliveryTarget: () => ({
+        kind: "node",
+        id: "android-node-1",
+        nodeId: "android-node-1",
+      }),
+      getActiveChannelId: () => "legacy-channel",
+      getActiveChannelType: () => "telegram",
+    }));
+
+    expect(snap.activeDeliveryTarget).toEqual({
+      kind: "node",
+      id: "android-node-1",
+      nodeId: "android-node-1",
+    });
+    expect(snap.activeChannelId).toBe("android-node-1");
+    expect(snap.activeChannelType).toBeUndefined();
   });
 
   it("substitutes safe default when sync adapter throws", async () => {

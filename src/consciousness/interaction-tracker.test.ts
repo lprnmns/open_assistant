@@ -5,10 +5,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   _resetInteractionTrackerForTest,
+  getActiveDeliveryTarget,
   getActiveChannelId,
   getActiveChannelType,
   getLastUserInteractionAt,
+  recordDeliveryTargetInteraction,
   recordUserInteraction,
+  resolveDeliveryTargetFromInteraction,
   resolveActiveChannelIdFromInteraction,
 } from "./interaction-tracker.js";
 
@@ -19,6 +22,7 @@ describe("InteractionTracker", () => {
 
   it("starts with undefined state", () => {
     expect(getLastUserInteractionAt()).toBeUndefined();
+    expect(getActiveDeliveryTarget()).toBeUndefined();
     expect(getActiveChannelId()).toBeUndefined();
     expect(getActiveChannelType()).toBeUndefined();
   });
@@ -34,6 +38,11 @@ describe("InteractionTracker", () => {
 
   it("recordUserInteraction sets activeChannelId", () => {
     recordUserInteraction("discord:channel:123", "discord");
+    expect(getActiveDeliveryTarget()).toEqual({
+      kind: "channel",
+      id: "discord:channel:123",
+      channelType: "discord",
+    });
     expect(getActiveChannelId()).toBe("discord:channel:123");
   });
 
@@ -44,6 +53,11 @@ describe("InteractionTracker", () => {
 
   it("recordUserInteraction leaves activeChannelType undefined when absent", () => {
     recordUserInteraction("route-only");
+    expect(getActiveDeliveryTarget()).toEqual({
+      kind: "channel",
+      id: "route-only",
+      channelType: undefined,
+    });
     expect(getActiveChannelId()).toBe("route-only");
     expect(getActiveChannelType()).toBeUndefined();
   });
@@ -59,7 +73,23 @@ describe("InteractionTracker", () => {
     recordUserInteraction("telegram:123", "telegram");
     _resetInteractionTrackerForTest();
     expect(getLastUserInteractionAt()).toBeUndefined();
+    expect(getActiveDeliveryTarget()).toBeUndefined();
     expect(getActiveChannelId()).toBeUndefined();
+    expect(getActiveChannelType()).toBeUndefined();
+  });
+
+  it("recordDeliveryTargetInteraction stores a node target without a channel type", () => {
+    recordDeliveryTargetInteraction({
+      kind: "node",
+      id: "android-node-1",
+      nodeId: "android-node-1",
+    });
+    expect(getActiveDeliveryTarget()).toEqual({
+      kind: "node",
+      id: "android-node-1",
+      nodeId: "android-node-1",
+    });
+    expect(getActiveChannelId()).toBe("android-node-1");
     expect(getActiveChannelType()).toBeUndefined();
   });
 
@@ -115,5 +145,21 @@ describe("InteractionTracker", () => {
         From: undefined,
       }),
     ).toBeUndefined();
+  });
+
+  it("builds a channel delivery target from the resolved route", () => {
+    expect(
+      resolveDeliveryTargetFromInteraction(
+        {
+          OriginatingTo: "telegram:123",
+          NativeChannelId: "native:ignored",
+        },
+        "telegram",
+      ),
+    ).toEqual({
+      kind: "channel",
+      id: "telegram:123",
+      channelType: "telegram",
+    });
   });
 });

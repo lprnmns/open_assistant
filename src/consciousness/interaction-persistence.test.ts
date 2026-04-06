@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   _resetInteractionTrackerForTest,
+  getActiveDeliveryTarget,
   getActiveChannelId,
   getActiveChannelType,
   getLastUserInteractionAt,
@@ -58,6 +59,11 @@ describe("maybeStartInteractionPersistence", () => {
 
     expect(lifecycle).not.toBeNull();
     expect(getLastUserInteractionAt()).toBe(1_700_000_000_000);
+    expect(getActiveDeliveryTarget()).toEqual({
+      kind: "channel",
+      id: "telegram:owner",
+      channelType: "telegram",
+    });
     expect(getActiveChannelId()).toBe("telegram:owner");
     expect(getActiveChannelType()).toBe("telegram");
 
@@ -77,10 +83,16 @@ describe("maybeStartInteractionPersistence", () => {
 
     const persisted = JSON.parse(fs.readFileSync(statePath, "utf-8")) as {
       lastUserInteractionAt?: number;
+      activeDeliveryTarget?: unknown;
       activeChannelId?: string;
       activeChannelType?: string;
     };
     expect(typeof persisted.lastUserInteractionAt).toBe("number");
+    expect(persisted.activeDeliveryTarget).toEqual({
+      kind: "channel",
+      id: "whatsapp:+15550001111",
+      channelType: "whatsapp",
+    });
     expect(persisted.activeChannelId).toBe("whatsapp:+15550001111");
     expect(persisted.activeChannelType).toBe("whatsapp");
   });

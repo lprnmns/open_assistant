@@ -1,4 +1,11 @@
 import type { OriginatingChannelType } from "../auto-reply/templating.js";
+import {
+  getDeliveryTargetChannelId,
+  getDeliveryTargetChannelType,
+  makeChannelDeliveryTarget,
+  migrateLegacyActiveChannel,
+  type DeliveryTarget,
+} from "./delivery-target.js";
 import type { InteractionStore, PersistedInteractionState } from "./interaction-store.js";
 
 /**
@@ -8,8 +15,7 @@ import type { InteractionStore, PersistedInteractionState } from "./interaction-
  * Updated by the shared inbound reply pipeline on every user→bot message.
  * Read by the consciousness snapshot adapters to populate:
  *   - lastUserInteractionAt
- *   - activeChannelId
- *   - activeChannelType
+ *   - activeDeliveryTarget
  *
  * Persistence: when an InteractionStore is wired via setInteractionStore(),
  *   every recordUserInteraction() call debounce-flushes state to disk so that
@@ -26,8 +32,7 @@ export type InteractionRouteLike = {
 };
 
 let _lastUserInteractionAt: number | undefined = undefined;
-let _activeChannelId: string | undefined = undefined;
-let _activeChannelType: OriginatingChannelType | undefined = undefined;
+let _activeDeliveryTarget: DeliveryTarget | undefined = undefined;
 let _store: InteractionStore | null = null;
 
 function normalizeRouteValue(value: string | undefined): string | undefined {
@@ -54,6 +59,14 @@ export function resolveActiveChannelIdFromInteraction(
   );
 }
 
+export function resolveDeliveryTargetFromInteraction(
+  route: InteractionRouteLike,
+  channelType?: OriginatingChannelType,
+): DeliveryTarget | undefined {
+  const channelId = resolveActiveChannelIdFromInteraction(route);
+  return channelId ? makeChannelDeliveryTarget(channelId, channelType) : undefined;
+}
+
 /**
  * Wire a persistent store so that every recordUserInteraction() call is
  * debounce-flushed to disk.  Call once at boot (before the first message
@@ -72,12 +85,25 @@ export function seedInteractionTracker(state: PersistedInteractionState): void {
   if (state.lastUserInteractionAt !== undefined) {
     _lastUserInteractionAt = state.lastUserInteractionAt;
   }
-  if (state.activeChannelId !== undefined) {
-    _activeChannelId = state.activeChannelId;
+  const activeDeliveryTarget =
+    state.activeDeliveryTarget ??
+    migrateLegacyActiveChannel(state.activeChannelId, state.activeChannelType);
+  if (activeDeliveryTarget !== undefined) {
+    _activeDeliveryTarget = activeDeliveryTarget;
   }
-  if (state.activeChannelType !== undefined) {
-    _activeChannelType = state.activeChannelType as OriginatingChannelType;
-  }
+}
+
+export function recordDeliveryTargetInteraction(
+  target: DeliveryTarget,
+): void {
+  _lastUserInteractionAt = Date.now();
+  _activeDeliveryTarget = target;
+  _store?.save({
+    lastUserInteractionAt: _lastUserInteractionAt,
+    activeDeliveryTarget: _activeDeliveryTarget,
+    activeChannelId: getDeliveryTargetChannelId(_activeDeliveryTarget),
+    activeChannelType: getDeliveryTargetChannelType(_activeDeliveryTarget),
+  });
 }
 
 /**
@@ -89,14 +115,7 @@ export function recordUserInteraction(
   channelId: string,
   channelType?: OriginatingChannelType,
 ): void {
-  _lastUserInteractionAt = Date.now();
-  _activeChannelId = channelId;
-  _activeChannelType = channelType;
-  _store?.save({
-    lastUserInteractionAt: _lastUserInteractionAt,
-    activeChannelId: _activeChannelId,
-    activeChannelType: _activeChannelType,
-  });
+  recordDeliveryTargetInteraction(makeChannelDeliveryTarget(channelId, channelType));
 }
 
 /** Returns the epoch-ms timestamp of the last owner message, or undefined if none yet. */
@@ -104,20 +123,24 @@ export function getLastUserInteractionAt(): number | undefined {
   return _lastUserInteractionAt;
 }
 
+/** Returns the canonical delivery target for the last owner interaction, if any. */
+export function getActiveDeliveryTarget(): DeliveryTarget | undefined {
+  return _activeDeliveryTarget;
+}
+
 /** Returns the channel where the owner last interacted, or undefined if none yet. */
 export function getActiveChannelId(): string | undefined {
-  return _activeChannelId;
+  return getDeliveryTargetChannelId(_activeDeliveryTarget);
 }
 
 /** Returns the active channel type for the last owner interaction, if known. */
 export function getActiveChannelType(): OriginatingChannelType | undefined {
-  return _activeChannelType;
+  return getDeliveryTargetChannelType(_activeDeliveryTarget);
 }
 
 /** Reset state — for tests only, never call in production. */
 export function _resetInteractionTrackerForTest(): void {
   _lastUserInteractionAt = undefined;
-  _activeChannelId = undefined;
-  _activeChannelType = undefined;
+  _activeDeliveryTarget = undefined;
   _store = null;
 }

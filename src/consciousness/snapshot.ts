@@ -36,6 +36,12 @@
 import type { WorldSnapshot } from "./types.js";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 import type { OriginatingChannelType } from "../auto-reply/templating.js";
+import type { DeliveryTarget } from "./delivery-target.js";
+import {
+  getDeliveryTargetChannelId,
+  getDeliveryTargetChannelType,
+  makeChannelDeliveryTarget,
+} from "./delivery-target.js";
 
 // ── Adapters ──────────────────────────────────────────────────────────────────
 
@@ -93,6 +99,12 @@ export type SnapshotAdapters = {
     | undefined;
 
   /**
+   * Canonical proactive delivery target.
+   * When omitted, snapshot construction derives it from the legacy channel adapters.
+   */
+  getActiveDeliveryTarget?: () => Promise<DeliveryTarget | undefined> | DeliveryTarget | undefined;
+
+  /**
    * Unix ms of the last completed consciousness tick.
    * Returns undefined if the loop has never ticked.
    */
@@ -128,6 +140,7 @@ export async function buildRealWorldSnapshot(
     firedTriggerIds,
     dueCronExpressions,
     externalWorldEvents,
+    activeDeliveryTarget,
     activeChannelId,
     activeChannelType,
   ] = await Promise.all([
@@ -139,6 +152,12 @@ export async function buildRealWorldSnapshot(
     adapters.getExternalWorldEvents
       ? safeFetch(() => adapters.getExternalWorldEvents!(), [] as string[])
       : ([] as string[]),
+    adapters.getActiveDeliveryTarget
+      ? safeFetch(
+          () => adapters.getActiveDeliveryTarget!(),
+          undefined as DeliveryTarget | undefined,
+        )
+      : (undefined as DeliveryTarget | undefined),
     safeFetch(() => adapters.getActiveChannelId(), undefined as string | undefined),
     adapters.getActiveChannelType
       ? safeFetch(
@@ -155,6 +174,16 @@ export async function buildRealWorldSnapshot(
     ? safeSync(() => adapters.getEffectiveSilenceThresholdMs!(), DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs)
     : DEFAULT_CONSCIOUSNESS_CONFIG.baseSilenceThresholdMs;
 
+  const resolvedDeliveryTarget =
+    activeDeliveryTarget ??
+    (activeChannelId ? makeChannelDeliveryTarget(activeChannelId, activeChannelType) : undefined);
+  const resolvedActiveChannelId = resolvedDeliveryTarget
+    ? getDeliveryTargetChannelId(resolvedDeliveryTarget)
+    : activeChannelId;
+  const resolvedActiveChannelType = resolvedDeliveryTarget
+    ? getDeliveryTargetChannelType(resolvedDeliveryTarget)
+    : activeChannelType;
+
   return {
     capturedAt,
     lastUserInteractionAt,
@@ -162,8 +191,9 @@ export async function buildRealWorldSnapshot(
     firedTriggerIds,
     dueCronExpressions,
     externalWorldEvents,
-    activeChannelId,
-    activeChannelType,
+    activeChannelId: resolvedActiveChannelId,
+    activeChannelType: resolvedActiveChannelType,
+    activeDeliveryTarget: resolvedDeliveryTarget,
     lastTickAt,
     effectiveSilenceThresholdMs,
     // eventBuffer is injected by the scheduler — not built here

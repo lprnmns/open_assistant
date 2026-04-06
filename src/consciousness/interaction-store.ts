@@ -16,6 +16,8 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import type { DeliveryTarget } from "./delivery-target.js";
+import { migrateLegacyActiveChannel, normalizeDeliveryTarget } from "./delivery-target.js";
 
 // ── Persisted state ───────────────────────────────────────────────────────────
 
@@ -27,9 +29,11 @@ import path from "node:path";
 export type PersistedInteractionState = {
   /** Unix ms of the last owner interaction (any channel). */
   lastUserInteractionAt?: number;
-  /** Stable route key for the owner's active channel (e.g. "telegram:123"). */
+  /** Canonical proactive delivery target for the owner's active surface. */
+  activeDeliveryTarget?: DeliveryTarget;
+  /** Legacy stable route key for the owner's active channel (e.g. "telegram:123"). */
   activeChannelId?: string;
-  /** Provider/channel type for the active channel (e.g. "telegram"). */
+  /** Legacy provider/channel type for the active channel (e.g. "telegram"). */
   activeChannelType?: string;
   /** Silence threshold in ms currently in effect (backoff-expanded). Wired in WS-1.2. */
   effectiveSilenceThresholdMs?: number;
@@ -111,7 +115,7 @@ export class FileInteractionStore implements InteractionStore {
     if (this.closed) return;
     // Shallow-merge: only the supplied keys are updated; all other fields
     // already present in mergedState are preserved unchanged.
-    this.mergedState = { ...this.mergedState, ...partial };
+    this.mergedState = mergePersistedInteractionState(this.mergedState, partial);
     this.hasPending = true;
     if (this.timer === null) {
       this.timer = setTimeout(() => {
@@ -151,7 +155,7 @@ export class FileInteractionStore implements InteractionStore {
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
         return null;
       }
-      const state = parsed as PersistedInteractionState;
+      const state = normalizePersistedInteractionState(parsed as PersistedInteractionState);
       // Hydrate internal merged state so the restart boundary is transparent:
       // the first partial save() after boot merges onto the full disk snapshot
       // rather than onto an empty object.
@@ -183,4 +187,63 @@ export class FileInteractionStore implements InteractionStore {
       // Swallowed: persistence failure must never crash the consciousness loop.
     }
   }
+}
+
+function normalizePersistedInteractionState(
+  state: PersistedInteractionState,
+): PersistedInteractionState {
+  const activeDeliveryTarget =
+    normalizeDeliveryTarget(state.activeDeliveryTarget) ??
+    migrateLegacyActiveChannel(state.activeChannelId, state.activeChannelType);
+  const legacyChannelId =
+    activeDeliveryTarget?.kind === "none" ? undefined : activeDeliveryTarget?.id;
+  const legacyChannelType =
+    activeDeliveryTarget?.kind === "channel"
+      ? activeDeliveryTarget.channelType
+      : undefined;
+
+  return {
+    ...state,
+    activeDeliveryTarget,
+    activeChannelId: legacyChannelId,
+    activeChannelType: legacyChannelType,
+  };
+}
+
+function mergePersistedInteractionState(
+  previous: PersistedInteractionState,
+  partial: Partial<PersistedInteractionState>,
+): PersistedInteractionState {
+  const merged = {
+    ...previous,
+    ...partial,
+  };
+
+  let activeDeliveryTarget: DeliveryTarget | undefined;
+  if (Object.hasOwn(partial, "activeDeliveryTarget")) {
+    activeDeliveryTarget = normalizeDeliveryTarget(partial.activeDeliveryTarget);
+  } else if (
+    Object.hasOwn(partial, "activeChannelId") ||
+    Object.hasOwn(partial, "activeChannelType")
+  ) {
+    const nextLegacyChannelId = Object.hasOwn(partial, "activeChannelId")
+      ? partial.activeChannelId
+      : previous.activeChannelId;
+    const nextLegacyChannelType = Object.hasOwn(partial, "activeChannelType")
+      ? partial.activeChannelType
+      : previous.activeChannelType;
+    activeDeliveryTarget = migrateLegacyActiveChannel(
+      nextLegacyChannelId,
+      nextLegacyChannelType,
+    );
+  } else {
+    activeDeliveryTarget =
+      normalizeDeliveryTarget(merged.activeDeliveryTarget) ??
+      migrateLegacyActiveChannel(merged.activeChannelId, merged.activeChannelType);
+  }
+
+  return normalizePersistedInteractionState({
+    ...merged,
+    activeDeliveryTarget,
+  });
 }
