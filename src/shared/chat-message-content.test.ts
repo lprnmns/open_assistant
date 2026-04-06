@@ -18,6 +18,23 @@ describe("shared/chat-message-content", () => {
     ).toBe("");
   });
 
+  it("prefers top-level text when present", () => {
+    expect(
+      extractFirstTextBlock({
+        text: "visible text",
+        content: [{ text: "hidden text" }],
+      }),
+    ).toBe("visible text");
+  });
+
+  it("returns string content when history stores content inline", () => {
+    expect(
+      extractFirstTextBlock({
+        content: "hello from history",
+      }),
+    ).toBe("hello from history");
+  });
+
   it("only considers the first content block even if later blocks have text", () => {
     expect(
       extractFirstTextBlock({

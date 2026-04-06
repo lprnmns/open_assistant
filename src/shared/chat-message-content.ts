@@ -2,7 +2,14 @@ export function extractFirstTextBlock(message: unknown): string | undefined {
   if (!message || typeof message !== "object") {
     return undefined;
   }
-  const content = (message as { content?: unknown }).content;
+  const entry = message as { text?: unknown; content?: unknown };
+  if (typeof entry.text === "string") {
+    return entry.text;
+  }
+  if (typeof entry.content === "string") {
+    return entry.content;
+  }
+  const content = entry.content;
   if (!Array.isArray(content) || content.length === 0) {
     return undefined;
   }
