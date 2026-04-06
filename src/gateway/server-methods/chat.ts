@@ -512,7 +512,16 @@ function extractChatHistoryFileName(filePath: string): string {
   if (!trimmed) {
     return "attachment";
   }
-  return trimmed.split(/[\\/]/).at(-1) || "attachment";
+  const baseName = trimmed.split(/[\\/]/).at(-1) || "attachment";
+  const parsed = path.parse(baseName);
+  const markerIndex = parsed.name.lastIndexOf("---");
+  if (markerIndex > 0) {
+    const restoredBase = parsed.name.slice(0, markerIndex).trim();
+    if (restoredBase) {
+      return `${restoredBase}${parsed.ext}`;
+    }
+  }
+  return baseName;
 }
 
 function buildChatHistoryAttachmentKey(params: {

@@ -693,7 +693,7 @@ describe("gateway server chat", () => {
         };
         return (
           typed.type === "document" &&
-          typeof typed.fileName === "string" &&
+          typed.fileName === "exam.pdf" &&
           typed.mimeType === "application/pdf"
         );
       });
