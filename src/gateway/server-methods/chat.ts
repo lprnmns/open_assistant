@@ -373,11 +373,7 @@ async function rewriteChatSendUserTurnMediaPaths(params: {
   sessionKey: string;
   message: string;
   savedMedia: SavedMedia[];
-}) {
-  const mediaFields = resolveChatSendTranscriptMediaFields(params.savedMedia);
-  if (!("MediaPath" in mediaFields)) {
-    return;
-  }
+}): Promise<boolean> {
   const sessionManager = SessionManager.open(params.transcriptPath);
   const branch = sessionManager.getBranch();
   const target = [...branch].toReversed().find((entry) => {
@@ -399,7 +395,12 @@ async function rewriteChatSendUserTurnMediaPaths(params: {
     );
   });
   if (!target || target.type !== "message") {
-    return;
+    return false;
+  }
+
+  const mediaFields = resolveChatSendTranscriptMediaFields(params.savedMedia);
+  if (!("MediaPath" in mediaFields)) {
+    return true;
   }
   const rewrittenMessage = {
     ...target.message,
@@ -417,6 +418,7 @@ async function rewriteChatSendUserTurnMediaPaths(params: {
       ],
     },
   });
+  return true;
 }
 
 function truncateChatHistoryText(text: string): { text: string; truncated: boolean } {
@@ -836,6 +838,123 @@ function appendAssistantTranscriptMessage(params: {
     idempotencyKey: params.idempotencyKey,
     abortMeta: params.abortMeta,
   });
+}
+
+function buildInjectedAssistantTranscriptMessage(params: {
+  message: string;
+  label?: string;
+  idempotencyKey?: string;
+  now?: number;
+}): Parameters<SessionManager["appendMessage"]>[0] & Record<string, unknown> {
+  const now = params.now ?? Date.now();
+  const labelPrefix = params.label ? `[${params.label}]\n\n` : "";
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: `${labelPrefix}${params.message}` }],
+    timestamp: now,
+    stopReason: "stop",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        total: 0,
+      },
+    },
+    api: "openai-responses",
+    provider: "openclaw",
+    model: "gateway-injected",
+    ...(params.idempotencyKey ? { idempotencyKey: params.idempotencyKey } : {}),
+  };
+}
+
+function appendFallbackTranscriptTurn(params: {
+  sessionId: string;
+  storePath: string | undefined;
+  sessionFile?: string;
+  agentId?: string;
+  userMessage: string;
+  assistantMessage: string;
+  savedMedia: SavedMedia[];
+  userTimestamp: number;
+  createIfMissing?: boolean;
+  userIdempotencyKey?: string;
+  assistantIdempotencyKey?: string;
+}): TranscriptAppendResult {
+  const transcriptPath = resolveTranscriptPath({
+    sessionId: params.sessionId,
+    storePath: params.storePath,
+    sessionFile: params.sessionFile,
+    agentId: params.agentId,
+  });
+  if (!transcriptPath) {
+    return { ok: false, error: "transcript path not resolved" };
+  }
+
+  if (!fs.existsSync(transcriptPath)) {
+    if (!params.createIfMissing) {
+      return { ok: false, error: "transcript file not found" };
+    }
+    const ensured = ensureTranscriptFile({
+      transcriptPath,
+      sessionId: params.sessionId,
+    });
+    if (!ensured.ok) {
+      return { ok: false, error: ensured.error ?? "failed to create transcript file" };
+    }
+  }
+
+  if (
+    params.assistantIdempotencyKey &&
+    transcriptHasIdempotencyKey(transcriptPath, params.assistantIdempotencyKey)
+  ) {
+    return { ok: true };
+  }
+
+  try {
+    const sessionManager = SessionManager.open(transcriptPath);
+    const branch = sessionManager.getBranch();
+    const hasMatchingUserTurn = [...branch].toReversed().some((entry) => {
+      if (entry.type !== "message" || entry.message.role !== "user") {
+        return false;
+      }
+      return extractTranscriptUserText((entry.message as { content?: unknown }).content) === params.userMessage;
+    });
+    if (!hasMatchingUserTurn) {
+      const userMessageBody: Parameters<SessionManager["appendMessage"]>[0] & Record<string, unknown> = {
+        role: "user",
+        content: params.userMessage,
+        timestamp: params.userTimestamp,
+        ...resolveChatSendTranscriptMediaFields(params.savedMedia),
+        ...(params.userIdempotencyKey ? { idempotencyKey: params.userIdempotencyKey } : {}),
+      };
+      const userMessageId = sessionManager.appendMessage(userMessageBody);
+      emitSessionTranscriptUpdate({
+        sessionFile: transcriptPath,
+        message: userMessageBody,
+        messageId: userMessageId,
+      });
+    }
+    const assistantMessageBody = buildInjectedAssistantTranscriptMessage({
+      message: params.assistantMessage,
+      idempotencyKey: params.assistantIdempotencyKey,
+    });
+    const messageId = sessionManager.appendMessage(assistantMessageBody);
+    emitSessionTranscriptUpdate({
+      sessionFile: transcriptPath,
+      message: assistantMessageBody,
+      messageId,
+    });
+    return { ok: true, messageId, message: assistantMessageBody };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
 
 function collectSessionAbortPartials(params: {
@@ -1517,16 +1636,13 @@ export const chatHandlers: GatewayRequestHandlers = {
           }),
         });
       };
-      let transcriptMediaRewriteDone = false;
-      const rewriteUserTranscriptMedia = async () => {
-        if (transcriptMediaRewriteDone) {
-          return;
+      let userTranscriptReconciled = false;
+      const reconcileExistingUserTranscript = async (): Promise<boolean> => {
+        if (userTranscriptReconciled) {
+          return true;
         }
         const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntry(sessionKey);
-        const resolvedSessionId = latestEntry?.sessionId ?? entry?.sessionId;
-        if (!resolvedSessionId) {
-          return;
-        }
+        const resolvedSessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
         const transcriptPath = resolveTranscriptPath({
           sessionId: resolvedSessionId,
           storePath: latestStorePath,
@@ -1534,10 +1650,10 @@ export const chatHandlers: GatewayRequestHandlers = {
           agentId,
         });
         if (!transcriptPath) {
-          return;
+          return false;
         }
-        transcriptMediaRewriteDone = true;
-        await rewriteChatSendUserTurnMediaPaths({
+        userTranscriptReconciled = true;
+        return rewriteChatSendUserTurnMediaPaths({
           transcriptPath,
           sessionKey,
           message: parsedMessage,
@@ -1590,9 +1706,8 @@ export const chatHandlers: GatewayRequestHandlers = {
         },
       })
         .then(async () => {
-          await rewriteUserTranscriptMedia();
+          const existingUserTurnFound = await reconcileExistingUserTranscript();
           if (!agentRunStarted) {
-            await emitUserTranscriptUpdate();
             const btwReplies = deliveredReplies
               .map((entry) => entry.payload)
               .filter(isBtwReplyPayload);
@@ -1632,14 +1747,28 @@ export const chatHandlers: GatewayRequestHandlers = {
                 const { storePath: latestStorePath, entry: latestEntry } =
                   loadSessionEntry(sessionKey);
                 const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
-                const appended = appendAssistantTranscriptMessage({
-                  message: combinedReply,
-                  sessionId,
-                  storePath: latestStorePath,
-                  sessionFile: latestEntry?.sessionFile,
-                  agentId,
-                  createIfMissing: true,
-                });
+                const appended = existingUserTurnFound
+                  ? appendAssistantTranscriptMessage({
+                      message: combinedReply,
+                      sessionId,
+                      storePath: latestStorePath,
+                      sessionFile: latestEntry?.sessionFile,
+                      agentId,
+                      createIfMissing: true,
+                    })
+                  : appendFallbackTranscriptTurn({
+                      sessionId,
+                      storePath: latestStorePath,
+                      sessionFile: latestEntry?.sessionFile,
+                      agentId,
+                      userMessage: parsedMessage,
+                      assistantMessage: combinedReply,
+                      savedMedia: persistedMedia,
+                      userTimestamp: now,
+                      createIfMissing: true,
+                      userIdempotencyKey: `${clientRunId}:user`,
+                      assistantIdempotencyKey: `${clientRunId}:assistant`,
+                    });
                 if (appended.ok) {
                   message = appended.message;
                 } else {

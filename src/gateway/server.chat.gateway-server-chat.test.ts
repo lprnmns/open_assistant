@@ -621,6 +621,70 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.history preserves persisted PDF attachment metadata for user turns", async () => {
+    await withMainSessionStore(async () => {
+      const pdfB64 = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n").toString("base64");
+      mockGetReplyFromConfigOnce(async () => ({ text: "pdf received" }));
+
+      const finalPromise = onceMessage(
+        ws,
+        (o) =>
+          o.type === "event" &&
+          o.event === "chat" &&
+          o.payload?.state === "final" &&
+          o.payload?.runId === "idem-pdf-history-1",
+        8000,
+      );
+
+      const sendRes = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "review this pdf",
+        idempotencyKey: "idem-pdf-history-1",
+        attachments: [
+          {
+            type: "document",
+            mimeType: "application/pdf",
+            fileName: "exam.pdf",
+            content: pdfB64,
+          },
+        ],
+      });
+      expect(sendRes.ok).toBe(true);
+      await finalPromise;
+
+      const historyRes = await rpcReq<{ messages?: Array<Record<string, unknown>> }>(ws, "chat.history", {
+        sessionKey: "main",
+      });
+      expect(historyRes.ok).toBe(true);
+
+      const historyMessages = historyRes.payload?.messages ?? [];
+      const userMessage = historyMessages.find((message) => {
+        if (!message || typeof message !== "object") {
+          return false;
+        }
+        const entry = message as { role?: unknown; content?: unknown };
+        const contentText =
+          typeof entry.content === "string" ? entry.content : extractFirstTextBlock(message);
+        return (
+          entry.role === "user" &&
+          contentText === "review this pdf"
+        );
+      });
+
+      expect(userMessage).toBeTruthy();
+      const entry = userMessage as Record<string, unknown>;
+      expect(entry.MediaType).toBe("application/pdf");
+      expect(typeof entry.MediaPath).toBe("string");
+      const mediaPath = entry.MediaPath;
+      expect(typeof mediaPath).toBe("string");
+      if (typeof mediaPath !== "string") {
+        return;
+      }
+      const persisted = await fs.readFile(mediaPath);
+      expect(persisted.subarray(0, 8).toString("utf-8")).toContain("%PDF-1.4");
+    });
+  });
+
   test("routes /btw replies through side-result events without transcript injection", async () => {
     await withMainSessionStore(async () => {
       mockGetReplyFromConfigOnce(async () => ({
