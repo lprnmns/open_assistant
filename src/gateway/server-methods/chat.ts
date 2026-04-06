@@ -10,6 +10,7 @@ import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.j
 import type { MsgContext } from "../../auto-reply/templating.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import type { ReplyPayload } from "../../auto-reply/types.js";
+import type { DeliveryTarget } from "../../consciousness/delivery-target.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
 import { type SavedMedia, saveMediaBuffer } from "../../media/store.js";
@@ -899,6 +900,27 @@ function normalizeOptionalText(value?: string | null): string | undefined {
   return trimmed || undefined;
 }
 
+function resolveChatSendActiveDeliveryTarget(
+  client: GatewayRequestHandlerOptions["client"],
+): DeliveryTarget | undefined {
+  if (client?.connect?.role !== "node") {
+    return undefined;
+  }
+  const nodeId =
+    normalizeOptionalText(client.connect.device?.id) ??
+    normalizeOptionalText(client.connect.client?.id) ??
+    normalizeOptionalText(client.connId);
+  if (!nodeId) {
+    return undefined;
+  }
+  return {
+    kind: "node",
+    id: nodeId,
+    nodeId,
+    label: normalizeOptionalText(client.connect.client?.displayName),
+  };
+}
+
 function resolveChatAbortRequester(
   client: GatewayRequestHandlerOptions["client"],
 ): ChatAbortRequester {
@@ -1426,6 +1448,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         OriginatingChannel: originatingChannel,
         OriginatingTo: originatingTo,
         ExplicitDeliverRoute: explicitDeliverRoute,
+        ActiveDeliveryTarget: resolveChatSendActiveDeliveryTarget(client),
         AccountId: accountId,
         MessageThreadId: messageThreadId,
         ChatType: "direct",

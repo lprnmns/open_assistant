@@ -132,6 +132,33 @@ describe("dispatchReplyFromConfig interaction tracking", () => {
     expect(getActiveChannelType()).toBe("whatsapp");
   });
 
+  it("prefers an explicit active delivery target over routable channel metadata", async () => {
+    await dispatchReplyFromConfig({
+      ctx: buildTestCtx({
+        ActiveDeliveryTarget: {
+          kind: "node",
+          id: "android-node-1",
+          nodeId: "android-node-1",
+          label: "Pixel 9",
+        },
+        OriginatingChannel: "telegram",
+        OriginatingTo: "telegram:123456789",
+      }),
+      cfg: {} as OpenClawConfig,
+      dispatcher: createDispatcher(),
+      replyResolver: async () => ({ text: "ok" }),
+    });
+
+    expect(getActiveDeliveryTarget()).toEqual({
+      kind: "node",
+      id: "android-node-1",
+      nodeId: "android-node-1",
+      label: "Pixel 9",
+    });
+    expect(getActiveChannelId()).toBe("android-node-1");
+    expect(getActiveChannelType()).toBeUndefined();
+  });
+
   it("ingests the normalized inbound user turn into the consciousness brain", async () => {
     const brain = makeFakeBrain();
     setConsciousnessRuntime({ brain });

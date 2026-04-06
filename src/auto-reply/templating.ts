@@ -1,5 +1,6 @@
 import type { StickerMetadata } from "../../extensions/telegram/api.js";
 import type { ChannelId } from "../channels/plugins/types.js";
+import type { DeliveryTarget } from "../consciousness/delivery-target.js";
 import type {
   MediaUnderstandingDecision,
   MediaUnderstandingOutput,
@@ -169,6 +170,12 @@ export type MsgContext = {
    * OriginatingChannel/OriginatingTo, rather than inheriting stale session route metadata.
    */
   ExplicitDeliverRoute?: boolean;
+  /**
+   * Canonical proactive delivery target for the current inbound turn.
+   * Used when the transport surface is not representable as a routable channel
+   * (for example paired Android/iOS nodes).
+   */
+  ActiveDeliveryTarget?: DeliveryTarget;
   /**
    * Provider-specific parent conversation id for threaded contexts.
    * For Discord threads, this is the parent channel id.

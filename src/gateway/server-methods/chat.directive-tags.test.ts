@@ -396,6 +396,35 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     expect(register).not.toHaveBeenCalled();
   });
 
+  it("chat.send marks node clients with an explicit active delivery target", async () => {
+    createTranscriptFixture("openclaw-chat-send-node-target-");
+    mockState.finalText = "ok";
+    const respond = vi.fn();
+    const context = createChatContext();
+
+    await runNonStreamingChatSend({
+      context,
+      respond,
+      idempotencyKey: "idem-node-target",
+      client: {
+        connId: "conn-node-1",
+        connect: {
+          role: "node",
+          device: { id: "android-node-1" },
+          client: { id: "android-client", displayName: "Pixel 9" },
+        },
+      },
+      expectBroadcast: false,
+    });
+
+    expect(mockState.lastDispatchCtx?.ActiveDeliveryTarget).toEqual({
+      kind: "node",
+      id: "android-node-1",
+      nodeId: "android-node-1",
+      label: "Pixel 9",
+    });
+  });
+
   it("chat.inject keeps message defined when directive tag is the only content", async () => {
     createTranscriptFixture("openclaw-chat-inject-directive-only-");
     const respond = vi.fn();

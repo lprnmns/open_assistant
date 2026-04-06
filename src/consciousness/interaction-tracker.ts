@@ -4,6 +4,7 @@ import {
   getDeliveryTargetChannelType,
   makeChannelDeliveryTarget,
   migrateLegacyActiveChannel,
+  normalizeDeliveryTarget,
   type DeliveryTarget,
 } from "./delivery-target.js";
 import type { InteractionStore, PersistedInteractionState } from "./interaction-store.js";
@@ -25,6 +26,7 @@ import type { InteractionStore, PersistedInteractionState } from "./interaction-
  */
 
 export type InteractionRouteLike = {
+  ActiveDeliveryTarget?: DeliveryTarget;
   OriginatingTo?: string;
   NativeChannelId?: string;
   To?: string;
@@ -63,6 +65,10 @@ export function resolveDeliveryTargetFromInteraction(
   route: InteractionRouteLike,
   channelType?: OriginatingChannelType,
 ): DeliveryTarget | undefined {
+  const explicitTarget = normalizeDeliveryTarget(route.ActiveDeliveryTarget);
+  if (explicitTarget) {
+    return explicitTarget;
+  }
   const channelId = resolveActiveChannelIdFromInteraction(route);
   return channelId ? makeChannelDeliveryTarget(channelId, channelType) : undefined;
 }
