@@ -58,15 +58,7 @@ private data class ChatBubbleStyle(
 fun ChatMessageBubble(message: ChatMessage) {
   val role = message.role.trim().lowercase(Locale.US)
   val style = bubbleStyle(role)
-
-  // Filter to only displayable content parts (text with content, or base64 images).
-  val displayableContent =
-    message.content.filter { part ->
-      when (part.type) {
-        "text" -> !part.text.isNullOrBlank()
-        else -> part.base64 != null
-      }
-    }
+  val displayableContent = message.content.filter(::isRenderableChatContent)
 
   if (displayableContent.isEmpty()) return
 
@@ -118,12 +110,25 @@ private fun ChatMessageBody(content: List<ChatMessageContent>, textColor: Color)
           val text = part.text ?: continue
           ChatMarkdown(text = text, textColor = textColor)
         }
-        else -> {
+
+        "image" -> {
           val b64 = part.base64 ?: continue
           ChatBase64Image(base64 = b64, mimeType = part.mimeType)
         }
+
+        else -> {
+          ChatAttachmentSummary(part = part)
+        }
       }
     }
+  }
+}
+
+internal fun isRenderableChatContent(part: ChatMessageContent): Boolean {
+  return when (part.type) {
+    "text" -> !part.text.isNullOrBlank()
+    "image" -> part.base64 != null
+    else -> !part.fileName.isNullOrBlank() || !part.mimeType.isNullOrBlank() || part.base64 != null
   }
 }
 
@@ -190,7 +195,7 @@ fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>) {
 fun ChatStreamingAssistantBubble(text: String) {
   ChatBubbleContainer(
     style = bubbleStyle("assistant").copy(borderColor = mobileAccent),
-    roleLabel = "OpenClaw · Live",
+    roleLabel = "OpenClaw Live",
   ) {
     ChatMarkdown(text = text, textColor = mobileText)
   }
@@ -246,7 +251,7 @@ private fun ChatBase64Image(base64: String, mimeType: String?) {
       modifier = Modifier.fillMaxWidth(),
     ) {
       Image(
-        bitmap = image!!,
+        bitmap = image,
         contentDescription = mimeType ?: "attachment",
         contentScale = ContentScale.Fit,
         modifier = Modifier.fillMaxWidth(),
@@ -254,6 +259,46 @@ private fun ChatBase64Image(base64: String, mimeType: String?) {
     }
   } else if (imageState.failed) {
     Text("Unsupported attachment", style = mobileCaption1, color = mobileTextSecondary)
+  }
+}
+
+@Composable
+private fun ChatAttachmentSummary(part: ChatMessageContent) {
+  val fileName = part.fileName?.trim().takeUnless { it.isNullOrEmpty() } ?: "Attachment"
+  val mimeType = part.mimeType?.trim().takeUnless { it.isNullOrEmpty() } ?: part.type
+  val typeLabel =
+    when (part.type.trim().lowercase(Locale.US)) {
+      "document" -> "PDF"
+      "file" -> "FILE"
+      else -> part.type.trim().uppercase(Locale.US).ifBlank { "FILE" }
+    }
+
+  Surface(
+    shape = RoundedCornerShape(10.dp),
+    border = BorderStroke(1.dp, mobileBorder),
+    color = mobileCardSurface,
+    modifier = Modifier.fillMaxWidth(),
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+      Text(
+        text = typeLabel,
+        style = mobileCaption2.copy(letterSpacing = 0.4.sp, fontWeight = FontWeight.Bold),
+        color = mobileTextSecondary,
+      )
+      Text(
+        text = fileName,
+        style = mobileCallout.copy(fontWeight = FontWeight.SemiBold),
+        color = mobileText,
+      )
+      Text(
+        text = mimeType,
+        style = mobileCaption1,
+        color = mobileTextSecondary,
+      )
+    }
   }
 }
 
