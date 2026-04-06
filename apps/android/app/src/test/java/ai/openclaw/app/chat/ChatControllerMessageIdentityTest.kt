@@ -105,6 +105,26 @@ class ChatControllerMessageIdentityTest {
   }
 
   @Test
+  fun resolveHistoryInlineContentsSupportsStringContent() {
+    val json = Json.parseToJsonElement("""{"content":"hello from transcript"}""").jsonObject
+
+    assertEquals(
+      listOf(ChatMessageContent(type = "text", text = "hello from transcript")),
+      resolveHistoryInlineContents(json),
+    )
+  }
+
+  @Test
+  fun resolveHistoryInlineContentsFallsBackToTextField() {
+    val json = Json.parseToJsonElement("""{"text":"assistant reply"}""").jsonObject
+
+    assertEquals(
+      listOf(ChatMessageContent(type = "text", text = "assistant reply")),
+      resolveHistoryInlineContents(json),
+    )
+  }
+
+  @Test
   fun imageHistoryAttachmentsRemainRenderableWithoutBase64() {
     val imageContent =
       ChatMessageContent(

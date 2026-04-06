@@ -468,11 +468,7 @@ class ChatController(
       array.mapNotNull { item ->
         val obj = item.asObjectOrNull() ?: return@mapNotNull null
         val role = obj["role"].asStringOrNull() ?: return@mapNotNull null
-        val content =
-          buildList {
-            addAll(obj["content"].asArrayOrNull()?.mapNotNull(::parseMessageContent) ?: emptyList())
-            addAll(parseHistoryAttachmentContents(obj, existing = this))
-          }
+        val content = parseHistoryMessageContents(obj)
         val ts = obj["timestamp"].asLongOrNull()
         ChatMessage(
           id = UUID.randomUUID().toString(),
@@ -488,6 +484,13 @@ class ChatController(
       thinkingLevel = thinkingLevel,
       messages = reconcileMessageIds(previous = previousMessages, incoming = messages),
     )
+  }
+
+  private fun parseHistoryMessageContents(obj: JsonObject): List<ChatMessageContent> {
+    return buildList {
+      addAll(resolveHistoryInlineContents(obj))
+      addAll(parseHistoryAttachmentContents(obj, existing = this))
+    }
   }
 
   private fun parseMessageContent(el: JsonElement): ChatMessageContent? {
@@ -598,6 +601,35 @@ internal fun extractHistoryFileName(path: String): String {
   val trimmed = path.trim()
   if (trimmed.isEmpty()) return "attachment"
   return trimmed.substringAfterLast('/').substringAfterLast('\\').ifEmpty { "attachment" }
+}
+
+internal fun resolveHistoryInlineContents(obj: JsonObject): List<ChatMessageContent> {
+  val contentArray = obj["content"].asArrayOrNull()
+  if (contentArray != null) {
+    return contentArray.mapNotNull { element ->
+      val item = element.asObjectOrNull() ?: return@mapNotNull null
+      val type = item["type"].asStringOrNull() ?: "text"
+      if (type == "text") {
+        ChatMessageContent(type = "text", text = item["text"].asStringOrNull())
+      } else {
+        ChatMessageContent(
+          type = type,
+          mimeType = item["mimeType"].asStringOrNull(),
+          fileName = item["fileName"].asStringOrNull(),
+          base64 = item["content"].asStringOrNull(),
+        )
+      }
+    }
+  }
+  val contentText = obj["content"].asStringOrNull()?.trim()?.takeIf(String::isNotEmpty)
+  if (contentText != null) {
+    return listOf(ChatMessageContent(type = "text", text = contentText))
+  }
+  val textField = obj["text"].asStringOrNull()?.trim()?.takeIf(String::isNotEmpty)
+  if (textField != null) {
+    return listOf(ChatMessageContent(type = "text", text = textField))
+  }
+  return emptyList()
 }
 
 private fun historyAttachmentKey(fileName: String?, mimeType: String?, type: String): String {
