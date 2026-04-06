@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import type { ProductionBrain } from "./brain/brain-factory.js";
 import { maybeStartConsciousnessLoop } from "./boot-lifecycle.js";
+import { makeChannelDeliveryTarget, type DeliveryTarget } from "./delivery-target.js";
 import { _resetInteractionTrackerForTest } from "./interaction-tracker.js";
 import { dispatchDecision } from "./integration.js";
 import { setConsciousnessRuntime } from "./runtime.js";
@@ -39,6 +40,7 @@ function writeState(
   partial: {
     lastProactiveSentAt?: number;
     lastUserInteractionAt?: number;
+    activeDeliveryTarget?: DeliveryTarget;
     activeChannelId?: string;
     activeChannelType?: string;
   },
@@ -59,6 +61,7 @@ function makeSnap(overrides: Partial<WorldSnapshot> = {}): WorldSnapshot {
     firedTriggerIds: [],
     dueCronExpressions: [],
     externalWorldEvents: [],
+    activeDeliveryTarget: makeChannelDeliveryTarget("web-chat", "webchat"),
     activeChannelId: "web-chat",
     activeChannelType: "webchat",
     lastTickAt: undefined,
@@ -118,8 +121,7 @@ describe("maybeStartConsciousnessLoop - proactive cooldown persistence", () => {
     writeState(statePath, {
       lastProactiveSentAt: NOW,
       lastUserInteractionAt: NOW - 120_000,
-      activeChannelId: "telegram:owner",
-      activeChannelType: "telegram",
+      activeDeliveryTarget: makeChannelDeliveryTarget("telegram:owner", "telegram"),
     });
 
     const lifecycle = await maybeStartConsciousnessLoop(makeEnv(statePath), makeDeps());
@@ -165,7 +167,7 @@ describe("maybeStartConsciousnessLoop - proactive cooldown persistence", () => {
     writeState(statePath, { lastProactiveSentAt: NOW });
 
     const lifecycle = await maybeStartConsciousnessLoop(makeEnv(statePath), makeDeps());
-    const sendToChannel = vi.fn().mockResolvedValue(undefined);
+    const sendToTarget = vi.fn().mockResolvedValue(undefined);
     const decision: TickDecision = {
       action: "SEND_MESSAGE",
       messageContent: "Still too soon",
@@ -175,7 +177,7 @@ describe("maybeStartConsciousnessLoop - proactive cooldown persistence", () => {
       decision,
       makeSnap(),
       {
-        sendToChannel,
+        sendToTarget,
         appendNote: vi.fn().mockResolvedValue(undefined),
         proactiveState: { lastSentAt: lifecycle?.getLastProactiveSentAt() },
       },
@@ -186,7 +188,7 @@ describe("maybeStartConsciousnessLoop - proactive cooldown persistence", () => {
     );
 
     expect(result.dispatched).toBe(false);
-    expect(sendToChannel).not.toHaveBeenCalled();
+    expect(sendToTarget).not.toHaveBeenCalled();
 
     await lifecycle?.stop();
   });
@@ -199,7 +201,7 @@ describe("maybeStartConsciousnessLoop - proactive cooldown persistence", () => {
     writeState(statePath, { lastProactiveSentAt: NOW });
 
     const lifecycle = await maybeStartConsciousnessLoop(makeEnv(statePath), makeDeps());
-    const sendToChannel = vi.fn().mockResolvedValue(undefined);
+    const sendToTarget = vi.fn().mockResolvedValue(undefined);
     const decision: TickDecision = {
       action: "SEND_MESSAGE",
       messageContent: "Cooldown elapsed",
@@ -208,11 +210,12 @@ describe("maybeStartConsciousnessLoop - proactive cooldown persistence", () => {
     const result = await dispatchDecision(
       decision,
       makeSnap({
+        activeDeliveryTarget: makeChannelDeliveryTarget("telegram:owner", "telegram"),
         activeChannelId: "telegram:owner",
         activeChannelType: "telegram",
       }),
       {
-        sendToChannel,
+        sendToTarget,
         appendNote: vi.fn().mockResolvedValue(undefined),
         proactiveState: { lastSentAt: lifecycle?.getLastProactiveSentAt() },
       },
@@ -223,7 +226,7 @@ describe("maybeStartConsciousnessLoop - proactive cooldown persistence", () => {
     );
 
     expect(result.dispatched).toBe(true);
-    expect(sendToChannel).toHaveBeenCalledOnce();
+    expect(sendToTarget).toHaveBeenCalledOnce();
 
     await lifecycle?.stop();
   });

@@ -26,12 +26,16 @@ import {
   type ProductionBrain,
 } from "./brain/brain-factory.js";
 import {
-  getActiveChannelId,
-  getActiveChannelType,
+  getActiveDeliveryTarget,
   getLastUserInteractionAt,
 } from "./interaction-tracker.js";
 import type { FileInteractionStore } from "./interaction-store.js";
 import { maybeStartInteractionPersistence } from "./interaction-persistence.js";
+import type { DeliveryTarget } from "./delivery-target.js";
+import {
+  getDeliveryTargetChannelId,
+  getDeliveryTargetChannelType,
+} from "./delivery-target.js";
 import type { TickResult } from "./loop.js";
 import { PendingReflectionQueue } from "./reflection-queue.js";
 import { setConsciousnessRuntime } from "./runtime.js";
@@ -59,6 +63,7 @@ export type ConsciousnessLifecycle = {
 export type BootLifecycleDeps = {
   loadConfig?: () => OpenClawConfig;
   createProductionBrain?: typeof createProductionBrain;
+  sendToTarget?: (target: DeliveryTarget, content: string) => Promise<void>;
 };
 
 export async function maybeStartConsciousnessLoop(
@@ -169,6 +174,81 @@ export async function maybeStartConsciousnessLoop(
       agentId: resolveSessionAgentId({ config: cfg, sessionKey }),
     });
     const activeBrain = brain;
+    const getCurrentDeliveryTarget = (): DeliveryTarget | undefined =>
+      getActiveDeliveryTarget();
+    const sendToTarget =
+      deps.sendToTarget ??
+      (async (target: DeliveryTarget, content: string) => {
+        const targetId = target.kind === "none" ? undefined : target.id;
+        const channelType = getDeliveryTargetChannelType(target);
+        consciousnessDispatchLog.info("dispatch attempt", {
+          targetKind: target.kind,
+          targetId,
+          channelType: channelType ?? "(unknown)",
+        });
+        const { isRoutableChannel, routeReply } = await import(
+          "../auto-reply/reply/route-reply.js"
+        );
+
+        if (target.kind !== "channel") {
+          const error = new Error(
+            `Default consciousness boot transport cannot route target kind "${target.kind}"`,
+          );
+          consciousnessDispatchLog.error("dispatch send_error", {
+            targetKind: target.kind,
+            targetId,
+            error: error.message,
+          });
+          throw error;
+        }
+
+        if (!channelType || !isRoutableChannel(channelType)) {
+          const error = new Error(
+            `Active channel is not routable for consciousness dispatch: ${String(channelType ?? "(unknown)")}`,
+          );
+          consciousnessDispatchLog.error("dispatch send_error", {
+            targetKind: target.kind,
+            targetId,
+            channelType: channelType ?? "(unknown)",
+            error: error.message,
+          });
+          throw error;
+        }
+
+        try {
+          const result = await routeReply({
+            payload: { text: content },
+            channel: channelType,
+            to: target.id,
+            cfg: loadConfigFn(),
+            mirror: false,
+          });
+          if (!result.ok) {
+            throw new Error(
+              result.error ??
+                `Failed to route proactive message to ${channelType}`,
+            );
+          }
+          await ingestConversationTurn({
+            direction: "assistant/proactive",
+            sessionKey: activeBrain.sessionKey,
+            text: content,
+          });
+          consciousnessDispatchLog.info("dispatch sent", {
+            targetKind: target.kind,
+            targetId,
+            channelType,
+          });
+        } catch (error) {
+          consciousnessDispatchLog.error("dispatch send_error", {
+            targetKind: target.kind,
+            targetId,
+            channelType: channelType ?? "(unknown)",
+            error: describeErrorMessage(error),
+          });
+          throw error;
+        }
+      });
 
     scheduler = startConsciousnessLoop({
       config: { baseSilenceThresholdMs },
@@ -177,70 +257,17 @@ export async function maybeStartConsciousnessLoop(
           getLastUserInteractionAt: () => getLastUserInteractionAt(),
           getPendingNoteCount: () => reflectionQueue.count(),
           getFiredTriggerIds: () => [],
-          getActiveChannelId: () => getActiveChannelId(),
-          getActiveChannelType: () => getActiveChannelType(),
+          getActiveDeliveryTarget: () => getCurrentDeliveryTarget(),
+          getActiveChannelId: () =>
+            getDeliveryTargetChannelId(getCurrentDeliveryTarget()),
+          getActiveChannelType: () =>
+            getDeliveryTargetChannelType(getCurrentDeliveryTarget()),
           getLastTickAt: () => lastTickAtRef.value,
           getEffectiveSilenceThresholdMs: () => effectiveThresholdRef.value,
         }),
       onTick: onTickCallback,
       dispatch: {
-        sendToChannel: async (
-          channelId: string,
-          content: string,
-          channelType?: string,
-        ) => {
-          consciousnessDispatchLog.info("dispatch attempt", {
-            channelId,
-            channelType: channelType ?? "(unknown)",
-          });
-          const { isRoutableChannel, routeReply } = await import(
-            "../auto-reply/reply/route-reply.js"
-          );
-
-          if (!channelType || !isRoutableChannel(channelType)) {
-            const error = new Error(
-              `Active channel is not routable for consciousness dispatch: ${String(channelType ?? "(unknown)")}`,
-            );
-            consciousnessDispatchLog.error("dispatch send_error", {
-              channelId,
-              channelType: channelType ?? "(unknown)",
-              error: error.message,
-            });
-            throw error;
-          }
-
-          try {
-            const result = await routeReply({
-              payload: { text: content },
-              channel: channelType,
-              to: channelId,
-              cfg: loadConfigFn(),
-              mirror: false,
-            });
-            if (!result.ok) {
-              throw new Error(
-                result.error ??
-                  `Failed to route proactive message to ${channelType}`,
-              );
-            }
-            await ingestConversationTurn({
-              direction: "assistant/proactive",
-              sessionKey: activeBrain.sessionKey,
-              text: content,
-            });
-            consciousnessDispatchLog.info("dispatch sent", {
-              channelId,
-              channelType,
-            });
-          } catch (error) {
-            consciousnessDispatchLog.error("dispatch send_error", {
-              channelId,
-              channelType,
-              error: describeErrorMessage(error),
-            });
-            throw error;
-          }
-        },
+        sendToTarget,
         proactiveState,
         onProactiveSent: onProactiveSentCallback,
         auditLog,
