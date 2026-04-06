@@ -11,9 +11,9 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 
-class ReminderHandler private constructor(
+class ReminderHandler internal constructor(
   private val scheduler: ReminderScheduler,
-  private val clock: () -> Long,
+  private val clock: () -> Long = System::currentTimeMillis,
 ) {
   constructor(appContext: Context) : this(
     scheduler = DeviceAlarmScheduler(appContext = appContext),

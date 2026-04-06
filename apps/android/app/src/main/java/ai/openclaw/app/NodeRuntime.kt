@@ -18,8 +18,10 @@ import ai.openclaw.app.gateway.GatewayEndpoint
 import ai.openclaw.app.gateway.GatewaySession
 import ai.openclaw.app.gateway.probeGatewayTlsFingerprint
 import ai.openclaw.app.node.*
+import ai.openclaw.app.reminder.DeviceAlarmScheduler
 import ai.openclaw.app.protocol.OpenClawCanvasA2UIAction
 import ai.openclaw.app.reminder.ReminderHandler
+import ai.openclaw.app.reminder.ReminderReconciler
 import ai.openclaw.app.voice.MicCaptureManager
 import ai.openclaw.app.voice.TalkModeManager
 import ai.openclaw.app.voice.VoiceConversationEntry
@@ -98,8 +100,10 @@ class NodeRuntime(
     appContext = appContext,
   )
 
+  private val reminderScheduler = DeviceAlarmScheduler(appContext = appContext)
+
   private val reminderHandler: ReminderHandler = ReminderHandler(
-    appContext = appContext,
+    scheduler = reminderScheduler,
   )
 
   private val systemHandler: SystemHandler = SystemHandler(
@@ -237,6 +241,7 @@ class NodeRuntime(
   private var operatorConnected = false
   private var operatorStatusText: String = "Offline"
   private var nodeStatusText: String = "Offline"
+  private var reminderReconcileJob: Job? = null
 
   private val operatorSession =
     GatewaySession(
@@ -257,6 +262,7 @@ class NodeRuntime(
           if (voiceReplySpeakerLazy.isInitialized()) {
             voiceReplySpeaker.refreshConfig()
           }
+          requestReminderReconciliation()
         }
       },
       onDisconnected = { message ->
@@ -292,6 +298,7 @@ class NodeRuntime(
         _canvasRehydrateErrorText.value = null
         updateStatus()
         showLocalCanvasOnConnect()
+        requestReminderReconciliation()
       },
       onDisconnected = { message ->
         _nodeConnected.value = false
@@ -326,6 +333,14 @@ class NodeRuntime(
       session = operatorSession,
       json = json,
       supportsChatSubscribe = false,
+    )
+
+  private val reminderReconciler =
+    ReminderReconciler(
+      scheduler = reminderScheduler,
+      requestCronList = { paramsJson ->
+        operatorSession.request("cron.list", paramsJson)
+      },
     )
   private val voiceReplySpeakerLazy: Lazy<TalkModeManager> = lazy {
     // Reuse the existing TalkMode speech engine (ElevenLabs + deterministic system-TTS fallback)
@@ -600,6 +615,23 @@ class NodeRuntime(
     }
 
     updateHomeCanvasState()
+  }
+
+  private fun requestReminderReconciliation() {
+    if (!operatorConnected || !_nodeConnected.value) {
+      return
+    }
+    if (reminderReconcileJob?.isActive == true) {
+      return
+    }
+    reminderReconcileJob =
+      scope.launch {
+        try {
+          reminderReconciler.reconcile()
+        } catch (err: Throwable) {
+          Log.w("OpenClawReminder", "reminder reconciliation failed: ${err.message ?: err::class.java.simpleName}")
+        }
+      }
   }
 
   fun setForeground(value: Boolean) {
