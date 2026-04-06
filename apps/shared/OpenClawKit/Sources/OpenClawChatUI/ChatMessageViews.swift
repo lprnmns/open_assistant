@@ -246,11 +246,11 @@ private struct ChatMessageBody: View {
 
     private var inlineAttachments: [OpenClawChatMessageContent] {
         self.message.content.filter { content in
-            switch content.type ?? "text" {
-            case "file", "attachment":
+            switch (content.type ?? "text").lowercased() {
+            case "attachment", "document", "file", "image":
                 true
             default:
-                false
+                content.fileName != nil || content.mimeType != nil
             }
         }
     }
