@@ -112,8 +112,12 @@ private fun ChatMessageBody(content: List<ChatMessageContent>, textColor: Color)
         }
 
         "image" -> {
-          val b64 = part.base64 ?: continue
-          ChatBase64Image(base64 = b64, mimeType = part.mimeType)
+          val b64 = part.base64
+          if (b64 != null) {
+            ChatBase64Image(base64 = b64, mimeType = part.mimeType)
+          } else {
+            ChatAttachmentSummary(part = part)
+          }
         }
 
         else -> {
@@ -127,7 +131,7 @@ private fun ChatMessageBody(content: List<ChatMessageContent>, textColor: Color)
 internal fun isRenderableChatContent(part: ChatMessageContent): Boolean {
   return when (part.type) {
     "text" -> !part.text.isNullOrBlank()
-    "image" -> part.base64 != null
+    "image" -> part.base64 != null || !part.fileName.isNullOrBlank() || !part.mimeType.isNullOrBlank()
     else -> !part.fileName.isNullOrBlank() || !part.mimeType.isNullOrBlank() || part.base64 != null
   }
 }

@@ -468,7 +468,11 @@ class ChatController(
       array.mapNotNull { item ->
         val obj = item.asObjectOrNull() ?: return@mapNotNull null
         val role = obj["role"].asStringOrNull() ?: return@mapNotNull null
-        val content = obj["content"].asArrayOrNull()?.mapNotNull(::parseMessageContent) ?: emptyList()
+        val content =
+          buildList {
+            addAll(obj["content"].asArrayOrNull()?.mapNotNull(::parseMessageContent) ?: emptyList())
+            addAll(parseHistoryAttachmentContents(obj, existing = this))
+          }
         val ts = obj["timestamp"].asLongOrNull()
         ChatMessage(
           id = UUID.randomUUID().toString(),
@@ -497,6 +501,43 @@ class ChatController(
         mimeType = obj["mimeType"].asStringOrNull(),
         fileName = obj["fileName"].asStringOrNull(),
         base64 = obj["content"].asStringOrNull(),
+      )
+    }
+  }
+
+  private fun parseHistoryAttachmentContents(
+    obj: JsonObject,
+    existing: List<ChatMessageContent>,
+  ): List<ChatMessageContent> {
+    val mediaPaths = resolveHistoryFieldArray(obj, "MediaPaths", "MediaPath")
+    if (mediaPaths.isEmpty()) return emptyList()
+    val mediaTypes = resolveHistoryFieldArray(obj, "MediaTypes", "MediaType")
+    val existingKeys =
+      existing.mapTo(mutableSetOf()) { content ->
+        historyAttachmentKey(
+          fileName = content.fileName,
+          mimeType = content.mimeType,
+          type = content.type,
+        )
+      }
+    return mediaPaths.mapIndexedNotNull { index, rawPath ->
+      val path = rawPath.trim()
+      if (path.isEmpty()) return@mapIndexedNotNull null
+      val mimeType =
+        mediaTypes.getOrNull(index)?.trim()?.takeIf { it.isNotEmpty() }
+          ?: mediaTypes.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+          ?: "application/octet-stream"
+      val fileName = extractHistoryFileName(path)
+      val type = inferHistoryAttachmentType(mimeType)
+      val key = historyAttachmentKey(fileName = fileName, mimeType = mimeType, type = type)
+      if (!existingKeys.add(key)) {
+        return@mapIndexedNotNull null
+      }
+      ChatMessageContent(
+        type = type,
+        mimeType = mimeType,
+        fileName = fileName,
+        base64 = null,
       )
     }
   }
@@ -530,6 +571,42 @@ class ChatController(
       else -> "off"
     }
   }
+}
+
+internal fun resolveHistoryFieldArray(
+  obj: JsonObject,
+  pluralKey: String,
+  singularKey: String,
+): List<String> {
+  val arrayValues =
+    obj[pluralKey].asArrayOrNull()?.mapNotNull { it.asStringOrNull()?.trim()?.takeIf(String::isNotEmpty) }
+  if (!arrayValues.isNullOrEmpty()) return arrayValues
+  val single = obj[singularKey].asStringOrNull()?.trim()?.takeIf(String::isNotEmpty)
+  return if (single != null) listOf(single) else emptyList()
+}
+
+internal fun inferHistoryAttachmentType(mimeType: String?): String {
+  val normalized = mimeType?.trim()?.lowercase().orEmpty()
+  return when {
+    normalized == "application/pdf" -> "document"
+    normalized.startsWith("image/") -> "image"
+    else -> "file"
+  }
+}
+
+internal fun extractHistoryFileName(path: String): String {
+  val trimmed = path.trim()
+  if (trimmed.isEmpty()) return "attachment"
+  return trimmed.substringAfterLast('/').substringAfterLast('\\').ifEmpty { "attachment" }
+}
+
+private fun historyAttachmentKey(fileName: String?, mimeType: String?, type: String): String {
+  return listOf(
+      type.trim().lowercase(),
+      fileName?.trim()?.lowercase().orEmpty(),
+      mimeType?.trim()?.lowercase().orEmpty(),
+    )
+    .joinToString(separator = "|")
 }
 
 internal fun reconcileMessageIds(previous: List<ChatMessage>, incoming: List<ChatMessage>): List<ChatMessage> {

@@ -1,7 +1,12 @@
 package ai.openclaw.app.chat
 
+import ai.openclaw.app.ui.chat.isRenderableChatContent
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ChatControllerMessageIdentityTest {
@@ -77,5 +82,51 @@ class ChatControllerMessageIdentityTest {
     assertEquals("msg-1", reconciled[0].id)
     assertEquals("new-2", reconciled[1].id)
     assertNotEquals(reconciled[0].id, reconciled[1].id)
+  }
+
+  @Test
+  fun resolveHistoryFieldArrayFallsBackToSingularValue() {
+    val json = Json.parseToJsonElement("""{"MediaPath":"C:\\temp\\exam.pdf"}""").jsonObject
+
+    assertEquals(listOf("C:\\temp\\exam.pdf"), resolveHistoryFieldArray(json, "MediaPaths", "MediaPath"))
+  }
+
+  @Test
+  fun inferHistoryAttachmentTypeDistinguishesPdfAndImages() {
+    assertEquals("document", inferHistoryAttachmentType("application/pdf"))
+    assertEquals("image", inferHistoryAttachmentType("image/png"))
+    assertEquals("file", inferHistoryAttachmentType("application/octet-stream"))
+  }
+
+  @Test
+  fun extractHistoryFileNameHandlesWindowsAndPosixPaths() {
+    assertEquals("exam.pdf", extractHistoryFileName("C:\\temp\\exam.pdf"))
+    assertEquals("image.jpg", extractHistoryFileName("/tmp/image.jpg"))
+  }
+
+  @Test
+  fun imageHistoryAttachmentsRemainRenderableWithoutBase64() {
+    val imageContent =
+      ChatMessageContent(
+        type = "image",
+        mimeType = "image/png",
+        fileName = "photo.png",
+        base64 = null,
+      )
+
+    assertTrue(isRenderableChatContent(imageContent))
+  }
+
+  @Test
+  fun emptyImageHistoryAttachmentIsNotRenderable() {
+    val imageContent =
+      ChatMessageContent(
+        type = "image",
+        mimeType = null,
+        fileName = null,
+        base64 = null,
+      )
+
+    assertFalse(isRenderableChatContent(imageContent))
   }
 }
