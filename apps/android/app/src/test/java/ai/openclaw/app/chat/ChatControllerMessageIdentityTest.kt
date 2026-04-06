@@ -102,6 +102,14 @@ class ChatControllerMessageIdentityTest {
   fun extractHistoryFileNameHandlesWindowsAndPosixPaths() {
     assertEquals("exam.pdf", extractHistoryFileName("C:\\temp\\exam.pdf"))
     assertEquals("image.jpg", extractHistoryFileName("/tmp/image.jpg"))
+    assertEquals(
+      "exam.pdf",
+      extractHistoryFileName("/tmp/exam---3b0d9af1-6db0-4f4f-9ec3-42dd93d07e9c.pdf"),
+    )
+    assertEquals(
+      "mid---term.pdf",
+      extractHistoryFileName("/tmp/mid---term---3b0d9af1-6db0-4f4f-9ec3-42dd93d07e9c.pdf"),
+    )
   }
 
   @Test

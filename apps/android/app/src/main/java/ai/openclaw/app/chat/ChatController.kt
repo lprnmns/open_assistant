@@ -600,7 +600,18 @@ internal fun inferHistoryAttachmentType(mimeType: String?): String {
 internal fun extractHistoryFileName(path: String): String {
   val trimmed = path.trim()
   if (trimmed.isEmpty()) return "attachment"
-  return trimmed.substringAfterLast('/').substringAfterLast('\\').ifEmpty { "attachment" }
+  val baseName = trimmed.substringAfterLast('/').substringAfterLast('\\').ifEmpty { "attachment" }
+  val lastDot = baseName.lastIndexOf('.')
+  val stem = if (lastDot > 0) baseName.substring(0, lastDot) else baseName
+  val ext = if (lastDot > 0) baseName.substring(lastDot) else ""
+  val markerIndex = stem.lastIndexOf("---")
+  if (markerIndex > 0) {
+    val restoredBase = stem.substring(0, markerIndex).trim()
+    if (restoredBase.isNotEmpty()) {
+      return restoredBase + ext
+    }
+  }
+  return baseName
 }
 
 internal fun resolveHistoryInlineContents(obj: JsonObject): List<ChatMessageContent> {
