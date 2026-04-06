@@ -10,6 +10,7 @@ import ai.openclaw.app.protocol.OpenClawLocationCommand
 import ai.openclaw.app.protocol.OpenClawMotionCommand
 import ai.openclaw.app.protocol.OpenClawNotificationsCommand
 import ai.openclaw.app.protocol.OpenClawPhotosCommand
+import ai.openclaw.app.protocol.OpenClawReminderCommand
 import ai.openclaw.app.protocol.OpenClawSmsCommand
 import ai.openclaw.app.protocol.OpenClawSystemCommand
 import org.junit.Assert.assertFalse
@@ -22,6 +23,7 @@ class InvokeCommandRegistryTest {
       OpenClawCapability.Canvas.rawValue,
       OpenClawCapability.Device.rawValue,
       OpenClawCapability.Notifications.rawValue,
+      OpenClawCapability.Reminder.rawValue,
       OpenClawCapability.System.rawValue,
       OpenClawCapability.Photos.rawValue,
       OpenClawCapability.Contacts.rawValue,
@@ -46,6 +48,9 @@ class InvokeCommandRegistryTest {
       OpenClawDeviceCommand.Health.rawValue,
       OpenClawNotificationsCommand.List.rawValue,
       OpenClawNotificationsCommand.Actions.rawValue,
+      OpenClawReminderCommand.Schedule.rawValue,
+      OpenClawReminderCommand.Cancel.rawValue,
+      OpenClawReminderCommand.List.rawValue,
       OpenClawSystemCommand.Notify.rawValue,
       OpenClawPhotosCommand.Latest.rawValue,
       OpenClawContactsCommand.Search.rawValue,

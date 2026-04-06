@@ -11,8 +11,10 @@ import ai.openclaw.app.protocol.OpenClawDeviceCommand
 import ai.openclaw.app.protocol.OpenClawLocationCommand
 import ai.openclaw.app.protocol.OpenClawMotionCommand
 import ai.openclaw.app.protocol.OpenClawNotificationsCommand
+import ai.openclaw.app.protocol.OpenClawReminderCommand
 import ai.openclaw.app.protocol.OpenClawSmsCommand
 import ai.openclaw.app.protocol.OpenClawSystemCommand
+import ai.openclaw.app.reminder.ReminderHandler
 
 class InvokeDispatcher(
   private val canvas: CanvasController,
@@ -20,6 +22,7 @@ class InvokeDispatcher(
   private val locationHandler: LocationHandler,
   private val deviceHandler: DeviceHandler,
   private val notificationsHandler: NotificationsHandler,
+  private val reminderHandler: ReminderHandler,
   private val systemHandler: SystemHandler,
   private val photosHandler: PhotosHandler,
   private val contactsHandler: ContactsHandler,
@@ -141,6 +144,11 @@ class InvokeDispatcher(
       // Notifications command
       OpenClawNotificationsCommand.List.rawValue -> notificationsHandler.handleNotificationsList(paramsJson)
       OpenClawNotificationsCommand.Actions.rawValue -> notificationsHandler.handleNotificationsActions(paramsJson)
+
+      // Reminder command
+      OpenClawReminderCommand.Schedule.rawValue -> reminderHandler.handleReminderSchedule(paramsJson)
+      OpenClawReminderCommand.Cancel.rawValue -> reminderHandler.handleReminderCancel(paramsJson)
+      OpenClawReminderCommand.List.rawValue -> reminderHandler.handleReminderList(paramsJson)
 
       // System command
       OpenClawSystemCommand.Notify.rawValue -> systemHandler.handleSystemNotify(paramsJson)

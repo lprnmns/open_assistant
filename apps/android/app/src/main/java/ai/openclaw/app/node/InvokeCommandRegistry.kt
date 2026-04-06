@@ -12,6 +12,7 @@ import ai.openclaw.app.protocol.OpenClawLocationCommand
 import ai.openclaw.app.protocol.OpenClawMotionCommand
 import ai.openclaw.app.protocol.OpenClawNotificationsCommand
 import ai.openclaw.app.protocol.OpenClawPhotosCommand
+import ai.openclaw.app.protocol.OpenClawReminderCommand
 import ai.openclaw.app.protocol.OpenClawSmsCommand
 import ai.openclaw.app.protocol.OpenClawSystemCommand
 
@@ -66,6 +67,7 @@ object InvokeCommandRegistry {
       NodeCapabilitySpec(name = OpenClawCapability.Canvas.rawValue),
       NodeCapabilitySpec(name = OpenClawCapability.Device.rawValue),
       NodeCapabilitySpec(name = OpenClawCapability.Notifications.rawValue),
+      NodeCapabilitySpec(name = OpenClawCapability.Reminder.rawValue),
       NodeCapabilitySpec(name = OpenClawCapability.System.rawValue),
       NodeCapabilitySpec(
         name = OpenClawCapability.Camera.rawValue,
@@ -129,6 +131,15 @@ object InvokeCommandRegistry {
       InvokeCommandSpec(
         name = OpenClawCanvasA2UICommand.Reset.rawValue,
         requiresForeground = true,
+      ),
+      InvokeCommandSpec(
+        name = OpenClawReminderCommand.Schedule.rawValue,
+      ),
+      InvokeCommandSpec(
+        name = OpenClawReminderCommand.Cancel.rawValue,
+      ),
+      InvokeCommandSpec(
+        name = OpenClawReminderCommand.List.rawValue,
       ),
       InvokeCommandSpec(
         name = OpenClawSystemCommand.Notify.rawValue,

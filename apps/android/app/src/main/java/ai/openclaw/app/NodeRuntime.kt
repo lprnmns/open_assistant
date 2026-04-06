@@ -19,6 +19,7 @@ import ai.openclaw.app.gateway.GatewaySession
 import ai.openclaw.app.gateway.probeGatewayTlsFingerprint
 import ai.openclaw.app.node.*
 import ai.openclaw.app.protocol.OpenClawCanvasA2UIAction
+import ai.openclaw.app.reminder.ReminderHandler
 import ai.openclaw.app.voice.MicCaptureManager
 import ai.openclaw.app.voice.TalkModeManager
 import ai.openclaw.app.voice.VoiceConversationEntry
@@ -97,6 +98,10 @@ class NodeRuntime(
     appContext = appContext,
   )
 
+  private val reminderHandler: ReminderHandler = ReminderHandler(
+    appContext = appContext,
+  )
+
   private val systemHandler: SystemHandler = SystemHandler(
     appContext = appContext,
   )
@@ -152,6 +157,7 @@ class NodeRuntime(
     locationHandler = locationHandler,
     deviceHandler = deviceHandler,
     notificationsHandler = notificationsHandler,
+    reminderHandler = reminderHandler,
     systemHandler = systemHandler,
     photosHandler = photosHandler,
     contactsHandler = contactsHandler,

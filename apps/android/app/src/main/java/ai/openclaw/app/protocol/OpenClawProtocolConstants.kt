@@ -8,6 +8,7 @@ enum class OpenClawCapability(val rawValue: String) {
   Location("location"),
   Device("device"),
   Notifications("notifications"),
+  Reminder("reminder"),
   System("system"),
   Photos("photos"),
   Contacts("contacts"),
@@ -98,6 +99,17 @@ enum class OpenClawSystemCommand(val rawValue: String) {
 
   companion object {
     const val NamespacePrefix: String = "system."
+  }
+}
+
+enum class OpenClawReminderCommand(val rawValue: String) {
+  Schedule("reminder.schedule"),
+  Cancel("reminder.cancel"),
+  List("reminder.list"),
+  ;
+
+  companion object {
+    const val NamespacePrefix: String = "reminder."
   }
 }
 
