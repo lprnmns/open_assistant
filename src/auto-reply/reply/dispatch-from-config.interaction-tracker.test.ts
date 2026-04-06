@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../../config/config.js";
 import type { ProductionBrain } from "../../consciousness/brain/brain-factory.js";
 import {
   _resetInteractionTrackerForTest,
+  getActiveDeliveryTarget,
   getActiveChannelId,
   getActiveChannelType,
   getLastUserInteractionAt,
@@ -99,6 +100,11 @@ describe("dispatchReplyFromConfig interaction tracking", () => {
       replyResolver: async () => ({ text: "ok" }),
     });
 
+    expect(getActiveDeliveryTarget()).toEqual({
+      kind: "channel",
+      id: "telegram:123456789",
+      channelType: "telegram",
+    });
     expect(getActiveChannelId()).toBe("telegram:123456789");
     expect(getActiveChannelType()).toBe("telegram");
     expect(getLastUserInteractionAt()).toBeTypeOf("number");
@@ -117,6 +123,11 @@ describe("dispatchReplyFromConfig interaction tracking", () => {
       replyResolver: async () => ({ text: "ok" }),
     });
 
+    expect(getActiveDeliveryTarget()).toEqual({
+      kind: "channel",
+      id: "channel:C123",
+      channelType: "whatsapp",
+    });
     expect(getActiveChannelId()).toBe("channel:C123");
     expect(getActiveChannelType()).toBe("whatsapp");
   });

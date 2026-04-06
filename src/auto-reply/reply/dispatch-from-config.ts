@@ -9,7 +9,9 @@ import type { OpenClawConfig } from "../../config/config.js";
 import type { CognitiveMode } from "../../consciousness/cognitive-load.js";
 import { sanitizeExecutiveReplyPayload } from "../../consciousness/executive-sanitizer.js";
 import {
+  recordDeliveryTargetInteraction,
   recordUserInteraction,
+  resolveDeliveryTargetFromInteraction,
   resolveActiveChannelIdFromInteraction,
 } from "../../consciousness/interaction-tracker.js";
 import { ingestConversationTurn } from "../../consciousness/turn-ingestion.js";
@@ -230,9 +232,17 @@ export async function dispatchReplyFromConfig(params: {
 
   // Track the owner's latest reply route at the shared inbound reply entry point
   // so built-in channels and extensions update consciousness consistently.
-  const activeChannelId = resolveActiveChannelIdFromInteraction(ctx);
-  if (activeChannelId) {
-    recordUserInteraction(activeChannelId, originatingChannel ?? currentSurface);
+  const activeDeliveryTarget = resolveDeliveryTargetFromInteraction(
+    ctx,
+    originatingChannel ?? currentSurface,
+  );
+  if (activeDeliveryTarget) {
+    recordDeliveryTargetInteraction(activeDeliveryTarget);
+  } else {
+    const activeChannelId = resolveActiveChannelIdFromInteraction(ctx);
+    if (activeChannelId) {
+      recordUserInteraction(activeChannelId, originatingChannel ?? currentSurface);
+    }
   }
 
   const sessionStoreEntry = resolveSessionStoreLookup(ctx, cfg);

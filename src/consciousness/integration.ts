@@ -18,6 +18,12 @@
 
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { createDispatchAuditEntry, type ConsciousnessAuditLog } from "./audit.js";
+import {
+  getDeliveryTargetChannelId,
+  getDeliveryTargetChannelType,
+  makeChannelDeliveryTarget,
+  type DeliveryTarget,
+} from "./delivery-target.js";
 import type { ConsciousnessConfig, TickDecision, WorldSnapshot } from "./types.js";
 import { DEFAULT_CONSCIOUSNESS_CONFIG } from "./types.js";
 
@@ -31,12 +37,20 @@ const consciousnessLog = createSubsystemLogger("consciousness");
  */
 export type DispatchContext = {
   /**
+   * Send a proactive message to a specific delivery target.
+   * Preferred over the legacy sendToChannel callback because it can address
+   * non-channel surfaces such as paired nodes.
+   */
+  sendToTarget?: (target: DeliveryTarget, content: string) => Promise<void>;
+
+  /**
    * Send a proactive message to a specific channel.
-   * Called ONLY when action === SEND_MESSAGE AND snap.activeChannelId is defined.
+   * Legacy compatibility callback used until all boot wiring migrates to
+   * sendToTarget().
    * Never called with a fallback channel — if activeChannelId is absent the
    * message is silently dropped to avoid unintended broadcast.
    */
-  sendToChannel: (
+  sendToChannel?: (
     channelId: string,
     content: string,
     channelType?: WorldSnapshot["activeChannelType"],
@@ -115,7 +129,15 @@ export async function dispatchDecision(
 ): Promise<DispatchResult> {
   switch (decision.action) {
     case "SEND_MESSAGE": {
-      if (!snap.activeChannelId) {
+      const activeDeliveryTarget =
+        snap.activeDeliveryTarget ??
+        (snap.activeChannelId
+          ? makeChannelDeliveryTarget(snap.activeChannelId, snap.activeChannelType)
+          : undefined);
+      const channelId = getDeliveryTargetChannelId(activeDeliveryTarget);
+      const channelType = getDeliveryTargetChannelType(activeDeliveryTarget);
+
+      if (!activeDeliveryTarget || activeDeliveryTarget.kind === "none" || !channelId) {
         // No active channel — drop silently, never broadcast to an unknown surface
         consciousnessLog.info("dispatch dropped", { reason: "no_active_channel" });
         return { dispatched: false, outcome: "no_active_channel" };
@@ -131,15 +153,15 @@ export async function dispatchDecision(
         ctx.auditLog?.append(
           createDispatchAuditEntry({
             timestamp: now,
-            channelId: snap.activeChannelId,
-            channelType: snap.activeChannelType,
+            channelId,
+            channelType,
             content: decision.messageContent,
             decision: "rate_limited",
           }),
         );
         consciousnessLog.info("dispatch rate_limited", {
-          channelId: snap.activeChannelId,
-          channelType: snap.activeChannelType ?? "(unknown)",
+          channelId,
+          channelType: channelType ?? "(unknown)",
           minIntervalMs,
         });
         return { dispatched: false, outcome: "rate_limited" };
@@ -150,7 +172,15 @@ export async function dispatchDecision(
         config.proactiveMessageMaxContentChars,
       );
       try {
-        await ctx.sendToChannel(snap.activeChannelId, content, snap.activeChannelType);
+        if (ctx.sendToTarget) {
+          await ctx.sendToTarget(activeDeliveryTarget, content);
+        } else if (ctx.sendToChannel && activeDeliveryTarget.kind === "channel") {
+          await ctx.sendToChannel(channelId, content, channelType);
+        } else {
+          throw new Error(
+            `No proactive transport available for delivery target kind "${activeDeliveryTarget.kind}"`,
+          );
+        }
         if (ctx.proactiveState) {
           ctx.proactiveState.lastSentAt = now;
         }
@@ -158,8 +188,8 @@ export async function dispatchDecision(
         ctx.auditLog?.append(
           createDispatchAuditEntry({
             timestamp: now,
-            channelId: snap.activeChannelId,
-            channelType: snap.activeChannelType,
+            channelId,
+            channelType,
             content,
             decision: "sent",
           }),
@@ -169,15 +199,15 @@ export async function dispatchDecision(
         ctx.auditLog?.append(
           createDispatchAuditEntry({
             timestamp: now,
-            channelId: snap.activeChannelId,
-            channelType: snap.activeChannelType,
+            channelId,
+            channelType,
             content,
             decision: "send_error",
           }),
         );
         consciousnessLog.error("dispatch send_error", {
-          channelId: snap.activeChannelId,
-          channelType: snap.activeChannelType ?? "(unknown)",
+          channelId,
+          channelType: channelType ?? "(unknown)",
           error: err instanceof Error ? err.message : String(err),
         });
         return {

@@ -19,6 +19,11 @@ function makeSnap(overrides: Partial<WorldSnapshot> = {}): WorldSnapshot {
     firedTriggerIds: [],
     dueCronExpressions: [],
     externalWorldEvents: [],
+    activeDeliveryTarget: {
+      kind: "channel",
+      id: "web-chat",
+      channelType: "webchat",
+    },
     activeChannelId: "web-chat",
     activeChannelType: "webchat",
     lastTickAt: undefined,
@@ -29,6 +34,7 @@ function makeSnap(overrides: Partial<WorldSnapshot> = {}): WorldSnapshot {
 
 function makeCtx(overrides: Partial<DispatchContext> = {}): DispatchContext {
   return {
+    sendToTarget: vi.fn().mockResolvedValue(undefined),
     sendToChannel: vi.fn().mockResolvedValue(undefined),
     appendNote: vi.fn().mockResolvedValue(undefined),
     proactiveState: {},
@@ -43,23 +49,92 @@ afterEach(() => {
 // ── SEND_MESSAGE ──────────────────────────────────────────────────────────────
 
 describe("dispatchDecision — SEND_MESSAGE", () => {
-  it("calls sendToChannel with the snap's activeChannelId and messageContent", async () => {
+  it("calls sendToTarget with the snap's active delivery target and message content", async () => {
     const ctx = makeCtx();
-    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
+    const snap = makeSnap({
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "telegram-123",
+        channelType: "telegram",
+      },
+      activeChannelId: "telegram-123",
+      activeChannelType: "telegram",
+    });
     const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello!" };
 
     const result = await dispatchDecision(decision, snap, ctx);
 
     expect(result.dispatched).toBe(true);
     expect(result.outcome).toBe("sent");
-    expect(ctx.sendToChannel).toHaveBeenCalledOnce();
-    expect(ctx.sendToChannel).toHaveBeenCalledWith("telegram-123", "Hello!", "telegram");
+    expect(ctx.sendToTarget).toHaveBeenCalledOnce();
+    expect(ctx.sendToTarget).toHaveBeenCalledWith(
+      {
+        kind: "channel",
+        id: "telegram-123",
+        channelType: "telegram",
+      },
+      "Hello!",
+    );
     expect(ctx.appendNote).not.toHaveBeenCalled();
   });
 
-  it("drops the message (dispatched:false) when activeChannelId is undefined", async () => {
+  it("falls back to the legacy sendToChannel callback for channel targets", async () => {
+    const ctx = makeCtx({
+      sendToTarget: undefined,
+      sendToChannel: vi.fn().mockResolvedValue(undefined),
+    });
+    const snap = makeSnap({
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "telegram-123",
+        channelType: "telegram",
+      },
+      activeChannelId: "telegram-123",
+      activeChannelType: "telegram",
+    });
+    const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello!" };
+
+    const result = await dispatchDecision(decision, snap, ctx);
+
+    expect(result.dispatched).toBe(true);
+    expect(result.outcome).toBe("sent");
+    expect(ctx.sendToChannel).toHaveBeenCalledWith("telegram-123", "Hello!", "telegram");
+  });
+
+  it("routes node targets through sendToTarget without a channel type", async () => {
     const ctx = makeCtx();
-    const snap = makeSnap({ activeChannelId: undefined });
+    const snap = makeSnap({
+      activeDeliveryTarget: {
+        kind: "node",
+        id: "android-node-1",
+        nodeId: "android-node-1",
+      },
+      activeChannelId: "android-node-1",
+      activeChannelType: undefined,
+    });
+    const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello node!" };
+
+    const result = await dispatchDecision(decision, snap, ctx);
+
+    expect(result.dispatched).toBe(true);
+    expect(result.outcome).toBe("sent");
+    expect(ctx.sendToTarget).toHaveBeenCalledWith(
+      {
+        kind: "node",
+        id: "android-node-1",
+        nodeId: "android-node-1",
+      },
+      "Hello node!",
+    );
+  });
+
+  it("drops the message (dispatched:false) when no delivery target is available", async () => {
+    const ctx = makeCtx();
+    const snap = makeSnap({
+      activeDeliveryTarget: undefined,
+      activeChannelId: undefined,
+      activeChannelType: undefined,
+    });
     const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hi" };
 
     const result = await dispatchDecision(decision, snap, ctx);
@@ -71,14 +146,23 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
   });
 
   it("never routes to a channel other than snap.activeChannelId", async () => {
-    const ctx = makeCtx();
-    const snap = makeSnap({ activeChannelId: "channel-A" });
+    const sendToTarget = vi.fn().mockResolvedValue(undefined);
+    const ctx = makeCtx({ sendToTarget });
+    const snap = makeSnap({
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "channel-A",
+        channelType: "telegram",
+      },
+      activeChannelId: "channel-A",
+      activeChannelType: "telegram",
+    });
     const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hi" };
 
     await dispatchDecision(decision, snap, ctx);
 
-    const calls = (ctx.sendToChannel as ReturnType<typeof vi.fn>).mock.calls;
-    expect(calls.every(([ch]) => ch === "channel-A")).toBe(true);
+    const calls = sendToTarget.mock.calls;
+    expect(calls.every(([target]) => target.id === "channel-A")).toBe(true);
   });
 
   it("enforces proactive rate limits and records an audit entry", async () => {
@@ -90,7 +174,15 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
       proactiveState: { lastSentAt: NOW - 10_000 },
       auditLog,
     });
-    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
+    const snap = makeSnap({
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "telegram-123",
+        channelType: "telegram",
+      },
+      activeChannelId: "telegram-123",
+      activeChannelType: "telegram",
+    });
     const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello again" };
 
     const result = await dispatchDecision(decision, snap, ctx, {
@@ -116,7 +208,15 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
   it("caps proactive content before sending and auditing", async () => {
     const auditLog = new ConsciousnessAuditLog();
     const ctx = makeCtx({ auditLog });
-    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
+    const snap = makeSnap({
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "telegram-123",
+        channelType: "telegram",
+      },
+      activeChannelId: "telegram-123",
+      activeChannelType: "telegram",
+    });
     const decision: TickDecision = {
       action: "SEND_MESSAGE",
       messageContent: "This proactive message is intentionally too long.",
@@ -129,7 +229,14 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
 
     expect(result.dispatched).toBe(true);
     expect(result.outcome).toBe("sent");
-    expect(ctx.sendToChannel).toHaveBeenCalledWith("telegram-123", "This proa...", "telegram");
+    expect(ctx.sendToTarget).toHaveBeenCalledWith(
+      {
+        kind: "channel",
+        id: "telegram-123",
+        channelType: "telegram",
+      },
+      "This proa...",
+    );
     expect(auditLog.list()).toEqual([
       expect.objectContaining({
         kind: "dispatch",
@@ -151,7 +258,15 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
       proactiveState: {},
       onProactiveSent,
     });
-    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
+    const snap = makeSnap({
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "telegram-123",
+        channelType: "telegram",
+      },
+      activeChannelId: "telegram-123",
+      activeChannelType: "telegram",
+    });
     const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello!" };
 
     const result = await dispatchDecision(decision, snap, ctx);
@@ -172,7 +287,15 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
       proactiveState: { lastSentAt: NOW - 10_000 },
       onProactiveSent,
     });
-    const snap = makeSnap({ activeChannelId: "telegram-123", activeChannelType: "telegram" });
+    const snap = makeSnap({
+      activeDeliveryTarget: {
+        kind: "channel",
+        id: "telegram-123",
+        channelType: "telegram",
+      },
+      activeChannelId: "telegram-123",
+      activeChannelType: "telegram",
+    });
     const decision: TickDecision = { action: "SEND_MESSAGE", messageContent: "Hello again" };
 
     const result = await dispatchDecision(decision, snap, ctx, {
@@ -187,7 +310,9 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
 
   it("returns dispatched:false with error when sendToChannel throws — does not rethrow", async () => {
     const auditLog = new ConsciousnessAuditLog();
+    const sendToTarget = vi.fn().mockRejectedValue(new Error("network error"));
     const ctx = makeCtx({
+      sendToTarget,
       sendToChannel: vi.fn().mockRejectedValue(new Error("network error")),
       auditLog,
     });
@@ -199,6 +324,7 @@ describe("dispatchDecision — SEND_MESSAGE", () => {
     expect(result.dispatched).toBe(false);
     expect(result.outcome).toBe("send_error");
     expect(result.error?.message).toBe("network error");
+    expect(sendToTarget).toHaveBeenCalledOnce();
     expect(auditLog.list()).toEqual([
       expect.objectContaining({
         kind: "dispatch",
