@@ -20,6 +20,20 @@ const SHORT_DELAY_PATTERNS: RegExp[] = [
 
 const AUTO_REMINDER_MIN_DELAY_MS = 15_000;
 const AUTO_REMINDER_MAX_DELAY_MS = 12 * 60 * 60 * 1000;
+const AUTO_REMINDER_EXACT_THRESHOLD_MS = 4 * 60 * 60 * 1000;
+
+type GatewayCaller = typeof callGateway;
+
+type ConnectedNodeSummary = {
+  nodeId?: string;
+  connected?: boolean;
+  commands?: string[];
+  caps?: string[];
+};
+
+type NodeListResult = {
+  nodes?: ConnectedNodeSummary[];
+};
 
 export type AutoReminderCommitment = {
   delayMs: number;
@@ -112,17 +126,83 @@ function buildAutoReminderSystemEvent(commitment: AutoReminderCommitment): strin
   ].join(" ");
 }
 
+function buildAutoReminderNotificationBody(commitment: AutoReminderCommitment): string {
+  return commitment.sourceText.replace(/\s+/g, " ").slice(0, 220);
+}
+
+function resolveAutoReminderPrecision(
+  commitment: AutoReminderCommitment,
+): "exact" | "soft" {
+  return commitment.delayMs < AUTO_REMINDER_EXACT_THRESHOLD_MS ? "exact" : "soft";
+}
+
+export function findConnectedReminderNode(nodes: ConnectedNodeSummary[]): string | null {
+  for (const node of nodes) {
+    if (!node.connected || typeof node.nodeId !== "string" || !node.nodeId.trim()) {
+      continue;
+    }
+    const commands = Array.isArray(node.commands) ? node.commands : [];
+    const caps = Array.isArray(node.caps) ? node.caps : [];
+    if (commands.includes("reminder.schedule") || caps.includes("reminder")) {
+      return node.nodeId.trim();
+    }
+  }
+  return null;
+}
+
+export async function relayAutoReminderToConnectedNode(params: {
+  commitment: AutoReminderCommitment;
+  cronJobId?: string;
+  cfg?: OpenClawConfig;
+  timeoutMs?: number;
+  callGatewayImpl?: GatewayCaller;
+}): Promise<boolean> {
+  const gatewayCall = params.callGatewayImpl ?? callGateway;
+  const nodeList = await gatewayCall<NodeListResult>({
+    config: params.cfg,
+    method: "node.list",
+    timeoutMs: params.timeoutMs ?? 10_000,
+    params: {},
+  });
+  const nodeId = findConnectedReminderNode(Array.isArray(nodeList.nodes) ? nodeList.nodes : []);
+  if (!nodeId) {
+    return false;
+  }
+
+  await gatewayCall({
+    config: params.cfg,
+    method: "node.invoke",
+    timeoutMs: params.timeoutMs ?? 10_000,
+    params: {
+      nodeId,
+      command: "reminder.schedule",
+      params: {
+        id: params.cronJobId ?? `auto-reminder-${params.commitment.dueAtMs}`,
+        title: "OpenClaw follow-up",
+        body: buildAutoReminderNotificationBody(params.commitment),
+        dueAtMs: params.commitment.dueAtMs,
+        precision: resolveAutoReminderPrecision(params.commitment),
+        priority: "active",
+        cronJobId: params.cronJobId,
+      },
+    },
+  });
+  return true;
+}
+
 export async function autoScheduleReminderCommitment(params: {
   payloads: ReplyPayload[];
   cfg?: OpenClawConfig;
   sessionKey?: string;
   agentId?: string;
   timeoutMs?: number;
+  callGatewayImpl?: GatewayCaller;
 }): Promise<number> {
   if (!params.sessionKey || params.cfg?.cron?.enabled === false) {
     return 0;
   }
 
+  const gatewayCall = params.callGatewayImpl ?? callGateway;
   for (const payload of params.payloads) {
     if (payload.isError || typeof payload.text !== "string") {
       continue;
@@ -131,7 +211,7 @@ export async function autoScheduleReminderCommitment(params: {
     if (!commitment) {
       continue;
     }
-    await callGateway({
+    const cronJob = await gatewayCall<{ id?: string }>({
       config: params.cfg,
       method: "cron.add",
       timeoutMs: params.timeoutMs ?? 10_000,
@@ -150,6 +230,17 @@ export async function autoScheduleReminderCommitment(params: {
         },
       },
     });
+    try {
+      await relayAutoReminderToConnectedNode({
+        commitment,
+        cronJobId: typeof cronJob?.id === "string" ? cronJob.id : undefined,
+        cfg: params.cfg,
+        timeoutMs: params.timeoutMs,
+        callGatewayImpl: gatewayCall,
+      });
+    } catch {
+      // Cron remains the source of truth; device relay failures are non-fatal.
+    }
     return 1;
   }
 
