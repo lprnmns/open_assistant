@@ -14,9 +14,17 @@ export type ChatImageContent = {
   mimeType: string;
 };
 
-export type ParsedMessageWithImages = {
+export type ChatPersistedAttachment = {
+  type: string;
+  data: string;
+  mimeType: string;
+  fileName?: string;
+};
+
+export type ParsedMessageWithAttachments = {
   message: string;
   images: ChatImageContent[];
+  attachments: ChatPersistedAttachment[];
 };
 
 type AttachmentLog = {
@@ -98,14 +106,15 @@ export async function parseMessageWithAttachments(
   message: string,
   attachments: ChatAttachment[] | undefined,
   opts?: { maxBytes?: number; log?: AttachmentLog },
-): Promise<ParsedMessageWithImages> {
+): Promise<ParsedMessageWithAttachments> {
   const maxBytes = opts?.maxBytes ?? 5_000_000; // decoded bytes (5,000,000)
   const log = opts?.log;
   if (!attachments || attachments.length === 0) {
-    return { message, images: [] };
+    return { message, images: [], attachments: [] };
   }
 
   const images: ChatImageContent[] = [];
+  const persistedAttachments: ChatPersistedAttachment[] = [];
 
   for (const [idx, att] of attachments.entries()) {
     if (!att) {
@@ -120,28 +129,39 @@ export async function parseMessageWithAttachments(
 
     const providedMime = normalizeMime(mime);
     const sniffedMime = normalizeMime(await sniffMimeFromBase64(b64));
-    if (sniffedMime && !isImageMime(sniffedMime)) {
-      log?.warn(`attachment ${label}: detected non-image (${sniffedMime}), dropping`);
-      continue;
-    }
-    if (!sniffedMime && !isImageMime(providedMime)) {
+    const resolvedMime = sniffedMime ?? providedMime;
+    if (!resolvedMime) {
       log?.warn(`attachment ${label}: unable to detect image mime type, dropping`);
       continue;
     }
-    if (sniffedMime && providedMime && sniffedMime !== providedMime) {
+    if (sniffedMime && !isImageMime(sniffedMime)) {
+      log?.warn(
+        `attachment ${label}: detected non-image (${sniffedMime}), keeping for file persistence`,
+      );
+    } else if (sniffedMime && providedMime && sniffedMime !== providedMime) {
       log?.warn(
         `attachment ${label}: mime mismatch (${providedMime} -> ${sniffedMime}), using sniffed`,
       );
     }
 
+    const resolvedType = isImageMime(resolvedMime) ? "image" : (att.type ?? "document");
+    persistedAttachments.push({
+      type: resolvedType,
+      data: b64,
+      mimeType: resolvedMime,
+      fileName: att.fileName,
+    });
+    if (!isImageMime(resolvedMime)) {
+      continue;
+    }
     images.push({
       type: "image",
       data: b64,
-      mimeType: sniffedMime ?? providedMime ?? mime,
+      mimeType: resolvedMime,
     });
   }
 
-  return { message, images };
+  return { message, images, attachments: persistedAttachments };
 }
 
 /**

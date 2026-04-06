@@ -91,6 +91,30 @@ describe("parseMessageWithAttachments", () => {
     expect(logs[0]).toMatch(/non-image/i);
   });
 
+  it("keeps non-image attachments available for persistence", async () => {
+    const pdf = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n").toString("base64");
+    const { parsed, logs } = await parseWithWarnings("review this pdf", [
+      {
+        type: "document",
+        mimeType: "application/pdf",
+        fileName: "exam.pdf",
+        content: pdf,
+      },
+    ]);
+    expect(parsed.message).toBe("review this pdf");
+    expect(parsed.images).toHaveLength(0);
+    expect(parsed.attachments).toEqual([
+      {
+        type: "document",
+        mimeType: "application/pdf",
+        data: pdf,
+        fileName: "exam.pdf",
+      },
+    ]);
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatch(/non-image/i);
+  });
+
   it("prefers sniffed mime type and logs mismatch", async () => {
     const { parsed, logs } = await parseWithWarnings("x", [
       {

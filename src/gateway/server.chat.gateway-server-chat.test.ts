@@ -560,6 +560,67 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.send makes PDF attachments available to the reply pipeline and persisted media", async () => {
+    await withMainSessionStore(async () => {
+      const pdfB64 = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n").toString("base64");
+      let capturedCtx:
+        | {
+            MediaPath?: string;
+            MediaPaths?: string[];
+            MediaType?: string;
+            MediaTypes?: string[];
+          }
+        | undefined;
+      mockGetReplyFromConfigOnce(async (ctx) => {
+        capturedCtx = {
+          MediaPath: ctx.MediaPath,
+          MediaPaths: ctx.MediaPaths ? [...ctx.MediaPaths] : undefined,
+          MediaType: ctx.MediaType,
+          MediaTypes: ctx.MediaTypes ? [...ctx.MediaTypes] : undefined,
+        };
+        return { text: "pdf received" };
+      });
+
+      const finalPromise = onceMessage(
+        ws,
+        (o) =>
+          o.type === "event" &&
+          o.event === "chat" &&
+          o.payload?.state === "final" &&
+          o.payload?.runId === "idem-pdf-1",
+        8000,
+      );
+
+      const sendRes = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "review this pdf",
+        idempotencyKey: "idem-pdf-1",
+        attachments: [
+          {
+            type: "document",
+            mimeType: "application/pdf",
+            fileName: "exam.pdf",
+            content: pdfB64,
+          },
+        ],
+      });
+      expect(sendRes.ok).toBe(true);
+      await finalPromise;
+
+      expect(capturedCtx?.MediaPath).toBeTruthy();
+      expect(capturedCtx?.MediaPaths).toHaveLength(1);
+      expect(capturedCtx?.MediaType).toBe("application/pdf");
+      expect(capturedCtx?.MediaTypes).toEqual(["application/pdf"]);
+      const mediaPath = capturedCtx?.MediaPath;
+      expect(typeof mediaPath).toBe("string");
+      if (typeof mediaPath !== "string") {
+        return;
+      }
+      const persisted = await fs.readFile(mediaPath);
+      expect(persisted.subarray(0, 8).toString("utf-8")).toContain("%PDF-1.4");
+    });
+  });
+
   test("routes /btw replies through side-result events without transcript injection", async () => {
     await withMainSessionStore(async () => {
       mockGetReplyFromConfigOnce(async () => ({
