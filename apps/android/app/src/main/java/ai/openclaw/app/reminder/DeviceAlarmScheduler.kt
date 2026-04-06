@@ -7,19 +7,29 @@ import android.content.Intent
 import kotlinx.coroutines.runBlocking
 
 internal interface ReminderAlarmRegistrar {
-  fun schedule(dueAtMs: Long, pendingIntent: PendingIntent)
+  fun canScheduleExactAlarms(): Boolean
 
-  fun cancel(pendingIntent: PendingIntent)
+  fun scheduleExact(id: String, dueAtMs: Long, pendingIntent: PendingIntent)
+
+  fun scheduleSoft(id: String, dueAtMs: Long, pendingIntent: PendingIntent)
+
+  fun cancel(id: String, pendingIntent: PendingIntent)
 }
 
 private class AndroidReminderAlarmRegistrar(
   private val alarmManager: AlarmManager,
 ) : ReminderAlarmRegistrar {
-  override fun schedule(dueAtMs: Long, pendingIntent: PendingIntent) {
+  override fun canScheduleExactAlarms(): Boolean = alarmManager.canScheduleExactAlarms()
+
+  override fun scheduleExact(id: String, dueAtMs: Long, pendingIntent: PendingIntent) {
+    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, dueAtMs, pendingIntent)
+  }
+
+  override fun scheduleSoft(id: String, dueAtMs: Long, pendingIntent: PendingIntent) {
     alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, dueAtMs, pendingIntent)
   }
 
-  override fun cancel(pendingIntent: PendingIntent) {
+  override fun cancel(id: String, pendingIntent: PendingIntent) {
     alarmManager.cancel(pendingIntent)
   }
 }
@@ -47,10 +57,7 @@ internal class DeviceAlarmScheduler(
     runBlocking {
       database.reminderDao().upsert(entity)
     }
-    registrar.schedule(
-      dueAtMs = request.dueAtMs,
-      pendingIntent = buildPendingIntent(request.id),
-    )
+    registerAlarm(entity)
   }
 
   override fun cancel(id: String) {
@@ -58,6 +65,7 @@ internal class DeviceAlarmScheduler(
       database.reminderDao().deleteById(id)
     }
     registrar.cancel(
+      id = id,
       pendingIntent = buildPendingIntent(id),
     )
   }
@@ -66,6 +74,24 @@ internal class DeviceAlarmScheduler(
     runBlocking {
       database.reminderDao().getAllPending(nowMs)
     }
+
+  fun restorePending(nowMs: Long = System.currentTimeMillis()) {
+    val reminders =
+      runBlocking {
+        database.reminderDao().deleteExpired(nowMs)
+        database.reminderDao().getAllPending(nowMs)
+      }
+    reminders.forEach(::registerAlarm)
+  }
+
+  private fun registerAlarm(reminder: ScheduledReminderEntity) {
+    val pendingIntent = buildPendingIntent(reminder.id)
+    if (shouldScheduleExact(reminder.precision, registrar.canScheduleExactAlarms())) {
+      registrar.scheduleExact(reminder.id, reminder.dueAtMs, pendingIntent)
+    } else {
+      registrar.scheduleSoft(reminder.id, reminder.dueAtMs, pendingIntent)
+    }
+  }
 
   private fun buildPendingIntent(reminderId: String): PendingIntent {
     val intent =
@@ -81,4 +107,8 @@ internal class DeviceAlarmScheduler(
   }
 
   private fun reminderRequestCode(reminderId: String): Int = reminderId.hashCode() and 0x7FFFFFFF
+
+  internal fun shouldScheduleExact(precision: String, exactAlarmsAllowed: Boolean): Boolean {
+    return precision.equals("exact", ignoreCase = true) && exactAlarmsAllowed
+  }
 }
