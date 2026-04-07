@@ -1,4 +1,5 @@
 import { Type } from "@sinclair/typebox";
+import { GatewayAttachmentInputSchema } from "./attachments.js";
 import { NonEmptyString, SessionLabelString } from "./primitives.js";
 
 export const SessionsListParamsSchema = Type.Object(
@@ -65,7 +66,7 @@ export const SessionsSendParamsSchema = Type.Object(
     key: NonEmptyString,
     message: Type.String(),
     thinking: Type.Optional(Type.String()),
-    attachments: Type.Optional(Type.Array(Type.Unknown())),
+    attachments: Type.Optional(Type.Array(GatewayAttachmentInputSchema)),
     timeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
     idempotencyKey: Type.Optional(NonEmptyString),
   },

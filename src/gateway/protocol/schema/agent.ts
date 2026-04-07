@@ -1,4 +1,5 @@
 import { Type } from "@sinclair/typebox";
+import { GatewayAttachmentInputSchema } from "./attachments.js";
 import { InputProvenanceSchema, NonEmptyString, SessionLabelString } from "./primitives.js";
 
 export const AgentInternalEventSchema = Type.Object(
@@ -83,7 +84,7 @@ export const AgentParamsSchema = Type.Object(
     sessionKey: Type.Optional(Type.String()),
     thinking: Type.Optional(Type.String()),
     deliver: Type.Optional(Type.Boolean()),
-    attachments: Type.Optional(Type.Array(Type.Unknown())),
+    attachments: Type.Optional(Type.Array(GatewayAttachmentInputSchema)),
     channel: Type.Optional(Type.String()),
     replyChannel: Type.Optional(Type.String()),
     accountId: Type.Optional(Type.String()),

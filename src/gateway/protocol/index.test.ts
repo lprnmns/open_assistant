@@ -1,6 +1,12 @@
 import type { ErrorObject } from "ajv";
 import { describe, expect, it } from "vitest";
-import { formatValidationErrors, validateTalkConfigResult } from "./index.js";
+import {
+  formatValidationErrors,
+  validateAgentParams,
+  validateChatSendParams,
+  validateSessionsSendParams,
+  validateTalkConfigResult,
+} from "./index.js";
 
 const makeError = (overrides: Partial<ErrorObject>): ErrorObject => ({
   keyword: "type",
@@ -113,6 +119,59 @@ describe("validateTalkConfigResult", () => {
             },
           },
         },
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("attachment RPC validators", () => {
+  it("accepts fileRef-based chat.send attachments", () => {
+    expect(
+      validateChatSendParams({
+        sessionKey: "main",
+        message: "review this staged pdf",
+        idempotencyKey: "idem-file-ref-1",
+        attachments: [
+          {
+            type: "document",
+            fileName: "exam.pdf",
+            fileRef: "upload:test-file",
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("accepts nested source attachments for sessions.send", () => {
+    expect(
+      validateSessionsSendParams({
+        key: "main",
+        message: "see image",
+        attachments: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: "image/png",
+              data: "Zm9v",
+            },
+          },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects malformed attachment entries for agent.send", () => {
+    expect(
+      validateAgentParams({
+        message: "hello",
+        idempotencyKey: "idem-agent-1",
+        attachments: [
+          {
+            fileRef: "upload:test-file",
+            unexpected: true,
+          },
+        ],
       }),
     ).toBe(false);
   });
