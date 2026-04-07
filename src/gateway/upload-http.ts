@@ -9,10 +9,9 @@ import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import { authorizeGatewayBearerRequestOrReply } from "./http-auth-helpers.js";
 import { sendInvalidRequest, sendJson, sendMethodNotAllowed } from "./http-common.js";
+import { DEFAULT_UPLOAD_MAX_BYTES } from "./upload-constants.js";
 import { getHeader } from "./http-utils.js";
 import { buildUploadFileRef, UPLOADS_SUBDIR } from "./upload-file-ref.js";
-
-export const DEFAULT_UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
 
 export async function handleUploadHttpRequest(
   req: IncomingMessage,

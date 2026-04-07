@@ -66,6 +66,7 @@ import {
   readSessionMessages,
   resolveSessionModelRef,
 } from "../session-utils.js";
+import { DEFAULT_UPLOAD_MAX_BYTES } from "../upload-constants.js";
 import { formatForLog } from "../ws-log.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import { setGatewayDedupeEntry } from "./agent-wait-dedupe.js";
@@ -310,7 +311,7 @@ async function persistChatSendAttachments(params: {
           Buffer.from(attachment.data, "base64"),
           attachment.mimeType,
           "inbound",
-          undefined,
+          DEFAULT_UPLOAD_MAX_BYTES,
           attachment.fileName,
         ),
       );
@@ -1580,7 +1581,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     if (normalizedAttachments.length > 0) {
       try {
         const parsed = await parseMessageWithAttachments(inboundMessage, normalizedAttachments, {
-          maxBytes: 5_000_000,
+          inlineMaxBytes: 5_000_000,
           log: context.logGateway,
         });
         parsedMessage = parsed.message;

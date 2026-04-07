@@ -19,10 +19,12 @@ import {
 } from "./test-helpers.js";
 import { agentCommand } from "./test-helpers.mocks.js";
 import { installConnectedControlUiServerSuite } from "./test-with-server.js";
+import { DEFAULT_UPLOAD_MAX_BYTES } from "./upload-constants.js";
 import { buildUploadFileRef, UPLOADS_SUBDIR } from "./upload-file-ref.js";
 
 installGatewayTestHooks({ scope: "suite" });
 const CHAT_RESPONSE_TIMEOUT_MS = 4_000;
+const LARGE_STAGED_PDF_BYTES = 5_250_000;
 
 let ws: WebSocket;
 let port: number;
@@ -31,6 +33,13 @@ installConnectedControlUiServerSuite((started) => {
   ws = started.ws;
   port = started.port;
 });
+
+function buildPdfBuffer(sizeBytes: number): Buffer {
+  const header = Buffer.from("%PDF-1.4\n");
+  const footer = Buffer.from("\n%%EOF\n");
+  const fillSize = Math.max(0, sizeBytes - header.length - footer.length);
+  return Buffer.concat([header, Buffer.alloc(fillSize, 0x20), footer]);
+}
 
 describe("gateway server chat", () => {
   const buildNoReplyHistoryFixture = (includeMixedAssistant = false) => [
@@ -625,12 +634,12 @@ describe("gateway server chat", () => {
 
   test("chat.send resolves staged PDF fileRefs for the reply pipeline and persisted media", async () => {
     await withMainSessionStore(async () => {
-      const pdfBuffer = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n");
+      const pdfBuffer = buildPdfBuffer(LARGE_STAGED_PDF_BYTES);
       const uploaded = await saveMediaBuffer(
         pdfBuffer,
         "application/pdf",
         UPLOADS_SUBDIR,
-        undefined,
+        DEFAULT_UPLOAD_MAX_BYTES,
         "midterm-exam.pdf",
       );
       let capturedCtx:

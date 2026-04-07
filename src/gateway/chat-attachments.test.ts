@@ -6,10 +6,19 @@ import {
   parseMessageWithAttachments,
 } from "./chat-attachments.js";
 import { withTempConfig } from "./test-temp-config.js";
+import { DEFAULT_UPLOAD_MAX_BYTES } from "./upload-constants.js";
 import { buildUploadFileRef, UPLOADS_SUBDIR } from "./upload-file-ref.js";
 
 const PNG_1x1 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/woAAn8B9FD5fHAAAAAASUVORK5CYII=";
+const LARGE_STAGED_PDF_BYTES = 5_250_000;
+
+function buildPdfBuffer(sizeBytes: number): Buffer {
+  const header = Buffer.from("%PDF-1.4\n");
+  const footer = Buffer.from("\n%%EOF\n");
+  const fillSize = Math.max(0, sizeBytes - header.length - footer.length);
+  return Buffer.concat([header, Buffer.alloc(fillSize, 0x20), footer]);
+}
 
 async function parseWithWarnings(message: string, attachments: ChatAttachment[]) {
   const logs: string[] = [];
@@ -148,6 +157,37 @@ describe("parseMessageWithAttachments", () => {
             fileName: "exam.pdf",
           },
         ]);
+        expect(logs).toHaveLength(1);
+        expect(logs[0]).toMatch(/non-image/i);
+      },
+    });
+  });
+
+  it("allows staged upload fileRefs above the inline parse limit", async () => {
+    await withTempConfig({
+      cfg: {},
+      prefix: "openclaw-chat-attachments-large-",
+      run: async () => {
+        const pdfBuffer = buildPdfBuffer(LARGE_STAGED_PDF_BYTES);
+        const saved = await saveMediaBuffer(
+          pdfBuffer,
+          "application/pdf",
+          UPLOADS_SUBDIR,
+          DEFAULT_UPLOAD_MAX_BYTES,
+          "large-exam.pdf",
+        );
+        const { parsed, logs } = await parseWithWarnings("review this large pdf", [
+          {
+            type: "document",
+            mimeType: "application/pdf",
+            fileRef: buildUploadFileRef(saved.id),
+          },
+        ]);
+        expect(parsed.images).toHaveLength(0);
+        expect(parsed.attachments).toHaveLength(1);
+        expect(parsed.attachments[0]?.fileName).toBe("large-exam.pdf");
+        expect(parsed.attachments[0]?.mimeType).toBe("application/pdf");
+        expect(Buffer.from(parsed.attachments[0]?.data ?? "", "base64").equals(pdfBuffer)).toBe(true);
         expect(logs).toHaveLength(1);
         expect(logs[0]).toMatch(/non-image/i);
       },

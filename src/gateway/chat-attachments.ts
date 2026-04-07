@@ -1,5 +1,6 @@
 import { estimateBase64DecodedBytes } from "../media/base64.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
+import { DEFAULT_UPLOAD_MAX_BYTES } from "./upload-constants.js";
 import { readUploadFileRef } from "./upload-file-ref.js";
 
 export type ChatAttachment = {
@@ -38,6 +39,7 @@ type NormalizedAttachment = {
   mime: string;
   base64: string;
   fileName?: string;
+  source: "inline" | "fileRef";
 };
 
 function normalizeMime(mime?: string): string | undefined {
@@ -81,13 +83,13 @@ function normalizeAttachment(
       base64 = dataUrlMatch[1];
     }
   }
-  return { label, mime, base64 };
+  return { label, mime, base64, source: "inline" };
 }
 
 async function normalizeAttachmentForParsing(
   att: ChatAttachment,
   idx: number,
-  opts: { stripDataUrlPrefix: boolean; maxBytes: number },
+  opts: { stripDataUrlPrefix: boolean; fileRefMaxBytes: number },
 ): Promise<NormalizedAttachment> {
   if (typeof att.content === "string") {
     return normalizeAttachment(att, idx, {
@@ -104,27 +106,30 @@ async function normalizeAttachmentForParsing(
 
   const uploaded = await readUploadFileRef({
     fileRef,
-    maxBytes: opts.maxBytes,
+    maxBytes: opts.fileRefMaxBytes,
   });
   return {
     label: att.fileName || uploaded.fileName || label,
     mime: att.mimeType ?? "",
     base64: uploaded.buffer.toString("base64"),
     fileName: att.fileName ?? uploaded.fileName,
+    source: "fileRef",
   };
 }
 
 function validateAttachmentBase64OrThrow(
   normalized: NormalizedAttachment,
-  opts: { maxBytes: number },
+  opts: { inlineMaxBytes: number; fileRefMaxBytes: number },
 ): number {
   if (!isValidBase64(normalized.base64)) {
     throw new Error(`attachment ${normalized.label}: invalid base64 content`);
   }
   const sizeBytes = estimateBase64DecodedBytes(normalized.base64);
-  if (sizeBytes <= 0 || sizeBytes > opts.maxBytes) {
+  const maxBytes =
+    normalized.source === "fileRef" ? opts.fileRefMaxBytes : opts.inlineMaxBytes;
+  if (sizeBytes <= 0 || sizeBytes > maxBytes) {
     throw new Error(
-      `attachment ${normalized.label}: exceeds size limit (${sizeBytes} > ${opts.maxBytes} bytes)`,
+      `attachment ${normalized.label}: exceeds size limit (${sizeBytes} > ${maxBytes} bytes)`,
     );
   }
   return sizeBytes;
@@ -138,9 +143,15 @@ function validateAttachmentBase64OrThrow(
 export async function parseMessageWithAttachments(
   message: string,
   attachments: ChatAttachment[] | undefined,
-  opts?: { maxBytes?: number; log?: AttachmentLog },
+  opts?: {
+    maxBytes?: number;
+    inlineMaxBytes?: number;
+    fileRefMaxBytes?: number;
+    log?: AttachmentLog;
+  },
 ): Promise<ParsedMessageWithAttachments> {
-  const maxBytes = opts?.maxBytes ?? 5_000_000; // decoded bytes (5,000,000)
+  const inlineMaxBytes = opts?.inlineMaxBytes ?? opts?.maxBytes ?? 5_000_000;
+  const fileRefMaxBytes = opts?.fileRefMaxBytes ?? opts?.maxBytes ?? DEFAULT_UPLOAD_MAX_BYTES;
   const log = opts?.log;
   if (!attachments || attachments.length === 0) {
     return { message, images: [], attachments: [] };
@@ -155,9 +166,9 @@ export async function parseMessageWithAttachments(
     }
     const normalized = await normalizeAttachmentForParsing(att, idx, {
       stripDataUrlPrefix: true,
-      maxBytes,
+      fileRefMaxBytes,
     });
-    validateAttachmentBase64OrThrow(normalized, { maxBytes });
+    validateAttachmentBase64OrThrow(normalized, { inlineMaxBytes, fileRefMaxBytes });
     const { base64: b64, label, mime } = normalized;
 
     const providedMime = normalizeMime(mime);
@@ -221,7 +232,10 @@ export function buildMessageWithAttachments(
       stripDataUrlPrefix: false,
       requireImageMime: true,
     });
-    validateAttachmentBase64OrThrow(normalized, { maxBytes });
+    validateAttachmentBase64OrThrow(normalized, {
+      inlineMaxBytes: maxBytes,
+      fileRefMaxBytes: maxBytes,
+    });
     const { base64, label, mime } = normalized;
 
     const safeLabel = label.replace(/\s+/g, "_");
