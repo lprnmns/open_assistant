@@ -979,8 +979,14 @@ class NodeRuntime(
     fileName: String,
     mimeType: String,
     bytes: ByteArray,
+    onProgress: ((sentBytes: Long, totalBytes: Long) -> Unit)? = null,
   ): String {
-    return chat.uploadAttachment(fileName = fileName, mimeType = mimeType, bytes = bytes)
+    return chat.uploadAttachment(
+      fileName = fileName,
+      mimeType = mimeType,
+      bytes = bytes,
+      onProgress = onProgress,
+    )
   }
 
   private fun handleGatewayEvent(event: String, payloadJson: String?) {

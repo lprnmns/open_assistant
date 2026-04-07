@@ -32,6 +32,10 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okhttp3.MediaType.Companion.toMediaType
+import okio.Buffer
+import okio.BufferedSink
+import okio.ForwardingSink
+import okio.buffer
 
 data class GatewayClientInfo(
   val id: String,
@@ -230,6 +234,7 @@ class GatewaySession(
     mimeType: String,
     bytes: ByteArray,
     timeoutMs: Long = 60_000,
+    onProgress: ((sentBytes: Long, totalBytes: Long) -> Unit)? = null,
   ): UploadResult {
     val conn = currentConnection ?: throw IllegalStateException("not connected")
     return conn.uploadFile(
@@ -237,6 +242,7 @@ class GatewaySession(
       mimeType = mimeType,
       bytes = bytes,
       timeoutMs = timeoutMs,
+      onProgress = onProgress,
     )
   }
 
@@ -343,6 +349,7 @@ class GatewaySession(
       mimeType: String,
       bytes: ByteArray,
       timeoutMs: Long,
+      onProgress: ((sentBytes: Long, totalBytes: Long) -> Unit)?,
     ): UploadResult {
       val bearerToken = resolveUploadBearerToken()
       if (bearerToken.isNullOrBlank()) {
@@ -356,7 +363,7 @@ class GatewaySession(
           .url(url)
           .header("Authorization", "Bearer $bearerToken")
           .header("X-OpenClaw-File-Name", fileName)
-          .post(bytes.toRequestBody(mimeType.toMediaType()))
+          .post(buildUploadRequestBody(bytes = bytes, mimeType = mimeType, onProgress = onProgress))
           .build()
       val httpClient =
         client.newBuilder()
@@ -423,6 +430,39 @@ class GatewaySession(
 
     private fun bytesLengthFromUploadPayload(payload: JsonObject): Long {
       return payload["size"]?.asLongOrNull() ?: 0L
+    }
+
+    private fun buildUploadRequestBody(
+      bytes: ByteArray,
+      mimeType: String,
+      onProgress: ((sentBytes: Long, totalBytes: Long) -> Unit)?,
+    ): okhttp3.RequestBody {
+      val contentType = mimeType.toMediaType()
+      val delegate = bytes.toRequestBody(contentType)
+      if (onProgress == null) {
+        return delegate
+      }
+      val totalBytes = bytes.size.toLong()
+      return object : okhttp3.RequestBody() {
+        override fun contentType() = contentType
+
+        override fun contentLength(): Long = totalBytes
+
+        override fun writeTo(sink: BufferedSink) {
+          var writtenBytes = 0L
+          onProgress(0L, totalBytes)
+          val countingSink =
+            object : ForwardingSink(sink) {
+              override fun write(source: Buffer, byteCount: Long) {
+                super.write(source, byteCount)
+                writtenBytes += byteCount
+                onProgress(writtenBytes.coerceAtMost(totalBytes), totalBytes)
+              }
+            }.buffer()
+          delegate.writeTo(countingSink)
+          countingSink.flush()
+        }
+      }
     }
 
     suspend fun awaitClose() = closedDeferred.await()

@@ -210,8 +210,14 @@ class ChatController(
     fileName: String,
     mimeType: String,
     bytes: ByteArray,
+    onProgress: ((sentBytes: Long, totalBytes: Long) -> Unit)? = null,
   ): String {
-    return session.uploadFile(fileName = fileName, mimeType = mimeType, bytes = bytes).fileRef
+    return session.uploadFile(
+      fileName = fileName,
+      mimeType = mimeType,
+      bytes = bytes,
+      onProgress = onProgress,
+    ).fileRef
   }
 
   fun abort() {

@@ -281,7 +281,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fileName: String,
     mimeType: String,
     bytes: ByteArray,
+    onProgress: ((sentBytes: Long, totalBytes: Long) -> Unit)? = null,
   ): String {
-    return ensureRuntime().uploadChatAttachment(fileName = fileName, mimeType = mimeType, bytes = bytes)
+    return ensureRuntime().uploadChatAttachment(
+      fileName = fileName,
+      mimeType = mimeType,
+      bytes = bytes,
+      onProgress = onProgress,
+    )
   }
 }

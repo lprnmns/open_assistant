@@ -340,6 +340,7 @@ class GatewaySessionInvokeTest {
     val lastDisconnect = AtomicReference("")
     val uploadedRequest = CompletableDeferred<RecordedRequest>()
     val activeSocket = AtomicReference<WebSocket?>(null)
+    val uploadProgress = mutableListOf<Pair<Long, Long>>()
     val uploadBytes = "%PDF-1.4\nexam schedule\n".toByteArray()
     val server =
       startGatewayServer(
@@ -380,6 +381,9 @@ class GatewaySessionInvokeTest {
           mimeType = "application/pdf",
           bytes = uploadBytes,
           timeoutMs = TEST_TIMEOUT_MS,
+          onProgress = { sentBytes, totalBytes ->
+            uploadProgress += sentBytes to totalBytes
+          },
         )
       val request = withTimeout(TEST_TIMEOUT_MS) { uploadedRequest.await() }
 
@@ -392,6 +396,7 @@ class GatewaySessionInvokeTest {
       assertEquals("exam.pdf", result.fileName)
       assertEquals("application/pdf", result.mimeType)
       assertEquals(uploadBytes.size.toLong(), result.size)
+      assertEquals(uploadBytes.size.toLong() to uploadBytes.size.toLong(), uploadProgress.last())
     } finally {
       shutdownHarness(harness, server)
     }

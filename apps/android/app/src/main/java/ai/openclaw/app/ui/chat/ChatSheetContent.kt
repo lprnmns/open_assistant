@@ -16,6 +16,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -74,6 +75,8 @@ fun ChatSheetContent(viewModel: MainViewModel) {
   val attachments = remember { mutableStateListOf<PendingChatAttachment>() }
   var attachmentError by rememberSaveable { mutableStateOf<String?>(null) }
   var preparingSend by remember { mutableStateOf(false) }
+  var uploadProgress by remember { mutableStateOf<Float?>(null) }
+  var uploadFileName by remember { mutableStateOf<String?>(null) }
 
   val pickImages =
     rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
@@ -148,6 +151,12 @@ fun ChatSheetContent(viewModel: MainViewModel) {
     if (!attachmentError.isNullOrBlank()) {
       ChatErrorRail(errorText = attachmentError!!)
     }
+    if (uploadProgress != null) {
+      ChatUploadRail(
+        fileName = uploadFileName ?: "attachment",
+        progress = uploadProgress ?: 0f,
+      )
+    }
 
     ChatMessageListCard(
       messages = messages,
@@ -184,39 +193,57 @@ fun ChatSheetContent(viewModel: MainViewModel) {
           scope.launch {
             preparingSend = true
             try {
-              val outgoing =
-                withContext(Dispatchers.IO) {
-                  pendingAttachments.map { att ->
-                    val inlineBase64 = att.base64
-                    if (inlineBase64 != null) {
-                      return@map OutgoingAttachment(
-                        type = att.type,
-                        mimeType = att.mimeType,
-                        fileName = att.fileName,
-                        base64 = inlineBase64,
-                      )
-                    }
-                    val sourceUri = att.sourceUri ?: throw IllegalStateException("unsupported attachment")
-                    val uploadBytes =
-                      readAttachmentBytesForUpload(
-                        resolver = resolver,
-                        uri = Uri.parse(sourceUri),
-                        maxBytes = CHAT_DOCUMENT_STAGED_UPLOAD_MAX_BYTES,
-                      )
-                    val fileRef =
-                      viewModel.uploadChatAttachment(
-                        fileName = att.fileName,
-                        mimeType = att.mimeType,
-                        bytes = uploadBytes,
-                      )
+              val outgoing = mutableListOf<OutgoingAttachment>()
+              for (att in pendingAttachments) {
+                val inlineBase64 = att.base64
+                if (inlineBase64 != null) {
+                  outgoing +=
                     OutgoingAttachment(
                       type = att.type,
                       mimeType = att.mimeType,
                       fileName = att.fileName,
-                      fileRef = fileRef,
+                      base64 = inlineBase64,
+                    )
+                  continue
+                }
+
+                val sourceUri = att.sourceUri ?: throw IllegalStateException("unsupported attachment")
+                uploadFileName = att.fileName
+                uploadProgress = 0f
+                val uploadBytes =
+                  withContext(Dispatchers.IO) {
+                    readAttachmentBytesForUpload(
+                      resolver = resolver,
+                      uri = Uri.parse(sourceUri),
+                      maxBytes = CHAT_DOCUMENT_STAGED_UPLOAD_MAX_BYTES,
                     )
                   }
-                }
+                val fileRef =
+                  viewModel.uploadChatAttachment(
+                    fileName = att.fileName,
+                    mimeType = att.mimeType,
+                    bytes = uploadBytes,
+                    onProgress = { sentBytes, totalBytes ->
+                      val nextProgress =
+                        if (totalBytes <= 0L) {
+                          0f
+                        } else {
+                          (sentBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                        }
+                      scope.launch {
+                        uploadProgress = nextProgress
+                      }
+                    },
+                  )
+                uploadProgress = 1f
+                outgoing +=
+                  OutgoingAttachment(
+                    type = att.type,
+                    mimeType = att.mimeType,
+                    fileName = att.fileName,
+                    fileRef = fileRef,
+                  )
+              }
               attachmentError = null
               viewModel.sendChat(message = text, thinking = thinkingLevel, attachments = outgoing)
               clearInput()
@@ -225,9 +252,46 @@ fun ChatSheetContent(viewModel: MainViewModel) {
               attachmentError = attachmentLoadErrorMessage(error)
             } finally {
               preparingSend = false
+              uploadProgress = null
+              uploadFileName = null
             }
           }
         },
+      )
+    }
+  }
+}
+
+@Composable
+private fun ChatUploadRail(fileName: String, progress: Float) {
+  val percent = (progress.coerceIn(0f, 1f) * 100).toInt()
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    color = mobileCardSurface,
+    shape = RoundedCornerShape(12.dp),
+    border = BorderStroke(1.dp, mobileAccentBorderStrong),
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+      Text(
+        text = "Uploading $fileName",
+        style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold),
+        color = mobileText,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+      LinearProgressIndicator(
+        progress = { progress.coerceIn(0f, 1f) },
+        modifier = Modifier.fillMaxWidth(),
+        color = mobileAccent,
+        trackColor = mobileDangerSoft,
+      )
+      Text(
+        text = "$percent%",
+        style = mobileCaption2,
+        color = mobileText,
       )
     }
   }
