@@ -5,10 +5,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   _resetInteractionTrackerForTest,
+  acknowledgePendingProactiveDeliveries,
   getActiveDeliveryTarget,
   getActiveChannelId,
   getActiveChannelType,
   getLastUserInteractionAt,
+  getPendingProactiveDeliveries,
+  queuePendingProactiveDelivery,
   recordDeliveryTargetInteraction,
   recordUserInteraction,
   resolveDeliveryTargetFromInteraction,
@@ -91,6 +94,71 @@ describe("InteractionTracker", () => {
     });
     expect(getActiveChannelId()).toBe("android-node-1");
     expect(getActiveChannelType()).toBeUndefined();
+  });
+
+  it("queues pending proactive deliveries for node targets", () => {
+    const queuedAt = Date.now() - 1_000;
+    const queued = queuePendingProactiveDelivery({
+      target: {
+        kind: "node",
+        id: "android-node-1",
+        nodeId: "android-node-1",
+      },
+      content: "Ping me later",
+      queuedAt,
+      id: "queued-1",
+    });
+
+    expect(queued).toEqual({
+      id: "queued-1",
+      target: {
+        kind: "node",
+        id: "android-node-1",
+        nodeId: "android-node-1",
+        label: undefined,
+      },
+      content: "Ping me later",
+      queuedAt,
+    });
+    expect(getPendingProactiveDeliveries()).toEqual([queued]);
+  });
+
+  it("acknowledges queued proactive deliveries by id", () => {
+    const queuedAt = Date.now() - 1_000;
+    queuePendingProactiveDelivery({
+      target: {
+        kind: "node",
+        id: "android-node-1",
+      },
+      content: "first",
+      queuedAt,
+      id: "queued-1",
+    });
+    queuePendingProactiveDelivery({
+      target: {
+        kind: "node",
+        id: "android-node-2",
+      },
+      content: "second",
+      queuedAt: queuedAt + 1_000,
+      id: "queued-2",
+    });
+
+    acknowledgePendingProactiveDeliveries(["queued-1"]);
+
+    expect(getPendingProactiveDeliveries()).toEqual([
+      {
+        id: "queued-2",
+        target: {
+          kind: "node",
+          id: "android-node-2",
+          nodeId: undefined,
+          label: undefined,
+        },
+        content: "second",
+        queuedAt: queuedAt + 1_000,
+      },
+    ]);
   });
 
   it("each call updates the timestamp monotonically", () => {

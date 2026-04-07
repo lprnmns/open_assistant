@@ -8,6 +8,7 @@ import {
   getDeliveryTargetChannelType,
   type DeliveryTarget,
 } from "./delivery-target.js";
+import { queuePendingProactiveDelivery } from "./interaction-tracker.js";
 import { ingestConversationTurn } from "./turn-ingestion.js";
 
 type BootChannelSender = (params: {
@@ -23,6 +24,7 @@ export type BootDeliveryTargetSenderDeps = {
   ingestTurn?: typeof ingestConversationTurn;
   resolveRuntimeSender?: () => DeliveryTargetSender | null;
   sendChannelReply?: BootChannelSender;
+  queuePendingDelivery?: typeof queuePendingProactiveDelivery;
 };
 
 export function createBootDeliveryTargetSender(
@@ -32,16 +34,34 @@ export function createBootDeliveryTargetSender(
   const sendChannelReply = deps.sendChannelReply ?? defaultSendChannelReply;
   const resolveRuntimeSender =
     deps.resolveRuntimeSender ?? getConsciousnessDeliveryTargetSender;
+  const queuePendingDelivery = deps.queuePendingDelivery ?? queuePendingProactiveDelivery;
 
   return async (target: DeliveryTarget, content: string) => {
     if (target.kind === "node") {
       const runtimeSender = resolveRuntimeSender();
       if (!runtimeSender) {
-        throw new Error(
-          `No proactive transport available for delivery target kind "${target.kind}"`,
-        );
+        queuePendingDelivery({ target, content });
+        await ingestTurn({
+          direction: "assistant/proactive",
+          sessionKey: deps.sessionKey,
+          text: content,
+        });
+        return;
       }
-      await runtimeSender(target, content);
+      try {
+        await runtimeSender(target, content);
+      } catch (error) {
+        if (!isQueueableNodeDeliveryError(error)) {
+          throw error;
+        }
+        queuePendingDelivery({ target, content });
+        await ingestTurn({
+          direction: "assistant/proactive",
+          sessionKey: deps.sessionKey,
+          text: content,
+        });
+        return;
+      }
       await ingestTurn({
         direction: "assistant/proactive",
         sessionKey: deps.sessionKey,
@@ -75,6 +95,19 @@ export function createBootDeliveryTargetSender(
       text: content,
     });
   };
+}
+
+function isQueueableNodeDeliveryError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message.trim().toLowerCase()
+      : String(error).trim().toLowerCase();
+  return (
+    message.includes("not connected") ||
+    message.includes("disconnected") ||
+    message.includes("timed out") ||
+    message.includes("failed to send invoke")
+  );
 }
 
 async function defaultSendChannelReply(params: {

@@ -18,6 +18,10 @@ import fs from "node:fs";
 import path from "node:path";
 import type { DeliveryTarget } from "./delivery-target.js";
 import { migrateLegacyActiveChannel, normalizeDeliveryTarget } from "./delivery-target.js";
+import {
+  prunePendingProactiveDeliveries,
+  type PendingProactiveDelivery,
+} from "./pending-proactive-delivery.js";
 
 // ── Persisted state ───────────────────────────────────────────────────────────
 
@@ -41,6 +45,8 @@ export type PersistedInteractionState = {
   lastTickAt?: number;
   /** Unix ms of the last proactive SEND_MESSAGE dispatch. Wired in WS-1.3. */
   lastProactiveSentAt?: number;
+  /** Persisted queue for proactive node deliveries that should retry on reconnect. */
+  pendingProactiveDeliveries?: PendingProactiveDelivery[];
 };
 
 // ── InteractionStore interface ────────────────────────────────────────────────
@@ -195,6 +201,9 @@ function normalizePersistedInteractionState(
   const activeDeliveryTarget =
     normalizeDeliveryTarget(state.activeDeliveryTarget) ??
     migrateLegacyActiveChannel(state.activeChannelId, state.activeChannelType);
+  const pendingProactiveDeliveries = prunePendingProactiveDeliveries(
+    state.pendingProactiveDeliveries,
+  );
   const legacyChannelId =
     activeDeliveryTarget?.kind === "none" ? undefined : activeDeliveryTarget?.id;
   const legacyChannelType =
@@ -207,6 +216,8 @@ function normalizePersistedInteractionState(
     activeDeliveryTarget,
     activeChannelId: legacyChannelId,
     activeChannelType: legacyChannelType,
+    pendingProactiveDeliveries:
+      pendingProactiveDeliveries.length > 0 ? pendingProactiveDeliveries : undefined,
   };
 }
 

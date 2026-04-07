@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { OriginatingChannelType } from "../auto-reply/templating.js";
 import {
   getDeliveryTargetChannelId,
@@ -8,6 +9,10 @@ import {
   type DeliveryTarget,
 } from "./delivery-target.js";
 import type { InteractionStore, PersistedInteractionState } from "./interaction-store.js";
+import {
+  prunePendingProactiveDeliveries,
+  type PendingProactiveDelivery,
+} from "./pending-proactive-delivery.js";
 
 /**
  * src/consciousness/interaction-tracker.ts
@@ -35,6 +40,7 @@ export type InteractionRouteLike = {
 
 let _lastUserInteractionAt: number | undefined = undefined;
 let _activeDeliveryTarget: DeliveryTarget | undefined = undefined;
+let _pendingProactiveDeliveries: PendingProactiveDelivery[] = [];
 let _store: InteractionStore | null = null;
 
 function normalizeRouteValue(value: string | undefined): string | undefined {
@@ -97,6 +103,7 @@ export function seedInteractionTracker(state: PersistedInteractionState): void {
   if (activeDeliveryTarget !== undefined) {
     _activeDeliveryTarget = activeDeliveryTarget;
   }
+  _pendingProactiveDeliveries = prunePendingProactiveDeliveries(state.pendingProactiveDeliveries);
 }
 
 export function recordDeliveryTargetInteraction(
@@ -144,9 +151,67 @@ export function getActiveChannelType(): OriginatingChannelType | undefined {
   return getDeliveryTargetChannelType(_activeDeliveryTarget);
 }
 
+export function queuePendingProactiveDelivery(params: {
+  target: DeliveryTarget;
+  content: string;
+  queuedAt?: number;
+  id?: string;
+}): PendingProactiveDelivery | undefined {
+  const target = normalizeDeliveryTarget(params.target);
+  const content = params.content.trim();
+  if (!target || target.kind !== "node" || !content) {
+    return undefined;
+  }
+  const queuedAt = params.queuedAt ?? Date.now();
+  const entry: PendingProactiveDelivery = {
+    id: params.id?.trim() || randomUUID(),
+    target,
+    content,
+    queuedAt,
+  };
+  _pendingProactiveDeliveries = prunePendingProactiveDeliveries([
+    ..._pendingProactiveDeliveries,
+    entry,
+  ]);
+  _store?.save({
+    pendingProactiveDeliveries: _pendingProactiveDeliveries,
+  });
+  return entry;
+}
+
+export function getPendingProactiveDeliveries(now = Date.now()): PendingProactiveDelivery[] {
+  const next = prunePendingProactiveDeliveries(_pendingProactiveDeliveries, now);
+  if (next.length !== _pendingProactiveDeliveries.length) {
+    _pendingProactiveDeliveries = next;
+    _store?.save({
+      pendingProactiveDeliveries: _pendingProactiveDeliveries,
+    });
+  }
+  return [..._pendingProactiveDeliveries];
+}
+
+export function acknowledgePendingProactiveDeliveries(ids: string[]): void {
+  if (ids.length === 0) {
+    return;
+  }
+  const seen = new Set(ids.map((id) => id.trim()).filter(Boolean));
+  if (seen.size === 0) {
+    return;
+  }
+  const next = _pendingProactiveDeliveries.filter((entry) => !seen.has(entry.id));
+  if (next.length === _pendingProactiveDeliveries.length) {
+    return;
+  }
+  _pendingProactiveDeliveries = next;
+  _store?.save({
+    pendingProactiveDeliveries: _pendingProactiveDeliveries,
+  });
+}
+
 /** Reset state — for tests only, never call in production. */
 export function _resetInteractionTrackerForTest(): void {
   _lastUserInteractionAt = undefined;
   _activeDeliveryTarget = undefined;
+  _pendingProactiveDeliveries = [];
   _store = null;
 }

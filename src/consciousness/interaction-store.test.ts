@@ -75,10 +75,19 @@ describe("FileInteractionStore", () => {
   });
 
   it("loadSync parses valid state", () => {
+    const queuedAt = Date.now() - 1_000;
     const state: PersistedInteractionState = {
       lastUserInteractionAt: 1_700_000_000_000,
       activeChannelId: "telegram:123",
       activeChannelType: "telegram",
+      pendingProactiveDeliveries: [
+        {
+          id: "queued-1",
+          target: { kind: "node", id: "android-node-1" },
+          content: "Ping me later",
+          queuedAt,
+        },
+      ],
     };
     const store = makeStore({ readReturn: JSON.stringify(state) });
     expect(store.loadSync()).toEqual({
@@ -88,6 +97,19 @@ describe("FileInteractionStore", () => {
         id: "telegram:123",
         channelType: "telegram",
       },
+      pendingProactiveDeliveries: [
+        {
+          id: "queued-1",
+          target: {
+            kind: "node",
+            id: "android-node-1",
+            nodeId: undefined,
+            label: undefined,
+          },
+          content: "Ping me later",
+          queuedAt,
+        },
+      ],
     });
   });
 
@@ -107,12 +129,21 @@ describe("FileInteractionStore", () => {
   });
 
   it("partial saves shallow-merge: earlier fields not in a later partial are preserved", async () => {
+    const queuedAt = Date.now() - 1_000;
     const writes: Array<{ path: string; data: string }> = [];
     const store = makeStore({ writes });
     // First save: WS-1.2/1.3 fields
     store.save({
       effectiveSilenceThresholdMs: 259_200_000,
       lastProactiveSentAt: 1_700_000_000_000,
+      pendingProactiveDeliveries: [
+        {
+          id: "queued-1",
+          target: { kind: "node", id: "android-node-1" },
+          content: "Queued proactive",
+          queuedAt,
+        },
+      ],
     });
     // Second save: WS-1.1 tracker fields (only 3 fields — must not wipe the first two)
     store.save({
@@ -126,6 +157,19 @@ describe("FileInteractionStore", () => {
     // All five fields must survive
     expect(parsed.effectiveSilenceThresholdMs).toBe(259_200_000);
     expect(parsed.lastProactiveSentAt).toBe(1_700_000_000_000);
+    expect(parsed.pendingProactiveDeliveries).toEqual([
+      {
+        id: "queued-1",
+        target: {
+          kind: "node",
+          id: "android-node-1",
+          nodeId: undefined,
+          label: undefined,
+        },
+        content: "Queued proactive",
+        queuedAt,
+      },
+    ]);
     expect(parsed.lastUserInteractionAt).toBe(1_700_001_000_000);
     expect(parsed.activeChannelId).toBe("telegram:42");
     expect(parsed.activeChannelType).toBe("telegram");

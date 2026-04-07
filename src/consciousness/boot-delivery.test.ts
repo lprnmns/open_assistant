@@ -38,24 +38,71 @@ describe("createBootDeliveryTargetSender", () => {
 
   it("fails for node targets when no runtime sender is registered", async () => {
     const ingestTurn = vi.fn().mockResolvedValue(undefined);
+    const queuePendingDelivery = vi.fn();
     const sendToTarget = createBootDeliveryTargetSender({
       loadConfig: () => ({}) as never,
       sessionKey: "main",
       ingestTurn,
       resolveRuntimeSender: () => null,
+      queuePendingDelivery,
     });
 
-    await expect(
-      sendToTarget(
-        {
-          kind: "node",
-          id: "android-node-1",
-          nodeId: "android-node-1",
-        },
-        "Ping me",
-      ),
-    ).rejects.toThrow('No proactive transport available for delivery target kind "node"');
-    expect(ingestTurn).not.toHaveBeenCalled();
+    await sendToTarget(
+      {
+        kind: "node",
+        id: "android-node-1",
+        nodeId: "android-node-1",
+      },
+      "Ping me",
+    );
+
+    expect(queuePendingDelivery).toHaveBeenCalledWith({
+      target: {
+        kind: "node",
+        id: "android-node-1",
+        nodeId: "android-node-1",
+      },
+      content: "Ping me",
+    });
+    expect(ingestTurn).toHaveBeenCalledWith({
+      direction: "assistant/proactive",
+      sessionKey: "main",
+      text: "Ping me",
+    });
+  });
+
+  it("queues node deliveries when the runtime sender fails with a disconnect-like error", async () => {
+    const runtimeSender = vi.fn().mockRejectedValue(new Error("node not connected"));
+    const ingestTurn = vi.fn().mockResolvedValue(undefined);
+    const queuePendingDelivery = vi.fn();
+    const sendToTarget = createBootDeliveryTargetSender({
+      loadConfig: () => ({}) as never,
+      sessionKey: "main",
+      ingestTurn,
+      resolveRuntimeSender: () => runtimeSender,
+      queuePendingDelivery,
+    });
+
+    await sendToTarget(
+      {
+        kind: "node",
+        id: "android-node-1",
+      },
+      "Retry me later",
+    );
+
+    expect(queuePendingDelivery).toHaveBeenCalledWith({
+      target: {
+        kind: "node",
+        id: "android-node-1",
+      },
+      content: "Retry me later",
+    });
+    expect(ingestTurn).toHaveBeenCalledWith({
+      direction: "assistant/proactive",
+      sessionKey: "main",
+      text: "Retry me later",
+    });
   });
 
   it("routes channel targets through the channel sender and ingests the proactive turn", async () => {

@@ -35,10 +35,16 @@ export type NodeInvokeResult = {
   error?: { code?: string; message?: string } | null;
 };
 
+type NodeRegistryHooks = {
+  onRegister?: (session: NodeSession) => void;
+};
+
 export class NodeRegistry {
   private nodesById = new Map<string, NodeSession>();
   private nodesByConn = new Map<string, string>();
   private pendingInvokes = new Map<string, PendingInvoke>();
+
+  constructor(private readonly hooks: NodeRegistryHooks = {}) {}
 
   register(client: GatewayWsClient, opts: { remoteIp?: string | undefined }) {
     const connect = client.connect;
@@ -75,6 +81,7 @@ export class NodeRegistry {
     };
     this.nodesById.set(nodeId, session);
     this.nodesByConn.set(client.connId, nodeId);
+    this.hooks.onRegister?.(session);
     return session;
   }
 

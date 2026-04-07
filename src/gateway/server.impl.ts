@@ -84,6 +84,7 @@ import {
 import { ExecApprovalManager } from "./exec-approval-manager.js";
 import { startGatewayModelPricingRefresh } from "./model-pricing-cache.js";
 import { NodeRegistry } from "./node-registry.js";
+import { drainPendingProactiveNodeDeliveries } from "./proactive-node-queue.js";
 import { createNodeProactiveDeliverySender } from "./proactive-node-delivery.js";
 import type { startBrowserControlServerIfEnabled } from "./server-browser.js";
 import { createChannelManager } from "./server-channels.js";
@@ -725,7 +726,16 @@ export async function startGatewayServer(
     getReadiness,
   });
   let bonjourStop: (() => Promise<void>) | null = null;
-  const nodeRegistry = new NodeRegistry();
+  const nodeRegistry = new NodeRegistry({
+    onRegister: (session) => {
+      void drainPendingProactiveNodeDeliveries({
+        nodeId: session.nodeId,
+        sender: createNodeProactiveDeliverySender(nodeRegistry),
+      }).catch((error) =>
+        log.warn(`failed to drain queued proactive deliveries for ${session.nodeId}: ${formatError(error)}`),
+      );
+    },
+  });
   setConsciousnessDeliveryTargetSender(createNodeProactiveDeliverySender(nodeRegistry));
   const nodePresenceTimers = new Map<string, ReturnType<typeof setInterval>>();
   const nodeSubscriptions = createNodeSubscriptionManager();
