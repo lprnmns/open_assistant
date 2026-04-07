@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import { emitAgentEvent, registerAgentRunContext } from "../infra/agent-events.js";
+import { saveMediaBuffer } from "../media/store.js";
 import { extractFirstTextBlock } from "../shared/chat-message-content.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import {
@@ -18,6 +19,7 @@ import {
 } from "./test-helpers.js";
 import { agentCommand } from "./test-helpers.mocks.js";
 import { installConnectedControlUiServerSuite } from "./test-with-server.js";
+import { buildUploadFileRef, UPLOADS_SUBDIR } from "./upload-file-ref.js";
 
 installGatewayTestHooks({ scope: "suite" });
 const CHAT_RESPONSE_TIMEOUT_MS = 4_000;
@@ -621,6 +623,73 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.send resolves staged PDF fileRefs for the reply pipeline and persisted media", async () => {
+    await withMainSessionStore(async () => {
+      const pdfBuffer = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n");
+      const uploaded = await saveMediaBuffer(
+        pdfBuffer,
+        "application/pdf",
+        UPLOADS_SUBDIR,
+        undefined,
+        "midterm-exam.pdf",
+      );
+      let capturedCtx:
+        | {
+            MediaPath?: string;
+            MediaPaths?: string[];
+            MediaType?: string;
+            MediaTypes?: string[];
+          }
+        | undefined;
+      mockGetReplyFromConfigOnce(async (ctx) => {
+        capturedCtx = {
+          MediaPath: ctx.MediaPath,
+          MediaPaths: ctx.MediaPaths ? [...ctx.MediaPaths] : undefined,
+          MediaType: ctx.MediaType,
+          MediaTypes: ctx.MediaTypes ? [...ctx.MediaTypes] : undefined,
+        };
+        return { text: "staged pdf received" };
+      });
+
+      const finalPromise = onceMessage(
+        ws,
+        (o) =>
+          o.type === "event" &&
+          o.event === "chat" &&
+          o.payload?.state === "final" &&
+          o.payload?.runId === "idem-staged-pdf-1",
+        8000,
+      );
+
+      const sendRes = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "review this staged pdf",
+        idempotencyKey: "idem-staged-pdf-1",
+        attachments: [
+          {
+            type: "document",
+            fileRef: buildUploadFileRef(uploaded.id),
+          },
+        ],
+      });
+      expect(sendRes.ok).toBe(true);
+      await finalPromise;
+
+      expect(capturedCtx?.MediaPath).toBeTruthy();
+      expect(capturedCtx?.MediaPaths).toHaveLength(1);
+      expect(capturedCtx?.MediaType).toBe("application/pdf");
+      expect(capturedCtx?.MediaTypes).toEqual(["application/pdf"]);
+      const mediaPath = capturedCtx?.MediaPath;
+      expect(typeof mediaPath).toBe("string");
+      if (typeof mediaPath !== "string") {
+        return;
+      }
+      const persisted = await fs.readFile(mediaPath);
+      expect(persisted.equals(pdfBuffer)).toBe(true);
+      expect(path.basename(mediaPath)).toContain("midterm-exam");
+    });
+  });
+
   test("chat.history preserves persisted PDF attachment metadata for user turns", async () => {
     await withMainSessionStore(async () => {
       const pdfB64 = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n").toString("base64");
@@ -700,6 +769,73 @@ describe("gateway server chat", () => {
       expect(attachmentBlock).toBeTruthy();
       const persisted = await fs.readFile(mediaPath);
       expect(persisted.subarray(0, 8).toString("utf-8")).toContain("%PDF-1.4");
+    });
+  });
+
+  test("chat.history preserves staged PDF fileRef metadata for user turns", async () => {
+    await withMainSessionStore(async () => {
+      const pdfBuffer = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n");
+      const uploaded = await saveMediaBuffer(
+        pdfBuffer,
+        "application/pdf",
+        UPLOADS_SUBDIR,
+        undefined,
+        "final-schedule.pdf",
+      );
+      mockGetReplyFromConfigOnce(async () => ({ text: "staged pdf received" }));
+
+      const finalPromise = onceMessage(
+        ws,
+        (o) =>
+          o.type === "event" &&
+          o.event === "chat" &&
+          o.payload?.state === "final" &&
+          o.payload?.runId === "idem-staged-pdf-history-1",
+        8000,
+      );
+
+      const sendRes = await rpcReq(ws, "chat.send", {
+        sessionKey: "main",
+        message: "review staged history pdf",
+        idempotencyKey: "idem-staged-pdf-history-1",
+        attachments: [
+          {
+            type: "document",
+            fileRef: buildUploadFileRef(uploaded.id),
+          },
+        ],
+      });
+      expect(sendRes.ok).toBe(true);
+      await finalPromise;
+
+      const historyRes = await rpcReq<{ messages?: Array<Record<string, unknown>> }>(ws, "chat.history", {
+        sessionKey: "main",
+      });
+      expect(historyRes.ok).toBe(true);
+
+      const historyMessages = historyRes.payload?.messages ?? [];
+      const userMessage = historyMessages.find((message) => {
+        if (!message || typeof message !== "object") {
+          return false;
+        }
+        const entry = message as { role?: unknown; content?: unknown };
+        const contentText =
+          typeof entry.content === "string" ? entry.content : extractFirstTextBlock(message);
+        return entry.role === "user" && contentText === "review staged history pdf";
+      });
+
+      expect(userMessage).toBeTruthy();
+      const entry = userMessage as Record<string, unknown>;
+      expect(entry.MediaType).toBe("application/pdf");
+      expect(typeof entry.MediaPath).toBe("string");
+      const mediaPath = entry.MediaPath;
+      expect(typeof mediaPath).toBe("string");
+      if (typeof mediaPath !== "string") {
+        return;
+      }
+      expect(path.basename(mediaPath)).toContain("final-schedule");
+      const persisted = await fs.readFile(mediaPath);
+      expect(persisted.equals(pdfBuffer)).toBe(true);
     });
   });
 
