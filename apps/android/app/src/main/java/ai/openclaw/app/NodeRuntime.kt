@@ -975,6 +975,14 @@ class NodeRuntime(
     chat.sendMessage(message = message, thinkingLevel = thinking, attachments = attachments)
   }
 
+  suspend fun uploadChatAttachment(
+    fileName: String,
+    mimeType: String,
+    bytes: ByteArray,
+  ): String {
+    return chat.uploadAttachment(fileName = fileName, mimeType = mimeType, bytes = bytes)
+  }
+
   private fun handleGatewayEvent(event: String, payloadJson: String?) {
     micCapture.handleGatewayEvent(event, payloadJson)
     talkMode.handleGatewayEvent(event, payloadJson)

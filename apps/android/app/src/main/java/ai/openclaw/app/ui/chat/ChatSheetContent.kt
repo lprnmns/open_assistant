@@ -1,5 +1,6 @@
 package ai.openclaw.app.ui.chat
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -72,6 +73,7 @@ fun ChatSheetContent(viewModel: MainViewModel) {
 
   val attachments = remember { mutableStateListOf<PendingChatAttachment>() }
   var attachmentError by rememberSaveable { mutableStateOf<String?>(null) }
+  var preparingSend by remember { mutableStateOf(false) }
 
   val pickImages =
     rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
@@ -161,29 +163,70 @@ fun ChatSheetContent(viewModel: MainViewModel) {
         healthOk = healthOk,
         thinkingLevel = thinkingLevel,
         pendingRunCount = pendingRunCount,
+        isPreparingSend = preparingSend,
         attachments = attachments,
         onPickImages = { pickImages.launch("image/*") },
         onPickDocument = { pickDocument.launch("application/pdf") },
-        onRemoveAttachment = { id -> attachments.removeAll { it.id == id } },
+        onRemoveAttachment = { id ->
+          if (!preparingSend) {
+            attachments.removeAll { it.id == id }
+          }
+        },
         onSetThinkingLevel = { level -> viewModel.setChatThinkingLevel(level) },
         onRefresh = {
           viewModel.refreshChat()
           viewModel.refreshChatSessions(limit = 200)
         },
         onAbort = { viewModel.abortChat() },
-        onSend = { text ->
-          val outgoing =
-            attachments.map { att ->
-              OutgoingAttachment(
-                type = att.type,
-                mimeType = att.mimeType,
-                fileName = att.fileName,
-                base64 = att.base64,
-              )
+        onSend = { text, clearInput ->
+          if (preparingSend) return@ChatComposer
+          val pendingAttachments = attachments.toList()
+          scope.launch {
+            preparingSend = true
+            try {
+              val outgoing =
+                withContext(Dispatchers.IO) {
+                  pendingAttachments.map { att ->
+                    val inlineBase64 = att.base64
+                    if (inlineBase64 != null) {
+                      return@map OutgoingAttachment(
+                        type = att.type,
+                        mimeType = att.mimeType,
+                        fileName = att.fileName,
+                        base64 = inlineBase64,
+                      )
+                    }
+                    val sourceUri = att.sourceUri ?: throw IllegalStateException("unsupported attachment")
+                    val uploadBytes =
+                      readAttachmentBytesForUpload(
+                        resolver = resolver,
+                        uri = Uri.parse(sourceUri),
+                        maxBytes = CHAT_DOCUMENT_STAGED_UPLOAD_MAX_BYTES,
+                      )
+                    val fileRef =
+                      viewModel.uploadChatAttachment(
+                        fileName = att.fileName,
+                        mimeType = att.mimeType,
+                        bytes = uploadBytes,
+                      )
+                    OutgoingAttachment(
+                      type = att.type,
+                      mimeType = att.mimeType,
+                      fileName = att.fileName,
+                      fileRef = fileRef,
+                    )
+                  }
+                }
+              attachmentError = null
+              viewModel.sendChat(message = text, thinking = thinkingLevel, attachments = outgoing)
+              clearInput()
+              attachments.clear()
+            } catch (error: Throwable) {
+              attachmentError = attachmentLoadErrorMessage(error)
+            } finally {
+              preparingSend = false
             }
-          viewModel.sendChat(message = text, thinking = thinkingLevel, attachments = outgoing)
-          attachments.clear()
-          attachmentError = null
+          }
         },
       )
     }

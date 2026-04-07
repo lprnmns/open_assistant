@@ -8,8 +8,16 @@ class AttachmentLoadErrorsTest {
   @Test
   fun mapsOversizedAttachmentToUserFacingMessage() {
     assertEquals(
-      "Attachment is too large. PDF limit is 10 MB.",
+      "Attachment is too large. PDF limit is 50 MB.",
       attachmentLoadErrorMessage(IllegalStateException("attachment too large")),
+    )
+  }
+
+  @Test
+  fun mapsMissingUploadAuthToUserFacingMessage() {
+    assertEquals(
+      "This connection cannot upload large PDFs yet.",
+      attachmentLoadErrorMessage(IllegalStateException("upload auth unavailable")),
     )
   }
 

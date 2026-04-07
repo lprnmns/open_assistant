@@ -276,4 +276,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   fun sendChat(message: String, thinking: String, attachments: List<OutgoingAttachment>) {
     ensureRuntime().sendChat(message = message, thinking = thinking, attachments = attachments)
   }
+
+  suspend fun uploadChatAttachment(
+    fileName: String,
+    mimeType: String,
+    bytes: ByteArray,
+  ): String {
+    return ensureRuntime().uploadChatAttachment(fileName = fileName, mimeType = mimeType, bytes = bytes)
+  }
 }

@@ -5,7 +5,8 @@ import android.net.Uri
 import android.util.Base64
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertThrows
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -25,22 +26,25 @@ class ChatDocumentCodecTest : NodeHandlerRobolectricTest() {
     assertEquals("document", attachment.type)
     assertEquals("application/pdf", attachment.mimeType)
     assertEquals("exam_schedule.pdf", attachment.fileName)
-    assertArrayEquals(file.readBytes(), Base64.decode(attachment.base64, Base64.DEFAULT))
+    assertNull(attachment.sourceUri)
+    assertNotNull(attachment.base64)
+    assertArrayEquals(file.readBytes(), Base64.decode(attachment.base64!!, Base64.DEFAULT))
   }
 
   @Test
-  fun loadPdfAttachmentRejectsOversizedPdf() {
-    val file = File(appContext().cacheDir, "oversized.pdf")
+  fun loadPdfAttachmentFallsBackToStagedUploadForLargePdf() {
+    val file = File(appContext().cacheDir, "large.pdf")
     RandomAccessFile(file, "rw").use { handle ->
       handle.setLength(CHAT_DOCUMENT_MAX_BYTES.toLong() + 1)
     }
 
-    val error =
-      assertThrows(IllegalStateException::class.java) {
-        loadPdfAttachment(appContext().contentResolver, Uri.fromFile(file))
-      }
+    val attachment = loadPdfAttachment(appContext().contentResolver, Uri.fromFile(file))
 
-    assertEquals("attachment too large", error.message)
+    assertEquals("document", attachment.type)
+    assertEquals("application/pdf", attachment.mimeType)
+    assertEquals("large.pdf", attachment.fileName)
+    assertNull(attachment.base64)
+    assertEquals(Uri.fromFile(file).toString(), attachment.sourceUri)
   }
 
   private fun writeTempFile(fileName: String, bytes: ByteArray): File {

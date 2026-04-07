@@ -68,6 +68,7 @@ internal fun ChatComposer(
   healthOk: Boolean,
   thinkingLevel: String,
   pendingRunCount: Int,
+  isPreparingSend: Boolean,
   attachments: List<PendingChatAttachment>,
   onPickImages: () -> Unit,
   onPickDocument: () -> Unit,
@@ -75,14 +76,14 @@ internal fun ChatComposer(
   onSetThinkingLevel: (level: String) -> Unit,
   onRefresh: () -> Unit,
   onAbort: () -> Unit,
-  onSend: (text: String) -> Unit,
+  onSend: (text: String, clearInput: () -> Unit) -> Unit,
 ) {
   var input by rememberSaveable { mutableStateOf("") }
   var showThinkingMenu by remember { mutableStateOf(false) }
   var showAttachmentMenu by remember { mutableStateOf(false) }
 
-  val canSend = pendingRunCount == 0 && (input.trim().isNotEmpty() || attachments.isNotEmpty()) && healthOk
-  val sendBusy = pendingRunCount > 0
+  val canSend = !isPreparingSend && pendingRunCount == 0 && (input.trim().isNotEmpty() || attachments.isNotEmpty()) && healthOk
+  val sendBusy = pendingRunCount > 0 || isPreparingSend
 
   Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
     if (attachments.isNotEmpty()) {
@@ -93,6 +94,7 @@ internal fun ChatComposer(
       value = input,
       onValueChange = { input = it },
       modifier = Modifier.fillMaxWidth(),
+      enabled = !isPreparingSend,
       placeholder = { Text("Type a message...", style = mobileBodyStyle(), color = mobileTextTertiary) },
       minLines = 2,
       maxLines = 5,
@@ -116,7 +118,11 @@ internal fun ChatComposer(
     ) {
       Box {
         Surface(
-          onClick = { showThinkingMenu = true },
+          onClick = {
+            if (!isPreparingSend) {
+              showThinkingMenu = true
+            }
+          },
           shape = RoundedCornerShape(14.dp),
           color = mobileCardSurface,
           border = BorderStroke(1.dp, mobileBorderStrong),
@@ -154,7 +160,7 @@ internal fun ChatComposer(
         SecondaryActionButton(
           label = "Attach",
           icon = Icons.Default.AttachFile,
-          enabled = true,
+          enabled = !isPreparingSend,
           compact = true,
           onClick = { showAttachmentMenu = true },
         )
@@ -190,7 +196,7 @@ internal fun ChatComposer(
       SecondaryActionButton(
         label = "Refresh",
         icon = Icons.Default.Refresh,
-        enabled = true,
+        enabled = !isPreparingSend,
         compact = true,
         onClick = onRefresh,
       )
@@ -198,7 +204,7 @@ internal fun ChatComposer(
       SecondaryActionButton(
         label = "Abort",
         icon = Icons.Default.Stop,
-        enabled = pendingRunCount > 0,
+        enabled = pendingRunCount > 0 && !isPreparingSend,
         compact = true,
         onClick = onAbort,
       )
@@ -208,8 +214,7 @@ internal fun ChatComposer(
       Button(
         onClick = {
           val text = input
-          input = ""
-          onSend(text)
+          onSend(text) { input = "" }
         },
         enabled = canSend,
         modifier = Modifier.height(44.dp),

@@ -181,7 +181,8 @@ class ChatController(
                       put("type", JsonPrimitive(att.type))
                       put("mimeType", JsonPrimitive(att.mimeType))
                       put("fileName", JsonPrimitive(att.fileName))
-                      put("content", JsonPrimitive(att.base64))
+                      att.base64?.let { put("content", JsonPrimitive(it)) }
+                      att.fileRef?.let { put("fileRef", JsonPrimitive(it)) }
                     }
                   },
                 ),
@@ -203,6 +204,14 @@ class ChatController(
         _errorText.value = err.message
       }
     }
+  }
+
+  suspend fun uploadAttachment(
+    fileName: String,
+    mimeType: String,
+    bytes: ByteArray,
+  ): String {
+    return session.uploadFile(fileName = fileName, mimeType = mimeType, bytes = bytes).fileRef
   }
 
   fun abort() {

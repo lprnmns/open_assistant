@@ -20,12 +20,14 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.ConscryptMode
 import org.robolectric.annotation.Config
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -61,6 +63,7 @@ private data class InvokeScenarioResult(
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
+@ConscryptMode(ConscryptMode.Mode.OFF)
 class GatewaySessionInvokeTest {
   @Test
   fun connect_usesBootstrapTokenWhenSharedAndDeviceTokensAreAbsent() = runBlocking {
@@ -330,6 +333,70 @@ class GatewaySessionInvokeTest {
     }
   }
 
+  @Test
+  fun uploadFile_postsBytesWithBearerToken() = runBlocking {
+    val json = testJson()
+    val connected = CompletableDeferred<Unit>()
+    val lastDisconnect = AtomicReference("")
+    val uploadedRequest = CompletableDeferred<RecordedRequest>()
+    val activeSocket = AtomicReference<WebSocket?>(null)
+    val uploadBytes = "%PDF-1.4\nexam schedule\n".toByteArray()
+    val server =
+      startGatewayServer(
+        json = json,
+        onHttpRequest = { request ->
+          if (!uploadedRequest.isCompleted) {
+            uploadedRequest.complete(request)
+          }
+          activeSocket.get()?.close(1000, "done")
+          MockResponse()
+            .setHeader("Content-Type", "application/json")
+            .setBody(
+              """{"fileRef":"upload:file-1","fileName":"exam.pdf","mimeType":"application/pdf","size":${uploadBytes.size}}""",
+            )
+        },
+      ) { webSocket, id, method, _ ->
+        when (method) {
+          "connect" -> {
+            activeSocket.set(webSocket)
+            webSocket.send(connectResponseFrame(id))
+          }
+        }
+      }
+
+    val harness =
+      createNodeHarness(
+        connected = connected,
+        lastDisconnect = lastDisconnect,
+      ) { GatewaySession.InvokeResult.ok("""{"handled":true}""") }
+
+    try {
+      connectNodeSession(harness.session, server.port)
+      awaitConnectedOrThrow(connected, lastDisconnect, server)
+
+      val result =
+        harness.session.uploadFile(
+          fileName = "exam.pdf",
+          mimeType = "application/pdf",
+          bytes = uploadBytes,
+          timeoutMs = TEST_TIMEOUT_MS,
+        )
+      val request = withTimeout(TEST_TIMEOUT_MS) { uploadedRequest.await() }
+
+      assertEquals("/upload", request.path)
+      assertEquals("Bearer test-token", request.getHeader("Authorization"))
+      assertEquals("exam.pdf", request.getHeader("X-OpenClaw-File-Name"))
+      assertEquals("application/pdf", request.getHeader("Content-Type"))
+      assertArrayEquals(uploadBytes, request.body.readByteArray())
+      assertEquals("upload:file-1", result.fileRef)
+      assertEquals("exam.pdf", result.fileName)
+      assertEquals("application/pdf", result.mimeType)
+      assertEquals(uploadBytes.size.toLong(), result.size)
+    } finally {
+      shutdownHarness(harness, server)
+    }
+  }
+
   private fun testJson(): Json = Json { ignoreUnknownKeys = true }
 
   private fun createNodeHarness(
@@ -478,12 +545,17 @@ class GatewaySessionInvokeTest {
   private fun startGatewayServer(
     json: Json,
     onHandshake: ((RecordedRequest) -> Unit)? = null,
+    onHttpRequest: ((RecordedRequest) -> MockResponse)? = null,
     onRequestFrame: (webSocket: WebSocket, id: String, method: String, frame: JsonObject) -> Unit,
   ): MockWebServer =
     MockWebServer().apply {
       dispatcher =
         object : Dispatcher() {
           override fun dispatch(request: RecordedRequest): MockResponse {
+            val upgradeHeader = request.getHeader("Upgrade")?.trim()?.lowercase()
+            if (upgradeHeader != "websocket") {
+              return onHttpRequest?.invoke(request) ?: MockResponse().setResponseCode(404)
+            }
             onHandshake?.invoke(request)
             return MockResponse().withWebSocketUpgrade(
               object : WebSocketListener() {

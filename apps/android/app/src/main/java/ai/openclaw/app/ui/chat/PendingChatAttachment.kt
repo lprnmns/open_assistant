@@ -7,7 +7,8 @@ internal data class PendingChatAttachment(
   val type: String,
   val fileName: String,
   val mimeType: String,
-  val base64: String,
+  val base64: String? = null,
+  val sourceUri: String? = null,
 )
 
 internal fun buildPendingAttachmentId(uri: Uri): String = "${uri}#${System.currentTimeMillis()}"

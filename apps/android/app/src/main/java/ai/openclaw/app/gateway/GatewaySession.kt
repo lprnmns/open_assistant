@@ -27,9 +27,11 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import okhttp3.MediaType.Companion.toMediaType
 
 data class GatewayClientInfo(
   val id: String,
@@ -114,6 +116,13 @@ class GatewaySession(
     val code: String,
     val message: String,
     val details: GatewayConnectErrorDetails? = null,
+  )
+
+  data class UploadResult(
+    val fileRef: String,
+    val fileName: String,
+    val mimeType: String,
+    val size: Long,
   )
 
   private val json = Json { ignoreUnknownKeys = true }
@@ -216,6 +225,21 @@ class GatewaySession(
     throw IllegalStateException("${err?.code ?: "UNAVAILABLE"}: ${err?.message ?: "request failed"}")
   }
 
+  suspend fun uploadFile(
+    fileName: String,
+    mimeType: String,
+    bytes: ByteArray,
+    timeoutMs: Long = 60_000,
+  ): UploadResult {
+    val conn = currentConnection ?: throw IllegalStateException("not connected")
+    return conn.uploadFile(
+      fileName = fileName,
+      mimeType = mimeType,
+      bytes = bytes,
+      timeoutMs = timeoutMs,
+    )
+  }
+
   suspend fun refreshNodeCanvasCapability(timeoutMs: Long = 8_000): Boolean {
     val conn = currentConnection ?: return false
     val response =
@@ -314,11 +338,91 @@ class GatewaySession(
       }
     }
 
+    suspend fun uploadFile(
+      fileName: String,
+      mimeType: String,
+      bytes: ByteArray,
+      timeoutMs: Long,
+    ): UploadResult {
+      val bearerToken = resolveUploadBearerToken()
+      if (bearerToken.isNullOrBlank()) {
+        throw IllegalStateException("upload auth unavailable")
+      }
+      val scheme = if (tls != null) "https" else "http"
+      val host = if (endpoint.host.contains(":")) "[${endpoint.host}]" else endpoint.host
+      val url = "$scheme://$host:${endpoint.port}/upload"
+      val request =
+        Request.Builder()
+          .url(url)
+          .header("Authorization", "Bearer $bearerToken")
+          .header("X-OpenClaw-File-Name", fileName)
+          .post(bytes.toRequestBody(mimeType.toMediaType()))
+          .build()
+      val httpClient =
+        client.newBuilder()
+          .callTimeout(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+          .readTimeout(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+          .writeTimeout(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+          .build()
+      return withContext(Dispatchers.IO) {
+        httpClient.newCall(request).execute().use { response ->
+          parseUploadResponse(response)
+        }
+      }
+    }
+
     suspend fun sendJson(obj: JsonObject) {
       val jsonString = obj.toString()
       writeLock.withLock {
         socket?.send(jsonString)
       }
+    }
+
+    private fun resolveUploadBearerToken(): String? {
+      val identity = identityStore.loadOrCreate()
+      val storedToken = deviceAuthStore.loadToken(identity.deviceId, options.role)?.trim()
+      val selectedAuth =
+        selectConnectAuth(
+          endpoint = endpoint,
+          tls = tls,
+          role = options.role,
+          explicitGatewayToken = token?.trim()?.takeIf { it.isNotEmpty() },
+          explicitBootstrapToken = bootstrapToken?.trim()?.takeIf { it.isNotEmpty() },
+          explicitPassword = password?.trim()?.takeIf { it.isNotEmpty() },
+          storedToken = storedToken?.takeIf { it.isNotEmpty() },
+        )
+      return selectedAuth.authToken ?: selectedAuth.authBootstrapToken ?: selectedAuth.authPassword
+    }
+
+    private fun parseUploadResponse(response: Response): UploadResult {
+      val responseBody = response.body?.string().orEmpty()
+      if (!response.isSuccessful) {
+        val payload = parseJsonOrNull(responseBody).asObjectOrNull()
+        val message =
+          payload?.get("error").asObjectOrNull()?.get("message").asStringOrNull()
+            ?: "upload failed"
+        throw IllegalStateException(message)
+      }
+      val payload =
+        parseJsonOrNull(responseBody).asObjectOrNull()
+          ?: throw IllegalStateException("upload failed")
+      val fileRef = payload["fileRef"].asStringOrNull()?.trim().orEmpty()
+      val uploadedFileName = payload["fileName"].asStringOrNull()?.trim().orEmpty()
+      val uploadedMimeType = payload["mimeType"].asStringOrNull()?.trim().orEmpty()
+      val size = payload["size"].asLongOrNull() ?: bytesLengthFromUploadPayload(payload)
+      if (fileRef.isEmpty() || uploadedFileName.isEmpty() || uploadedMimeType.isEmpty()) {
+        throw IllegalStateException("upload failed")
+      }
+      return UploadResult(
+        fileRef = fileRef,
+        fileName = uploadedFileName,
+        mimeType = uploadedMimeType,
+        size = size,
+      )
+    }
+
+    private fun bytesLengthFromUploadPayload(payload: JsonObject): Long {
+      return payload["size"]?.asLongOrNull() ?: 0L
     }
 
     suspend fun awaitClose() = closedDeferred.await()
