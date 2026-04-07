@@ -264,6 +264,19 @@ describe("normalizeRpcAttachmentsToChatAttachments", () => {
       attachments: [{ content: undefined }, { mimeType: "image/png" }],
       expected: [],
     },
+    {
+      name: "keeps fileRef-only attachments",
+      attachments: [{ type: "document", fileRef: "upload:test-file", fileName: "exam.pdf" }],
+      expected: [
+        {
+          type: "document",
+          mimeType: undefined,
+          fileName: "exam.pdf",
+          fileRef: "upload:test-file",
+          content: undefined,
+        },
+      ],
+    },
   ])("$name", ({ attachments, expected }) => {
     expect(normalizeRpcAttachmentsToChatAttachments(attachments)).toEqual(expected);
   });

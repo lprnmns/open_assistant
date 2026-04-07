@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { saveMediaBuffer } from "../media/store.js";
 import {
   buildMessageWithAttachments,
   type ChatAttachment,
   parseMessageWithAttachments,
 } from "./chat-attachments.js";
+import { withTempConfig } from "./test-temp-config.js";
+import { buildUploadFileRef, UPLOADS_SUBDIR } from "./upload-file-ref.js";
 
 const PNG_1x1 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/woAAn8B9FD5fHAAAAAASUVORK5CYII=";
@@ -113,6 +116,42 @@ describe("parseMessageWithAttachments", () => {
     ]);
     expect(logs).toHaveLength(1);
     expect(logs[0]).toMatch(/non-image/i);
+  });
+
+  it("reads staged upload fileRefs for persistence", async () => {
+    await withTempConfig({
+      cfg: {},
+      prefix: "openclaw-chat-attachments-",
+      run: async () => {
+        const pdfBuffer = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n");
+        const saved = await saveMediaBuffer(
+          pdfBuffer,
+          "application/pdf",
+          UPLOADS_SUBDIR,
+          undefined,
+          "exam.pdf",
+        );
+        const { parsed, logs } = await parseWithWarnings("review this pdf", [
+          {
+            type: "document",
+            mimeType: "application/pdf",
+            fileRef: buildUploadFileRef(saved.id),
+          },
+        ]);
+        expect(parsed.message).toBe("review this pdf");
+        expect(parsed.images).toHaveLength(0);
+        expect(parsed.attachments).toEqual([
+          {
+            type: "document",
+            mimeType: "application/pdf",
+            data: pdfBuffer.toString("base64"),
+            fileName: "exam.pdf",
+          },
+        ]);
+        expect(logs).toHaveLength(1);
+        expect(logs[0]).toMatch(/non-image/i);
+      },
+    });
   });
 
   it("prefers sniffed mime type and logs mismatch", async () => {

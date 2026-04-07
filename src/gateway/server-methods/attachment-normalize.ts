@@ -4,6 +4,7 @@ export type RpcAttachmentInput = {
   type?: unknown;
   mimeType?: unknown;
   fileName?: unknown;
+  fileRef?: unknown;
   content?: unknown;
   source?: unknown;
 };
@@ -41,9 +42,10 @@ export function normalizeRpcAttachmentsToChatAttachments(
           type: typeof a?.type === "string" ? a.type : undefined,
           mimeType: typeof a?.mimeType === "string" ? a.mimeType : sourceMimeType,
           fileName: typeof a?.fileName === "string" ? a.fileName : undefined,
+          ...(typeof a?.fileRef === "string" ? { fileRef: a.fileRef } : {}),
           content: normalizeAttachmentContent(a?.content) ?? sourceContent,
         };
       })
-      .filter((a) => a.content) ?? []
+      .filter((a) => a.content || a.fileRef) ?? []
   );
 }

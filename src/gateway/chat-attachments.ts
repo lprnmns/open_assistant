@@ -1,10 +1,12 @@
 import { estimateBase64DecodedBytes } from "../media/base64.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
+import { readUploadFileRef } from "./upload-file-ref.js";
 
 export type ChatAttachment = {
   type?: string;
   mimeType?: string;
   fileName?: string;
+  fileRef?: string;
   content?: unknown;
 };
 
@@ -35,6 +37,7 @@ type NormalizedAttachment = {
   label: string;
   mime: string;
   base64: string;
+  fileName?: string;
 };
 
 function normalizeMime(mime?: string): string | undefined {
@@ -81,6 +84,36 @@ function normalizeAttachment(
   return { label, mime, base64 };
 }
 
+async function normalizeAttachmentForParsing(
+  att: ChatAttachment,
+  idx: number,
+  opts: { stripDataUrlPrefix: boolean; maxBytes: number },
+): Promise<NormalizedAttachment> {
+  if (typeof att.content === "string") {
+    return normalizeAttachment(att, idx, {
+      stripDataUrlPrefix: opts.stripDataUrlPrefix,
+      requireImageMime: false,
+    });
+  }
+
+  const fileRef = typeof att.fileRef === "string" ? att.fileRef.trim() : "";
+  const label = att.fileName || att.type || `attachment-${idx + 1}`;
+  if (!fileRef) {
+    throw new Error(`attachment ${label}: content must be base64 string`);
+  }
+
+  const uploaded = await readUploadFileRef({
+    fileRef,
+    maxBytes: opts.maxBytes,
+  });
+  return {
+    label: att.fileName || uploaded.fileName || label,
+    mime: att.mimeType ?? "",
+    base64: uploaded.buffer.toString("base64"),
+    fileName: att.fileName ?? uploaded.fileName,
+  };
+}
+
 function validateAttachmentBase64OrThrow(
   normalized: NormalizedAttachment,
   opts: { maxBytes: number },
@@ -120,9 +153,9 @@ export async function parseMessageWithAttachments(
     if (!att) {
       continue;
     }
-    const normalized = normalizeAttachment(att, idx, {
+    const normalized = await normalizeAttachmentForParsing(att, idx, {
       stripDataUrlPrefix: true,
-      requireImageMime: false,
+      maxBytes,
     });
     validateAttachmentBase64OrThrow(normalized, { maxBytes });
     const { base64: b64, label, mime } = normalized;
@@ -149,7 +182,7 @@ export async function parseMessageWithAttachments(
       type: resolvedType,
       data: b64,
       mimeType: resolvedMime,
-      fileName: att.fileName,
+      fileName: normalized.fileName ?? att.fileName,
     });
     if (!isImageMime(resolvedMime)) {
       continue;
