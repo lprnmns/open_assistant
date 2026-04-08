@@ -4,6 +4,8 @@ export const ConnectErrorDetailCodes = {
   AUTH_TOKEN_MISSING: "AUTH_TOKEN_MISSING",
   AUTH_TOKEN_MISMATCH: "AUTH_TOKEN_MISMATCH",
   AUTH_TOKEN_NOT_CONFIGURED: "AUTH_TOKEN_NOT_CONFIGURED",
+  AUTH_ACCOUNT_TOKEN_INVALID: "AUTH_ACCOUNT_TOKEN_INVALID",
+  AUTH_ACCOUNT_TOKEN_EXPIRED: "AUTH_ACCOUNT_TOKEN_EXPIRED",
   AUTH_PASSWORD_MISSING: "AUTH_PASSWORD_MISSING", // pragma: allowlist secret
   AUTH_PASSWORD_MISMATCH: "AUTH_PASSWORD_MISMATCH", // pragma: allowlist secret
   AUTH_PASSWORD_NOT_CONFIGURED: "AUTH_PASSWORD_NOT_CONFIGURED", // pragma: allowlist secret
@@ -60,6 +62,10 @@ export function resolveAuthConnectErrorDetailCode(
       return ConnectErrorDetailCodes.AUTH_TOKEN_MISMATCH;
     case "token_missing_config":
       return ConnectErrorDetailCodes.AUTH_TOKEN_NOT_CONFIGURED;
+    case "account_token_invalid":
+      return ConnectErrorDetailCodes.AUTH_ACCOUNT_TOKEN_INVALID;
+    case "account_token_expired":
+      return ConnectErrorDetailCodes.AUTH_ACCOUNT_TOKEN_EXPIRED;
     case "password_missing":
       return ConnectErrorDetailCodes.AUTH_PASSWORD_MISSING;
     case "password_mismatch":

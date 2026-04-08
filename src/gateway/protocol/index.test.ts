@@ -4,6 +4,7 @@ import {
   formatValidationErrors,
   validateAgentParams,
   validateChatSendParams,
+  validateConnectParams,
   validateSessionsSendParams,
   validateTalkConfigResult,
 } from "./index.js";
@@ -125,6 +126,24 @@ describe("validateTalkConfigResult", () => {
 });
 
 describe("attachment RPC validators", () => {
+  it("accepts connect auth payloads with accountToken", () => {
+    expect(
+      validateConnectParams({
+        minProtocol: 1,
+        maxProtocol: 1,
+        client: {
+          id: "test",
+          version: "1.0.0",
+          platform: "test",
+          mode: "test",
+        },
+        auth: {
+          accountToken: "acct_token_123",
+        },
+      }),
+    ).toBe(true);
+  });
+
   it("accepts fileRef-based chat.send attachments", () => {
     expect(
       validateChatSendParams({

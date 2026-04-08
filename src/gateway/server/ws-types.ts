@@ -10,4 +10,7 @@ export type GatewayWsClient = {
   canvasHostUrl?: string;
   canvasCapability?: string;
   canvasCapabilityExpiresAtMs?: number;
+  internal?: {
+    accountUserId?: string;
+  };
 };

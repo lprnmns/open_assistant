@@ -419,6 +419,7 @@ describe("GatewayClient connect auth payload", () => {
       params?: {
         auth?: {
           token?: string;
+          accountToken?: string;
           bootstrapToken?: string;
           deviceToken?: string;
           password?: string;
@@ -436,6 +437,7 @@ describe("GatewayClient connect auth payload", () => {
       params?: {
         auth?: {
           token?: string;
+          accountToken?: string;
           deviceToken?: string;
         };
       };
@@ -524,6 +526,26 @@ describe("GatewayClient connect auth payload", () => {
     expect(connectFrameFrom(ws)).toMatchObject({
       token: "shared-token",
     });
+    expect(connectFrameFrom(ws).deviceToken).toBeUndefined();
+    client.stop();
+  });
+
+  it("uses explicit account token and does not inject stored device token", () => {
+    loadDeviceAuthTokenMock.mockReturnValue({ token: "stored-device-token" });
+    const client = new GatewayClient({
+      url: "ws://127.0.0.1:18789",
+      accountToken: "acct_token_123",
+    });
+
+    client.start();
+    const ws = getLatestWs();
+    ws.emitOpen();
+    emitConnectChallenge(ws);
+
+    expect(connectFrameFrom(ws)).toMatchObject({
+      accountToken: "acct_token_123",
+    });
+    expect(connectFrameFrom(ws).token).toBeUndefined();
     expect(connectFrameFrom(ws).deviceToken).toBeUndefined();
     client.stop();
   });

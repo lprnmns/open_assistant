@@ -18,6 +18,7 @@ export type HandshakeBrowserSecurityContext = {
 
 type HandshakeConnectAuth = {
   token?: string;
+  accountToken?: string;
   bootstrapToken?: string;
   deviceToken?: string;
   password?: string;
@@ -88,6 +89,7 @@ export function shouldSkipBackendSelfPairing(params: {
 function resolveSignatureToken(connectParams: ConnectParams): string | null {
   return (
     connectParams.auth?.token ??
+    connectParams.auth?.accountToken ??
     connectParams.auth?.deviceToken ??
     connectParams.auth?.bootstrapToken ??
     null
@@ -153,7 +155,9 @@ export function resolveDeviceSignaturePayloadVersion(params: {
 export function resolveAuthProvidedKind(
   connectAuth: HandshakeConnectAuth | null | undefined,
 ): AuthProvidedKind {
-  return connectAuth?.password
+  return connectAuth?.accountToken
+    ? "account-token"
+    : connectAuth?.password
     ? "password"
     : connectAuth?.token
       ? "token"
@@ -203,6 +207,8 @@ export function resolveUnauthorizedHandshakeContext(params: {
       });
     case "token_mismatch":
     case "password_mismatch":
+    case "account_token_invalid":
+    case "account_token_expired":
     case "device_token_mismatch":
       return buildUnauthorizedHandshakeContext({
         authProvided,

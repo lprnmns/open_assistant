@@ -2,7 +2,13 @@ import { isGatewayCliClient, isWebchatClient } from "../../../utils/message-chan
 import type { ResolvedGatewayAuth } from "../../auth.js";
 import { GATEWAY_CLIENT_IDS } from "../../protocol/client-info.js";
 
-export type AuthProvidedKind = "token" | "bootstrap-token" | "device-token" | "password" | "none";
+export type AuthProvidedKind =
+  | "token"
+  | "account-token"
+  | "bootstrap-token"
+  | "device-token"
+  | "password"
+  | "none";
 
 export function formatGatewayAuthFailureMessage(params: {
   authMode: ResolvedGatewayAuth["mode"];
@@ -26,6 +32,10 @@ export function formatGatewayAuthFailureMessage(params: {
       ? "enter the password in Control UI settings"
       : "provide gateway auth password";
   switch (reason) {
+    case "account_token_invalid":
+      return "unauthorized: account session invalid (sign in again)";
+    case "account_token_expired":
+      return "unauthorized: account session expired (sign in again)";
     case "token_missing":
       return `unauthorized: gateway token missing (${tokenHint})`;
     case "token_mismatch":
@@ -61,6 +71,9 @@ export function formatGatewayAuthFailureMessage(params: {
   }
   if (authMode === "token" && authProvided === "device-token") {
     return "unauthorized: device token rejected (pair/repair this device, or provide gateway token)";
+  }
+  if (authProvided === "account-token") {
+    return "unauthorized: account session invalid (sign in again)";
   }
   if (authProvided === "bootstrap-token") {
     return "unauthorized: bootstrap token invalid or expired (scan a fresh setup code)";

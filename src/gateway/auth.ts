@@ -43,6 +43,7 @@ export type GatewayAuthResult = {
   method?:
     | "none"
     | "token"
+    | "account-token"
     | "password"
     | "tailscale"
     | "device-token"

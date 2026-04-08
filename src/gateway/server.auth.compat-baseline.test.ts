@@ -1,6 +1,8 @@
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { createAccountStore } from "../accounts/store.js";
+import { issueAccountToken } from "../accounts/token.js";
 import {
   BACKEND_GATEWAY_CLIENT,
   connectReq,
@@ -39,7 +41,7 @@ function expectAuthErrorDetails(params: {
 
 async function expectSharedOperatorScopesCleared(
   port: number,
-  auth: { token?: string; password?: string },
+  auth: { token?: string; password?: string; accountToken?: string; skipDefaultAuth?: boolean },
 ) {
   const ws = await openWs(port);
   try {
@@ -122,6 +124,40 @@ describe("gateway auth compatibility baseline", () => {
           expectedCode: ConnectErrorDetailCodes.AUTH_TOKEN_MISMATCH,
           canRetryWithDeviceToken: true,
           recommendedNextStep: "retry_with_device_token",
+        });
+      } finally {
+        ws.close();
+      }
+    });
+
+    test("accepts valid account tokens without requiring the shared gateway token", async () => {
+      const account = await createAccountStore().createAccount({
+        email: "cloud-user@example.com",
+        password: "super-secure-password",
+      });
+      const accountToken = await issueAccountToken({ userId: account.id });
+
+      await expectSharedOperatorScopesCleared(port, {
+        skipDefaultAuth: true,
+        accountToken,
+      });
+    });
+
+    test("returns stable account-token invalid details", async () => {
+      const ws = await openWs(port);
+      try {
+        const res = await connectReq(ws, {
+          skipDefaultAuth: true,
+          accountToken: "acct_invalid_token",
+          device: null,
+        });
+        expect(res.ok).toBe(false);
+        expect(res.error?.message ?? "").toContain("account session invalid");
+        expectAuthErrorDetails({
+          details: res.error?.details,
+          expectedCode: ConnectErrorDetailCodes.AUTH_ACCOUNT_TOKEN_INVALID,
+          canRetryWithDeviceToken: false,
+          recommendedNextStep: "update_auth_credentials",
         });
       } finally {
         ws.close();

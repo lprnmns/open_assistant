@@ -55,6 +55,7 @@ type GatewayClientErrorShape = {
 
 type SelectedConnectAuth = {
   authToken?: string;
+  authAccountToken?: string;
   authBootstrapToken?: string;
   authDeviceToken?: string;
   authPassword?: string;
@@ -81,6 +82,7 @@ export type GatewayClientOptions = {
   tickWatchMinIntervalMs?: number;
   requestTimeoutMs?: number;
   token?: string;
+  accountToken?: string;
   bootstrapToken?: string;
   deviceToken?: string;
   password?: string;
@@ -393,6 +395,7 @@ export class GatewayClient {
     const role = this.opts.role ?? "operator";
     const {
       authToken,
+      authAccountToken,
       authBootstrapToken,
       authDeviceToken,
       authPassword,
@@ -404,9 +407,10 @@ export class GatewayClient {
       this.pendingDeviceTokenRetry = false;
     }
     const auth =
-      authToken || authBootstrapToken || authPassword || resolvedDeviceToken
+      authToken || authAccountToken || authBootstrapToken || authPassword || resolvedDeviceToken
         ? {
             token: authToken,
+            accountToken: authAccountToken,
             bootstrapToken: authBootstrapToken,
             deviceToken: authDeviceToken ?? resolvedDeviceToken,
             password: authPassword,
@@ -596,6 +600,7 @@ export class GatewayClient {
 
   private selectConnectAuth(role: string): SelectedConnectAuth {
     const explicitGatewayToken = this.opts.token?.trim() || undefined;
+    const explicitAccountToken = this.opts.accountToken?.trim() || undefined;
     const explicitBootstrapToken = this.opts.bootstrapToken?.trim() || undefined;
     const explicitDeviceToken = this.opts.deviceToken?.trim() || undefined;
     const authPassword = this.opts.password?.trim() || undefined;
@@ -611,20 +616,24 @@ export class GatewayClient {
     const resolvedDeviceToken =
       explicitDeviceToken ??
       (shouldUseDeviceRetryToken ||
-      (!(explicitGatewayToken || authPassword) && (!explicitBootstrapToken || Boolean(storedToken)))
+      (!(explicitGatewayToken || explicitAccountToken || authPassword) &&
+        (!explicitBootstrapToken || Boolean(storedToken)))
         ? (storedToken ?? undefined)
         : undefined);
     // Legacy compatibility: keep `auth.token` populated for device-token auth when
     // no explicit shared token is present.
     const authToken = explicitGatewayToken ?? resolvedDeviceToken;
     const authBootstrapToken =
-      !explicitGatewayToken && !resolvedDeviceToken ? explicitBootstrapToken : undefined;
+      !explicitGatewayToken && !explicitAccountToken && !resolvedDeviceToken
+        ? explicitBootstrapToken
+        : undefined;
     return {
       authToken,
+      authAccountToken: explicitAccountToken,
       authBootstrapToken,
       authDeviceToken: shouldUseDeviceRetryToken ? (storedToken ?? undefined) : undefined,
       authPassword,
-      signatureToken: authToken ?? authBootstrapToken ?? undefined,
+      signatureToken: authToken ?? explicitAccountToken ?? authBootstrapToken ?? undefined,
       resolvedDeviceToken,
       storedToken: storedToken ?? undefined,
     };

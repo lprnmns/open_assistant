@@ -694,6 +694,7 @@ export async function connectReq(
   ws: WebSocket,
   opts?: {
     token?: string;
+    accountToken?: string;
     deviceToken?: string;
     password?: string;
     skipDefaultAuth?: boolean;
@@ -748,9 +749,10 @@ export async function connectReq(
         ? ((testState.gatewayAuth as { password?: string }).password ?? undefined)
         : process.env.OPENCLAW_GATEWAY_PASSWORD;
   const token = opts?.token ?? defaultToken;
+  const accountToken = opts?.accountToken?.trim() || undefined;
   const deviceToken = opts?.deviceToken?.trim() || undefined;
   const password = opts?.password ?? defaultPassword;
-  const authTokenForSignature = token ?? deviceToken;
+  const authTokenForSignature = token ?? accountToken ?? deviceToken;
   const requestedScopes = Array.isArray(opts?.scopes)
     ? opts.scopes
     : role === "operator"
@@ -817,9 +819,10 @@ export async function connectReq(
         role,
         scopes: requestedScopes,
         auth:
-          token || password || deviceToken
+          token || accountToken || password || deviceToken
             ? {
                 token,
+                accountToken,
                 deviceToken,
                 password,
               }

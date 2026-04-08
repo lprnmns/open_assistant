@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthRateLimiter } from "../../auth-rate-limit.js";
-import { resolveConnectAuthDecision, type ConnectAuthState } from "./auth-context.js";
+import {
+  resolveConnectAuthDecision,
+  resolveConnectAuthState,
+  type ConnectAuthState,
+} from "./auth-context.js";
 
 type VerifyDeviceTokenFn = Parameters<typeof resolveConnectAuthDecision>[0]["verifyDeviceToken"];
 type VerifyBootstrapTokenFn = Parameters<
@@ -187,5 +191,65 @@ describe("resolveConnectAuthDecision", () => {
     expect(decision.authOk).toBe(true);
     expect(decision.authMethod).toBe("token");
     expect(verifyDeviceToken).not.toHaveBeenCalled();
+  });
+
+  it("keeps account-token failures authoritative and skips device-token fallback", async () => {
+    const verifyDeviceToken = vi.fn<VerifyDeviceTokenFn>(async () => ({ ok: true }));
+    const decision = await resolveConnectAuthDecision({
+      state: createBaseState({
+        authResult: { ok: false, reason: "account_token_invalid" },
+        authMethod: "account-token",
+        deviceTokenCandidateSource: "explicit-device-token",
+        accountUserId: undefined,
+      }),
+      hasDeviceIdentity: true,
+      deviceId: "dev-1",
+      publicKey: "pub-1",
+      role: "operator",
+      scopes: ["operator.read"],
+      verifyBootstrapToken: async () => ({ ok: false, reason: "bootstrap_token_invalid" }),
+      verifyDeviceToken,
+    });
+    expect(decision.authOk).toBe(false);
+    expect(decision.authResult.reason).toBe("account_token_invalid");
+    expect(verifyDeviceToken).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveConnectAuthState", () => {
+  it("accepts valid account tokens and marks them as shared auth", async () => {
+    const state = await resolveConnectAuthState({
+      resolvedAuth: { mode: "token", token: "shared-token", allowTailscale: false },
+      connectAuth: { accountToken: "acct_123" },
+      hasDeviceIdentity: false,
+      req: { socket: { remoteAddress: "127.0.0.1" }, headers: {} } as never,
+      trustedProxies: [],
+      allowRealIpFallback: false,
+      verifyAccountToken: async () => ({ ok: true, userId: "user-123" }),
+    });
+    expect(state.authOk).toBe(true);
+    expect(state.authMethod).toBe("account-token");
+    expect(state.accountUserId).toBe("user-123");
+    expect(state.sharedAuthOk).toBe(true);
+    expect(state.sharedAuthProvided).toBe(true);
+  });
+
+  it("rejects invalid account tokens before shared auth fallback", async () => {
+    const rateLimiter = createRateLimiter();
+    const state = await resolveConnectAuthState({
+      resolvedAuth: { mode: "token", token: "shared-token", allowTailscale: false },
+      connectAuth: { accountToken: "acct_bad", token: "shared-token" },
+      hasDeviceIdentity: true,
+      req: { socket: { remoteAddress: "127.0.0.1" }, headers: {} } as never,
+      trustedProxies: [],
+      allowRealIpFallback: false,
+      rateLimiter: rateLimiter.limiter,
+      clientIp: "203.0.113.20",
+      verifyAccountToken: async () => ({ ok: false, reason: "account_token_invalid" }),
+    });
+    expect(state.authOk).toBe(false);
+    expect(state.authMethod).toBe("account-token");
+    expect(state.authResult.reason).toBe("account_token_invalid");
+    expect(state.sharedAuthOk).toBe(false);
   });
 });

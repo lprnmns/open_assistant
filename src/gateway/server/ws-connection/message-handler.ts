@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import os from "node:os";
 import type { WebSocket } from "ws";
+import { verifyAccountToken } from "../../../accounts/token.js";
 import { loadConfig } from "../../../config/config.js";
 import { verifyDeviceBootstrapToken } from "../../../infra/device-bootstrap.js";
 import {
@@ -447,8 +448,9 @@ export function attachGatewayWsMessageHandler(params: {
         let devicePublicKey: string | null = null;
         let deviceAuthPayloadVersion: "v2" | "v3" | null = null;
         const hasTokenAuth = Boolean(connectParams.auth?.token);
+        const hasAccountTokenAuth = Boolean(connectParams.auth?.accountToken);
         const hasPasswordAuth = Boolean(connectParams.auth?.password);
-        const hasSharedAuth = hasTokenAuth || hasPasswordAuth;
+        const hasSharedAuth = hasTokenAuth || hasAccountTokenAuth || hasPasswordAuth;
         const controlUiAuthPolicy = resolveControlUiAuthPolicy({
           isControlUi,
           controlUiConfig: configSnapshot.gateway?.controlUi,
@@ -460,6 +462,7 @@ export function attachGatewayWsMessageHandler(params: {
           authResult,
           authOk,
           authMethod,
+          accountUserId,
           sharedAuthOk,
           bootstrapTokenCandidate,
           deviceTokenCandidate,
@@ -473,6 +476,17 @@ export function attachGatewayWsMessageHandler(params: {
           allowRealIpFallback,
           rateLimiter: authRateLimiter,
           clientIp: browserRateLimitClientIp,
+          verifyAccountToken: async (token) => {
+            const result = await verifyAccountToken({ token });
+            if (result.ok) {
+              return { ok: true, userId: result.userId };
+            }
+            return {
+              ok: false,
+              reason:
+                result.reason === "expired" ? "account_token_expired" : "account_token_invalid",
+            };
+          },
         });
         const rejectUnauthorized = (failedAuth: GatewayAuthResult) => {
           const { authProvided, canRetryWithDeviceToken, recommendedNextStep } =
@@ -524,7 +538,9 @@ export function attachGatewayWsMessageHandler(params: {
             isControlUi &&
             controlUiAuthPolicy.allowInsecureAuthConfigured &&
             isLocalClient &&
-            (authMethod === "token" || authMethod === "password");
+            (authMethod === "token" ||
+              authMethod === "password" ||
+              authMethod === "account-token");
           const decision = evaluateMissingDeviceIdentity({
             hasDeviceIdentity: Boolean(device),
             role,
@@ -544,7 +560,10 @@ export function attachGatewayWsMessageHandler(params: {
             (decision.kind !== "allow" ||
               (!controlUiAuthPolicy.allowBypass &&
                 !preserveInsecureLocalControlUiScopes &&
-                (authMethod === "token" || authMethod === "password" || trustedProxyAuthOk)))
+                (authMethod === "token" ||
+                  authMethod === "password" ||
+                  authMethod === "account-token" ||
+                  trustedProxyAuthOk)))
           ) {
             clearUnboundScopes();
           }
@@ -645,11 +664,12 @@ export function attachGatewayWsMessageHandler(params: {
           }
         }
 
-        ({ authResult, authOk, authMethod } = await resolveConnectAuthDecision({
+        ({ authResult, authOk, authMethod, accountUserId } = await resolveConnectAuthDecision({
           state: {
             authResult,
             authOk,
             authMethod,
+            accountUserId,
             sharedAuthOk,
             sharedAuthProvided: hasSharedAuth,
             bootstrapTokenCandidate,
@@ -1001,6 +1021,7 @@ export function attachGatewayWsMessageHandler(params: {
           canvasHostUrl,
           canvasCapability,
           canvasCapabilityExpiresAtMs,
+          ...(accountUserId ? { internal: { accountUserId } } : {}),
         };
         setSocketMaxPayload(socket, MAX_PAYLOAD_BYTES);
         setClient(nextClient);
