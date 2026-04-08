@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
+import { issueAccountToken } from "../accounts/token.js";
+import { resolveUserSessionStorePath } from "../accounts/user-dir.js";
 import { emitAgentEvent, registerAgentRunContext } from "../infra/agent-events.js";
 import { saveMediaBuffer } from "../media/store.js";
 import { extractFirstTextBlock } from "../shared/chat-message-content.js";
@@ -545,6 +547,97 @@ describe("gateway server chat", () => {
     // because entry.text takes precedence over entry.content for the silent check.
     // The user message with NO_REPLY text is preserved (only assistant filtered).
     expect(textValues).toEqual(["hello", "real reply", "real text field reply", "NO_REPLY"]);
+  });
+
+  test("account-token chat sessions persist to user-scoped stores", async () => {
+    const identityDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-acct-identities-"));
+    const wsUserA = new WebSocket(`ws://127.0.0.1:${port}`);
+    const wsUserB = new WebSocket(`ws://127.0.0.1:${port}`);
+    trackConnectChallengeNonce(wsUserA);
+    trackConnectChallengeNonce(wsUserB);
+    await Promise.all([
+      new Promise<void>((resolve) => wsUserA.once("open", () => resolve())),
+      new Promise<void>((resolve) => wsUserB.once("open", () => resolve())),
+    ]);
+
+    const accountTokenA = await issueAccountToken({ userId: "user-a" });
+    const accountTokenB = await issueAccountToken({ userId: "user-b" });
+
+    try {
+      const userStorePathA = resolveUserSessionStorePath("user-a");
+      const userStorePathB = resolveUserSessionStorePath("user-b");
+      await writeSessionStore({
+        storePath: userStorePathA,
+        entries: {
+          main: {
+            sessionId: "sess-user-a",
+            updatedAt: 1,
+          },
+        },
+      });
+      await writeSessionStore({
+        storePath: userStorePathB,
+        entries: {
+          main: {
+            sessionId: "sess-user-b",
+            updatedAt: 1,
+          },
+        },
+      });
+      await fs.writeFile(
+        path.join(path.dirname(userStorePathA), "sess-user-a.jsonl"),
+        `${JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "message from account a" }],
+            timestamp: Date.now(),
+          },
+        })}\n`,
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(path.dirname(userStorePathB), "sess-user-b.jsonl"),
+        `${JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "message from account b" }],
+            timestamp: Date.now(),
+          },
+        })}\n`,
+        "utf-8",
+      );
+
+      await connectOk(wsUserA, {
+        skipDefaultAuth: true,
+        accountToken: accountTokenA,
+        deviceIdentityPath: path.join(identityDir, "user-a-device.json"),
+      });
+      await connectOk(wsUserB, {
+        skipDefaultAuth: true,
+        accountToken: accountTokenB,
+        deviceIdentityPath: path.join(identityDir, "user-b-device.json"),
+      });
+
+      const historyA = await rpcReq<{ messages?: unknown[] }>(wsUserA, "chat.history", {
+        sessionKey: "main",
+      });
+      const historyB = await rpcReq<{ messages?: unknown[] }>(wsUserB, "chat.history", {
+        sessionKey: "main",
+      });
+      expect(historyA.ok).toBe(true);
+      expect(historyB.ok).toBe(true);
+
+      const textA = collectHistoryTextValues(historyA.payload?.messages ?? []);
+      const textB = collectHistoryTextValues(historyB.payload?.messages ?? []);
+      expect(textA).toContain("message from account a");
+      expect(textA).not.toContain("message from account b");
+      expect(textB).toContain("message from account b");
+      expect(textB).not.toContain("message from account a");
+    } finally {
+      wsUserA.close();
+      wsUserB.close();
+      await fs.rm(identityDir, { recursive: true, force: true });
+    }
   });
 
   test("routes chat.send slash commands without agent runs", async () => {

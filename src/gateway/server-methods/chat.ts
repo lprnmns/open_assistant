@@ -5,11 +5,14 @@ import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { rewriteTranscriptEntriesInSessionFile } from "../../agents/pi-embedded-runner/transcript-rewrite.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
+import { resolveUserSessionStorePath } from "../../accounts/user-dir.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import type { MsgContext } from "../../auto-reply/templating.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import type { ReplyPayload } from "../../auto-reply/types.js";
+import type { OpenClawConfig } from "../../config/config.js";
+import { loadConfig } from "../../config/config.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import type { DeliveryTarget } from "../../consciousness/delivery-target.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
@@ -1115,13 +1118,14 @@ function collectSessionAbortPartials(params: {
 
 function persistAbortedPartials(params: {
   context: Pick<GatewayRequestContext, "logGateway">;
+  cfg: OpenClawConfig;
   sessionKey: string;
   snapshots: AbortedPartialSnapshot[];
 }) {
   if (params.snapshots.length === 0) {
     return;
   }
-  const { storePath, entry } = loadSessionEntry(params.sessionKey);
+  const { storePath, entry } = loadSessionEntry(params.sessionKey, { cfg: params.cfg });
   for (const snapshot of params.snapshots) {
     const sessionId = entry?.sessionId ?? snapshot.sessionId ?? snapshot.runId;
     const appended = appendAssistantTranscriptMessage({
@@ -1162,6 +1166,30 @@ function createChatAbortOps(context: GatewayRequestContext): ChatAbortOps {
 function normalizeOptionalText(value?: string | null): string | undefined {
   const trimmed = value?.trim();
   return trimmed || undefined;
+}
+
+function resolveGatewayAccountUserId(
+  client: GatewayRequestHandlerOptions["client"],
+): string | undefined {
+  const userId = client?.internal?.accountUserId?.trim();
+  return userId || undefined;
+}
+
+function resolveChatScopedConfig(
+  client: GatewayRequestHandlerOptions["client"],
+): OpenClawConfig {
+  const cfg = loadConfig();
+  const accountUserId = resolveGatewayAccountUserId(client);
+  if (!accountUserId) {
+    return cfg;
+  }
+  return {
+    ...cfg,
+    session: {
+      ...(cfg.session ?? {}),
+      store: resolveUserSessionStorePath(accountUserId),
+    },
+  };
 }
 
 function resolveChatSendActiveDeliveryTarget(
@@ -1241,6 +1269,7 @@ function resolveAuthorizedRunIdsForSession(params: {
 
 function abortChatRunsForSessionKeyWithPartials(params: {
   context: GatewayRequestContext;
+  cfg: OpenClawConfig;
   ops: ChatAbortOps;
   sessionKey: string;
   abortOrigin: AbortOrigin;
@@ -1281,6 +1310,7 @@ function abortChatRunsForSessionKeyWithPartials(params: {
   if (res.aborted) {
     persistAbortedPartials({
       context: params.context,
+      cfg: params.cfg,
       sessionKey: params.sessionKey,
       snapshots,
     });
@@ -1363,7 +1393,7 @@ function broadcastChatError(params: {
 }
 
 export const chatHandlers: GatewayRequestHandlers = {
-  "chat.history": async ({ params, respond, context }) => {
+  "chat.history": async ({ params, respond, context, client }) => {
     if (!validateChatHistoryParams(params)) {
       respond(
         false,
@@ -1379,7 +1409,8 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       limit?: number;
     };
-    const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
+    const cfg = resolveChatScopedConfig(client);
+    const { storePath, entry } = loadSessionEntry(sessionKey, { cfg });
     const sessionId = entry?.sessionId;
     const rawMessages =
       sessionId && storePath ? readSessionMessages(sessionId, storePath, entry?.sessionFile) : [];
@@ -1443,6 +1474,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       runId?: string;
     };
+    const cfg = resolveChatScopedConfig(client);
 
     const ops = createChatAbortOps(context);
     const requester = resolveChatAbortRequester(client);
@@ -1450,6 +1482,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     if (!runId) {
       const res = abortChatRunsForSessionKeyWithPartials({
         context,
+        cfg,
         ops,
         sessionKey: rawSessionKey,
         abortOrigin: "rpc",
@@ -1491,6 +1524,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     if (res.aborted && partialText && partialText.trim()) {
       persistAbortedPartials({
         context,
+        cfg,
         sessionKey: rawSessionKey,
         snapshots: [
           {
@@ -1592,8 +1626,9 @@ export const chatHandlers: GatewayRequestHandlers = {
         return;
       }
     }
+    const cfg = resolveChatScopedConfig(client);
     const rawSessionKey = p.sessionKey;
-    const { cfg, entry, canonicalKey: sessionKey } = loadSessionEntry(rawSessionKey);
+    const { entry, canonicalKey: sessionKey } = loadSessionEntry(rawSessionKey, { cfg });
     const timeoutMs = resolveAgentTimeoutMs({
       cfg,
       overrideMs: p.timeoutMs,
@@ -1620,6 +1655,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     if (stopCommand) {
       const res = abortChatRunsForSessionKeyWithPartials({
         context,
+        cfg,
         ops: createChatAbortOps(context),
         sessionKey: rawSessionKey,
         abortOrigin: "stop-command",
@@ -1742,7 +1778,9 @@ export const chatHandlers: GatewayRequestHandlers = {
         if (userTranscriptUpdateEmitted) {
           return;
         }
-        const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntry(sessionKey);
+        const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntry(sessionKey, {
+          cfg,
+        });
         const resolvedSessionId = latestEntry?.sessionId ?? entry?.sessionId;
         if (!resolvedSessionId) {
           return;
@@ -1772,7 +1810,9 @@ export const chatHandlers: GatewayRequestHandlers = {
         if (userTranscriptReconciled) {
           return true;
         }
-        const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntry(sessionKey);
+        const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntry(sessionKey, {
+          cfg,
+        });
         const resolvedSessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
         const transcriptPath = resolveTranscriptPath({
           sessionId: resolvedSessionId,
@@ -1875,8 +1915,10 @@ export const chatHandlers: GatewayRequestHandlers = {
                 .trim();
               let message: Record<string, unknown> | undefined;
               if (combinedReply) {
-                const { storePath: latestStorePath, entry: latestEntry } =
-                  loadSessionEntry(sessionKey);
+                const { storePath: latestStorePath, entry: latestEntry } = loadSessionEntry(
+                  sessionKey,
+                  { cfg },
+                );
                 const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
                 const appended = existingUserTurnFound
                   ? appendAssistantTranscriptMessage({
@@ -1987,7 +2029,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       });
     }
   },
-  "chat.inject": async ({ params, respond, context }) => {
+  "chat.inject": async ({ params, respond, context, client }) => {
     if (!validateChatInjectParams(params)) {
       respond(
         false,
@@ -2006,8 +2048,9 @@ export const chatHandlers: GatewayRequestHandlers = {
     };
 
     // Load session to find transcript file
+    const cfg = resolveChatScopedConfig(client);
     const rawSessionKey = p.sessionKey;
-    const { cfg, storePath, entry } = loadSessionEntry(rawSessionKey);
+    const { storePath, entry } = loadSessionEntry(rawSessionKey, { cfg });
     const sessionId = entry?.sessionId;
     if (!sessionId || !storePath) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "session not found"));

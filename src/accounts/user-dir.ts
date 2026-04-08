@@ -12,6 +12,14 @@ export function resolveUserDataDir(userId: string, stateDir = resolveStateDir())
   return path.join(stateDir, "users", userId);
 }
 
+export function resolveUserSessionsDir(userId: string, stateDir = resolveStateDir()): string {
+  return path.join(resolveUserDataDir(userId, stateDir), "sessions");
+}
+
+export function resolveUserSessionStorePath(userId: string, stateDir = resolveStateDir()): string {
+  return path.join(resolveUserSessionsDir(userId, stateDir), "sessions.json");
+}
+
 export async function ensureUserDataDirs(
   userId: string,
   stateDir = resolveStateDir(),
