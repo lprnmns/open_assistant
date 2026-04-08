@@ -79,6 +79,9 @@ class SecurePrefs(
   private val _gatewayToken = MutableStateFlow("")
   val gatewayToken: StateFlow<String> = _gatewayToken
 
+  private val _gatewayAccountToken = MutableStateFlow("")
+  val gatewayAccountToken: StateFlow<String> = _gatewayAccountToken
+
   private val _gatewayBootstrapToken = MutableStateFlow("")
   val gatewayBootstrapToken: StateFlow<String> = _gatewayBootstrapToken
 
@@ -167,6 +170,13 @@ class SecurePrefs(
     _gatewayToken.value = trimmed
   }
 
+  fun setGatewayAccountToken(value: String) {
+    val trimmed = value.trim()
+    val key = "gateway.accountToken.${_instanceId.value}"
+    securePrefs.edit { putString(key, trimmed) }
+    _gatewayAccountToken.value = trimmed
+  }
+
   fun setGatewayPassword(value: String) {
     saveGatewayPassword(value)
   }
@@ -196,6 +206,19 @@ class SecurePrefs(
     val key = "gateway.token.${_instanceId.value}"
     val stored = securePrefs.getString(key, null)?.trim()
     return stored?.takeIf { it.isNotEmpty() }
+  }
+
+  fun loadGatewayAccountToken(): String? {
+    val key = "gateway.accountToken.${_instanceId.value}"
+    val stored =
+      _gatewayAccountToken.value.trim().ifEmpty {
+        val persisted = securePrefs.getString(key, null)?.trim().orEmpty()
+        if (persisted.isNotEmpty()) {
+          _gatewayAccountToken.value = persisted
+        }
+        persisted
+      }
+    return stored.takeIf { it.isNotEmpty() }
   }
 
   fun saveGatewayToken(token: String) {

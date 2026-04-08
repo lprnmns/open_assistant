@@ -153,6 +153,54 @@ class GatewaySessionInvokeTest {
   }
 
   @Test
+  fun connect_usesAccountTokenAndSkipsStoredDeviceTokenFallback() = runBlocking {
+    val json = testJson()
+    val connected = CompletableDeferred<Unit>()
+    val connectAuth = CompletableDeferred<JsonObject?>()
+    val lastDisconnect = AtomicReference("")
+    val server =
+      startGatewayServer(json) { webSocket, id, method, frame ->
+        when (method) {
+          "connect" -> {
+            if (!connectAuth.isCompleted) {
+              connectAuth.complete(frame["params"]?.jsonObject?.get("auth")?.jsonObject)
+            }
+            webSocket.send(connectResponseFrame(id))
+            webSocket.close(1000, "done")
+          }
+        }
+      }
+
+    val harness =
+      createNodeHarness(
+        connected = connected,
+        lastDisconnect = lastDisconnect,
+      ) { GatewaySession.InvokeResult.ok("""{"handled":true}""") }
+
+    try {
+      val deviceId = DeviceIdentityStore(RuntimeEnvironment.getApplication()).loadOrCreate().deviceId
+      harness.deviceAuthStore.saveToken(deviceId, "node", "stored-device-token")
+
+      connectNodeSession(
+        session = harness.session,
+        port = server.port,
+        token = null,
+        accountToken = "account-token",
+        bootstrapToken = "bootstrap-token",
+      )
+      awaitConnectedOrThrow(connected, lastDisconnect, server)
+
+      val auth = withTimeout(TEST_TIMEOUT_MS) { connectAuth.await() }
+      assertEquals("account-token", auth?.get("accountToken")?.jsonPrimitive?.content)
+      assertNull(auth?.get("token"))
+      assertNull(auth?.get("deviceToken"))
+      assertNull(auth?.get("bootstrapToken"))
+    } finally {
+      shutdownHarness(harness, server)
+    }
+  }
+
+  @Test
   fun connect_retriesWithStoredDeviceTokenAfterSharedTokenMismatch() = runBlocking {
     val json = testJson()
     val connected = CompletableDeferred<Unit>()
@@ -434,6 +482,7 @@ class GatewaySessionInvokeTest {
     session: GatewaySession,
     port: Int,
     token: String? = "test-token",
+    accountToken: String? = null,
     bootstrapToken: String? = null,
   ) {
     session.connect(
@@ -446,6 +495,7 @@ class GatewaySessionInvokeTest {
           tlsEnabled = false,
         ),
       token = token,
+      accountToken = accountToken,
       bootstrapToken = bootstrapToken,
       password = null,
       options =

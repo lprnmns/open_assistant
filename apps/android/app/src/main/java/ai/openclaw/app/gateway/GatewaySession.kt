@@ -61,6 +61,7 @@ data class GatewayConnectOptions(
 private enum class GatewayConnectAuthSource {
   DEVICE_TOKEN,
   SHARED_TOKEN,
+  ACCOUNT_TOKEN,
   BOOTSTRAP_TOKEN,
   PASSWORD,
   NONE,
@@ -74,6 +75,7 @@ data class GatewayConnectErrorDetails(
 
 private data class SelectedConnectAuth(
   val authToken: String?,
+  val authAccountToken: String?,
   val authBootstrapToken: String?,
   val authDeviceToken: String?,
   val authPassword: String?,
@@ -139,6 +141,7 @@ class GatewaySession(
   private data class DesiredConnection(
     val endpoint: GatewayEndpoint,
     val token: String?,
+    val accountToken: String?,
     val bootstrapToken: String?,
     val password: String?,
     val options: GatewayConnectOptions,
@@ -155,12 +158,13 @@ class GatewaySession(
   fun connect(
     endpoint: GatewayEndpoint,
     token: String?,
+    accountToken: String?,
     bootstrapToken: String?,
     password: String?,
     options: GatewayConnectOptions,
     tls: GatewayTlsParams? = null,
   ) {
-    desired = DesiredConnection(endpoint, token, bootstrapToken, password, options, tls)
+    desired = DesiredConnection(endpoint, token, accountToken, bootstrapToken, password, options, tls)
     pendingDeviceTokenRetry = false
     deviceTokenRetryBudgetUsed = false
     reconnectPausedForAuthFailure = false
@@ -292,6 +296,7 @@ class GatewaySession(
   private inner class Connection(
     private val endpoint: GatewayEndpoint,
     private val token: String?,
+    private val accountToken: String?,
     private val bootstrapToken: String?,
     private val password: String?,
     private val options: GatewayConnectOptions,
@@ -394,11 +399,15 @@ class GatewaySession(
           tls = tls,
           role = options.role,
           explicitGatewayToken = token?.trim()?.takeIf { it.isNotEmpty() },
+          explicitAccountToken = accountToken?.trim()?.takeIf { it.isNotEmpty() },
           explicitBootstrapToken = bootstrapToken?.trim()?.takeIf { it.isNotEmpty() },
           explicitPassword = password?.trim()?.takeIf { it.isNotEmpty() },
           storedToken = storedToken?.takeIf { it.isNotEmpty() },
         )
-      return selectedAuth.authToken ?: selectedAuth.authBootstrapToken ?: selectedAuth.authPassword
+      return selectedAuth.authToken
+        ?: selectedAuth.authAccountToken
+        ?: selectedAuth.authBootstrapToken
+        ?: selectedAuth.authPassword
     }
 
     private fun parseUploadResponse(response: Response): UploadResult {
@@ -539,6 +548,7 @@ class GatewaySession(
           tls = tls,
           role = options.role,
           explicitGatewayToken = token?.trim()?.takeIf { it.isNotEmpty() },
+          explicitAccountToken = accountToken?.trim()?.takeIf { it.isNotEmpty() },
           explicitBootstrapToken = bootstrapToken?.trim()?.takeIf { it.isNotEmpty() },
           explicitPassword = password?.trim()?.takeIf { it.isNotEmpty() },
           storedToken = storedToken?.takeIf { it.isNotEmpty() },
@@ -626,6 +636,10 @@ class GatewaySession(
             buildJsonObject {
               put("token", JsonPrimitive(selectedAuth.authToken))
               selectedAuth.authDeviceToken?.let { put("deviceToken", JsonPrimitive(it)) }
+            }
+          selectedAuth.authAccountToken != null ->
+            buildJsonObject {
+              put("accountToken", JsonPrimitive(selectedAuth.authAccountToken))
             }
           selectedAuth.authBootstrapToken != null ->
             buildJsonObject {
@@ -873,6 +887,7 @@ class GatewaySession(
       Connection(
         target.endpoint,
         target.token,
+        target.accountToken,
         target.bootstrapToken,
         target.password,
         target.options,
@@ -959,6 +974,7 @@ class GatewaySession(
     tls: GatewayTlsParams?,
     role: String,
     explicitGatewayToken: String?,
+    explicitAccountToken: String?,
     explicitBootstrapToken: String?,
     explicitPassword: String?,
     storedToken: String?,
@@ -966,10 +982,14 @@ class GatewaySession(
     val shouldUseDeviceRetryToken =
       pendingDeviceTokenRetry &&
         explicitGatewayToken != null &&
+        explicitAccountToken == null &&
         storedToken != null &&
         isTrustedDeviceRetryEndpoint(endpoint, tls)
     val authToken =
-      explicitGatewayToken
+      if (explicitAccountToken != null) {
+        null
+      } else {
+        explicitGatewayToken
         ?: if (
           explicitPassword == null &&
             (explicitBootstrapToken == null || storedToken != null)
@@ -978,23 +998,28 @@ class GatewaySession(
         } else {
           null
         }
+      }
+    val authAccountToken = if (authToken == null) explicitAccountToken else null
     val authDeviceToken = if (shouldUseDeviceRetryToken) storedToken else null
-    val authBootstrapToken = if (authToken == null) explicitBootstrapToken else null
+    val authBootstrapToken =
+      if (authToken == null && authAccountToken == null) explicitBootstrapToken else null
     val authSource =
       when {
         authDeviceToken != null || (explicitGatewayToken == null && authToken != null) ->
           GatewayConnectAuthSource.DEVICE_TOKEN
         authToken != null -> GatewayConnectAuthSource.SHARED_TOKEN
+        authAccountToken != null -> GatewayConnectAuthSource.ACCOUNT_TOKEN
         authBootstrapToken != null -> GatewayConnectAuthSource.BOOTSTRAP_TOKEN
         explicitPassword != null -> GatewayConnectAuthSource.PASSWORD
         else -> GatewayConnectAuthSource.NONE
       }
     return SelectedConnectAuth(
       authToken = authToken,
+      authAccountToken = authAccountToken,
       authBootstrapToken = authBootstrapToken,
       authDeviceToken = authDeviceToken,
       authPassword = explicitPassword,
-      signatureToken = authToken ?: authBootstrapToken,
+      signatureToken = authToken ?: authAccountToken ?: authBootstrapToken,
       authSource = authSource,
       attemptedDeviceTokenRetry = shouldUseDeviceRetryToken,
     )
@@ -1022,6 +1047,8 @@ class GatewaySession(
   private fun shouldPauseReconnectAfterAuthFailure(error: ErrorShape): Boolean {
     return when (error.details?.code) {
       "AUTH_TOKEN_MISSING",
+      "AUTH_ACCOUNT_TOKEN_INVALID",
+      "AUTH_ACCOUNT_TOKEN_EXPIRED",
       "AUTH_BOOTSTRAP_TOKEN_INVALID",
       "AUTH_PASSWORD_MISSING",
       "AUTH_PASSWORD_MISMATCH",

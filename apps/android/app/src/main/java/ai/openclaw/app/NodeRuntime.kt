@@ -771,12 +771,14 @@ class NodeRuntime(
     operatorStatusText = "Connecting…"
     updateStatus()
     val token = prefs.loadGatewayToken()
+    val accountToken = prefs.loadGatewayAccountToken()
     val bootstrapToken = prefs.loadGatewayBootstrapToken()
     val password = prefs.loadGatewayPassword()
     val tls = connectionManager.resolveTlsParams(endpoint)
     operatorSession.connect(
       endpoint,
       token,
+      accountToken,
       bootstrapToken,
       password,
       connectionManager.buildOperatorConnectOptions(),
@@ -785,6 +787,7 @@ class NodeRuntime(
     nodeSession.connect(
       endpoint,
       token,
+      accountToken,
       bootstrapToken,
       password,
       connectionManager.buildNodeConnectOptions(),
@@ -814,11 +817,13 @@ class NodeRuntime(
     nodeStatusText = "Connecting…"
     updateStatus()
     val token = prefs.loadGatewayToken()
+    val accountToken = prefs.loadGatewayAccountToken()
     val bootstrapToken = prefs.loadGatewayBootstrapToken()
     val password = prefs.loadGatewayPassword()
     operatorSession.connect(
       endpoint,
       token,
+      accountToken,
       bootstrapToken,
       password,
       connectionManager.buildOperatorConnectOptions(),
@@ -827,6 +832,7 @@ class NodeRuntime(
     nodeSession.connect(
       endpoint,
       token,
+      accountToken,
       bootstrapToken,
       password,
       connectionManager.buildNodeConnectOptions(),

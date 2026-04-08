@@ -6,8 +6,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.ConscryptMode
 
 @RunWith(RobolectricTestRunner::class)
+@ConscryptMode(ConscryptMode.Mode.OFF)
 class SecurePrefsTest {
   @Test
   fun loadLocationMode_migratesLegacyAlwaysValue() {
@@ -34,5 +36,20 @@ class SecurePrefsTest {
     assertEquals("shared-token", prefs.loadGatewayToken())
     assertEquals("bootstrap-token", prefs.loadGatewayBootstrapToken())
     assertEquals("bootstrap-token", prefs.gatewayBootstrapToken.value)
+  }
+
+  @Test
+  fun saveGatewayAccountToken_persistsSeparatelyFromSharedToken() {
+    val context = RuntimeEnvironment.getApplication()
+    val securePrefs = context.getSharedPreferences("openclaw.node.secure.test", Context.MODE_PRIVATE)
+    securePrefs.edit().clear().commit()
+    val prefs = SecurePrefs(context, securePrefsOverride = securePrefs)
+
+    prefs.setGatewayToken("shared-token")
+    prefs.setGatewayAccountToken("account-token")
+
+    assertEquals("shared-token", prefs.loadGatewayToken())
+    assertEquals("account-token", prefs.loadGatewayAccountToken())
+    assertEquals("account-token", prefs.gatewayAccountToken.value)
   }
 }

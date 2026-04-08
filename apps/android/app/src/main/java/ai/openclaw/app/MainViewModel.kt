@@ -80,6 +80,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val manualPort: StateFlow<Int> = prefs.manualPort
   val manualTls: StateFlow<Boolean> = prefs.manualTls
   val gatewayToken: StateFlow<String> = prefs.gatewayToken
+  val gatewayAccountToken: StateFlow<String> = prefs.gatewayAccountToken
   val onboardingCompleted: StateFlow<Boolean> = prefs.onboardingCompleted
   val canvasDebugStatusEnabled: StateFlow<Boolean> = prefs.canvasDebugStatusEnabled
   val speakerEnabled: StateFlow<Boolean> = prefs.speakerEnabled
@@ -176,6 +177,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setGatewayToken(value: String) {
     prefs.setGatewayToken(value)
+  }
+
+  fun setGatewayAccountToken(value: String) {
+    prefs.setGatewayAccountToken(value)
   }
 
   fun setGatewayBootstrapToken(value: String) {
