@@ -42,6 +42,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -53,10 +54,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import ai.openclaw.app.MainViewModel
+import ai.openclaw.app.cloud.AccountAuthClient
+import ai.openclaw.app.cloud.AccountAuthException
+import ai.openclaw.app.gateway.GatewayEndpoint
 import ai.openclaw.app.ui.mobileCardSurface
+import kotlinx.coroutines.launch
 
 private enum class ConnectInputMode {
   SetupCode,
+  Cloud,
   Manual,
 }
 
@@ -66,18 +72,25 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
   val statusText by viewModel.statusText.collectAsState()
   val isConnected by viewModel.isConnected.collectAsState()
   val remoteAddress by viewModel.remoteAddress.collectAsState()
+  val cloudEnabled by viewModel.cloudEnabled.collectAsState()
+  val gatewayCloudBaseUrl by viewModel.gatewayCloudBaseUrl.collectAsState()
   val manualHost by viewModel.manualHost.collectAsState()
   val manualPort by viewModel.manualPort.collectAsState()
   val manualTls by viewModel.manualTls.collectAsState()
   val manualEnabled by viewModel.manualEnabled.collectAsState()
   val gatewayToken by viewModel.gatewayToken.collectAsState()
+  val gatewayAccountToken by viewModel.gatewayAccountToken.collectAsState()
   val pendingTrust by viewModel.pendingGatewayTrust.collectAsState()
+  val coroutineScope = rememberCoroutineScope()
+  val accountAuthClient = remember { AccountAuthClient() }
 
   var advancedOpen by rememberSaveable { mutableStateOf(false) }
   var inputMode by
-    remember(manualEnabled, manualHost, gatewayToken) {
+    remember(cloudEnabled, gatewayCloudBaseUrl, gatewayAccountToken, manualEnabled, manualHost, gatewayToken) {
       mutableStateOf(
-        if (manualEnabled || manualHost.isNotBlank() || gatewayToken.trim().isNotEmpty()) {
+        if (cloudEnabled || gatewayCloudBaseUrl.isNotBlank() || gatewayAccountToken.trim().isNotEmpty()) {
+          ConnectInputMode.Cloud
+        } else if (manualEnabled || manualHost.isNotBlank() || gatewayToken.trim().isNotEmpty()) {
           ConnectInputMode.Manual
         } else {
           ConnectInputMode.SetupCode
@@ -85,6 +98,12 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
       )
     }
   var setupCode by rememberSaveable { mutableStateOf("") }
+  var cloudBaseUrlInput by rememberSaveable { mutableStateOf(gatewayCloudBaseUrl) }
+  var cloudEmailInput by rememberSaveable { mutableStateOf("") }
+  var cloudPasswordInput by rememberSaveable { mutableStateOf("") }
+  var cloudInviteCodeInput by rememberSaveable { mutableStateOf("") }
+  var cloudAuthMode by rememberSaveable { mutableStateOf(CloudAuthMode.Login) }
+  var cloudAuthSubmitting by rememberSaveable { mutableStateOf(false) }
   var manualHostInput by rememberSaveable { mutableStateOf(manualHost.ifBlank { "10.0.2.2" }) }
   var manualPortInput by rememberSaveable { mutableStateOf(manualPort.toString()) }
   var manualTlsInput by rememberSaveable { mutableStateOf(manualTls) }
@@ -127,12 +146,14 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
   val manualResolvedEndpoint = remember(manualHostInput, manualPortInput, manualTlsInput) {
     composeGatewayManualUrl(manualHostInput, manualPortInput, manualTlsInput)?.let { parseGatewayEndpoint(it)?.displayUrl }
   }
+  val cloudResolvedEndpoint = remember(cloudBaseUrlInput) { cloudGatewayAddress(cloudBaseUrlInput) }
 
   val activeEndpoint =
-    remember(isConnected, remoteAddress, setupResolvedEndpoint, manualResolvedEndpoint, inputMode) {
+    remember(isConnected, remoteAddress, setupResolvedEndpoint, manualResolvedEndpoint, cloudResolvedEndpoint, cloudBaseUrlInput, inputMode) {
       when {
         isConnected && !remoteAddress.isNullOrBlank() -> remoteAddress!!
         inputMode == ConnectInputMode.SetupCode -> setupResolvedEndpoint ?: "Not set"
+        inputMode == ConnectInputMode.Cloud -> cloudResolvedEndpoint ?: cloudBaseUrlInput.ifBlank { "Not set" }
         else -> manualResolvedEndpoint ?: "Not set"
       }
     }
@@ -230,9 +251,78 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
     } else {
       Button(
         onClick = {
+          if (cloudAuthSubmitting) {
+            return@Button
+          }
           if (statusText.contains("operator offline", ignoreCase = true)) {
             validationText = null
             viewModel.refreshGatewayConnection()
+            return@Button
+          }
+
+          if (inputMode == ConnectInputMode.Cloud) {
+            val normalizedBaseUrl = cloudBaseUrlInput.trim()
+            if (GatewayEndpoint.cloud(normalizedBaseUrl) == null) {
+              validationText = "Enter a valid cloud gateway URL."
+              return@Button
+            }
+
+            val connectWithStoredSession = {
+              validationText = null
+              viewModel.setGatewayCloudBaseUrl(normalizedBaseUrl)
+              viewModel.setCloudEnabled(true)
+              viewModel.setManualEnabled(false)
+              viewModel.connectCloud()
+            }
+
+            val normalizedEmail = cloudEmailInput.trim()
+            if (normalizedEmail.isEmpty() || cloudPasswordInput.isBlank()) {
+              if (gatewayAccountToken.trim().isNotEmpty()) {
+                connectWithStoredSession()
+              } else {
+                validationText = "Sign in first, or enter email and password."
+              }
+              return@Button
+            }
+
+            validationText = null
+            cloudAuthSubmitting = true
+            coroutineScope.launch {
+              try {
+                val authResult =
+                  when (cloudAuthMode) {
+                    CloudAuthMode.Register ->
+                      accountAuthClient.register(
+                        baseUrl = normalizedBaseUrl,
+                        email = normalizedEmail,
+                        password = cloudPasswordInput,
+                        inviteCode = cloudInviteCodeInput,
+                      )
+                    CloudAuthMode.Login ->
+                      accountAuthClient.login(
+                        baseUrl = normalizedBaseUrl,
+                        email = normalizedEmail,
+                        password = cloudPasswordInput,
+                      )
+                  }
+                viewModel.setGatewayCloudBaseUrl(normalizedBaseUrl)
+                viewModel.setGatewayAccountToken(authResult.token)
+                viewModel.setCloudEnabled(true)
+                viewModel.setManualEnabled(false)
+                viewModel.setGatewayBootstrapToken("")
+                viewModel.setGatewayPassword("")
+                viewModel.setGatewayToken("")
+                cloudPasswordInput = ""
+                connectWithStoredSession()
+              } catch (err: Throwable) {
+                validationText =
+                  (err as? AccountAuthException)?.message
+                    ?: err.message
+                    ?: "Cloud sign-in failed."
+              } finally {
+                cloudAuthSubmitting = false
+              }
+            }
             return@Button
           }
 
@@ -273,13 +363,17 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
         },
         modifier = Modifier.fillMaxWidth().height(52.dp),
         shape = RoundedCornerShape(14.dp),
+        enabled = !cloudAuthSubmitting,
         colors =
           ButtonDefaults.buttonColors(
             containerColor = mobileAccent,
             contentColor = Color.White,
           ),
       ) {
-        Text("Connect Gateway", style = mobileHeadline.copy(fontWeight = FontWeight.Bold))
+        Text(
+          if (inputMode == ConnectInputMode.Cloud && cloudAuthSubmitting) "Signing in…" else "Connect Gateway",
+          style = mobileHeadline.copy(fontWeight = FontWeight.Bold),
+        )
       }
     }
 
@@ -366,6 +460,11 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
               onClick = { inputMode = ConnectInputMode.SetupCode },
             )
             MethodChip(
+              label = "Cloud",
+              active = inputMode == ConnectInputMode.Cloud,
+              onClick = { inputMode = ConnectInputMode.Cloud },
+            )
+            MethodChip(
               label = "Manual",
               active = inputMode == ConnectInputMode.Manual,
               onClick = { inputMode = ConnectInputMode.Manual },
@@ -395,6 +494,100 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
             )
             if (!setupResolvedEndpoint.isNullOrBlank()) {
               EndpointPreview(endpoint = setupResolvedEndpoint)
+            }
+          } else if (inputMode == ConnectInputMode.Cloud) {
+            Text("Cloud account", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+              MethodChip(
+                label = "Sign In",
+                active = cloudAuthMode == CloudAuthMode.Login,
+                onClick = { cloudAuthMode = CloudAuthMode.Login },
+              )
+              MethodChip(
+                label = "Create",
+                active = cloudAuthMode == CloudAuthMode.Register,
+                onClick = { cloudAuthMode = CloudAuthMode.Register },
+              )
+            }
+
+            Text("Cloud URL", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            OutlinedTextField(
+              value = cloudBaseUrlInput,
+              onValueChange = {
+                cloudBaseUrlInput = it
+                validationText = null
+              },
+              placeholder = { Text("https://your-cloud-gateway.example", style = mobileBody, color = mobileTextTertiary) },
+              modifier = Modifier.fillMaxWidth(),
+              singleLine = true,
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+              textStyle = mobileBody.copy(color = mobileText),
+              shape = RoundedCornerShape(14.dp),
+              colors = outlinedColors(),
+            )
+
+            Text("Email", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            OutlinedTextField(
+              value = cloudEmailInput,
+              onValueChange = {
+                cloudEmailInput = it
+                validationText = null
+              },
+              placeholder = { Text("you@example.com", style = mobileBody, color = mobileTextTertiary) },
+              modifier = Modifier.fillMaxWidth(),
+              singleLine = true,
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+              textStyle = mobileBody.copy(color = mobileText),
+              shape = RoundedCornerShape(14.dp),
+              colors = outlinedColors(),
+            )
+
+            Text("Password", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+            OutlinedTextField(
+              value = cloudPasswordInput,
+              onValueChange = {
+                cloudPasswordInput = it
+                validationText = null
+              },
+              placeholder = { Text("password", style = mobileBody, color = mobileTextTertiary) },
+              modifier = Modifier.fillMaxWidth(),
+              singleLine = true,
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+              textStyle = mobileBody.copy(color = mobileText),
+              shape = RoundedCornerShape(14.dp),
+              colors = outlinedColors(),
+            )
+
+            if (cloudAuthMode == CloudAuthMode.Register) {
+              Text("Invite code (optional)", style = mobileCaption1.copy(fontWeight = FontWeight.SemiBold), color = mobileTextSecondary)
+              OutlinedTextField(
+                value = cloudInviteCodeInput,
+                onValueChange = {
+                  cloudInviteCodeInput = it
+                  validationText = null
+                },
+                placeholder = { Text("invite code", style = mobileBody, color = mobileTextTertiary) },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                textStyle = mobileBody.copy(color = mobileText),
+                shape = RoundedCornerShape(14.dp),
+                colors = outlinedColors(),
+              )
+            }
+
+            Text(
+              if (gatewayAccountToken.trim().isNotEmpty()) {
+                "A cloud session is already saved on this device. Leave email and password blank to reconnect with it."
+              } else {
+                "We'll exchange your credentials for a device session before connecting."
+              },
+              style = mobileCallout,
+              color = if (cloudAuthSubmitting) mobileAccent else mobileTextSecondary,
+            )
+
+            if (!cloudResolvedEndpoint.isNullOrBlank()) {
+              EndpointPreview(endpoint = cloudResolvedEndpoint)
             }
           } else {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

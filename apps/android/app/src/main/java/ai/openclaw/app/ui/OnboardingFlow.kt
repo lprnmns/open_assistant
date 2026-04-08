@@ -119,11 +119,6 @@ private enum class GatewayInputMode {
   Manual,
 }
 
-private enum class CloudAuthMode {
-  Register,
-  Login,
-}
-
 private enum class PermissionToggle {
   Discovery,
   Location,
@@ -1999,12 +1994,6 @@ private fun FinalStep(
       }
     }
   }
-}
-
-private fun cloudGatewayAddress(rawBaseUrl: String): String? {
-  val endpoint = GatewayEndpoint.cloud(rawBaseUrl) ?: return null
-  val scheme = if (endpoint.tlsEnabled) "https" else "http"
-  return "$scheme://${endpoint.host}:${endpoint.port}"
 }
 
 @Composable
