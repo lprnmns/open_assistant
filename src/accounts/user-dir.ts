@@ -20,6 +20,36 @@ export function resolveUserSessionStorePath(userId: string, stateDir = resolveSt
   return path.join(resolveUserSessionsDir(userId, stateDir), "sessions.json");
 }
 
+export function resolveUserCronDir(userId: string, stateDir = resolveStateDir()): string {
+  return path.join(resolveUserDataDir(userId, stateDir), "cron");
+}
+
+export function resolveUserCronStorePath(userId: string, stateDir = resolveStateDir()): string {
+  return path.join(resolveUserCronDir(userId, stateDir), "jobs.json");
+}
+
+export function resolveUserConsciousnessDir(userId: string, stateDir = resolveStateDir()): string {
+  return path.join(resolveUserDataDir(userId, stateDir), "consciousness");
+}
+
+export function resolveUserConsciousnessDbPath(
+  userId: string,
+  stateDir = resolveStateDir(),
+): string {
+  return path.join(resolveUserConsciousnessDir(userId, stateDir), "consciousness.db");
+}
+
+export function resolveUserConsciousnessStatePath(
+  userId: string,
+  stateDir = resolveStateDir(),
+): string {
+  return path.join(resolveUserConsciousnessDir(userId, stateDir), "consciousness-state.json");
+}
+
+export function resolveUserMemoryDir(userId: string, stateDir = resolveStateDir()): string {
+  return path.join(resolveUserDataDir(userId, stateDir), "memory");
+}
+
 export async function ensureUserDataDirs(
   userId: string,
   stateDir = resolveStateDir(),
