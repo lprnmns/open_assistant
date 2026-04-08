@@ -60,11 +60,30 @@ import ai.openclaw.app.gateway.GatewayEndpoint
 import ai.openclaw.app.ui.mobileCardSurface
 import kotlinx.coroutines.launch
 
-private enum class ConnectInputMode {
+internal enum class ConnectInputMode {
   SetupCode,
   Cloud,
   Manual,
 }
+
+internal fun resolveInitialConnectInputMode(
+  cloudEnabled: Boolean,
+  gatewayCloudBaseUrl: String,
+  gatewayAccountToken: String,
+  manualEnabled: Boolean,
+  manualHost: String,
+  gatewayToken: String,
+): ConnectInputMode =
+  if (cloudEnabled || gatewayCloudBaseUrl.isNotBlank() || gatewayAccountToken.trim().isNotEmpty()) {
+    ConnectInputMode.Cloud
+  } else if (manualEnabled || manualHost.isNotBlank() || gatewayToken.trim().isNotEmpty()) {
+    ConnectInputMode.Manual
+  } else {
+    ConnectInputMode.SetupCode
+  }
+
+internal fun resolveInitialConnectAdvancedOpen(inputMode: ConnectInputMode): Boolean =
+  inputMode != ConnectInputMode.SetupCode
 
 @Composable
 fun ConnectTabScreen(viewModel: MainViewModel) {
@@ -84,19 +103,22 @@ fun ConnectTabScreen(viewModel: MainViewModel) {
   val coroutineScope = rememberCoroutineScope()
   val accountAuthClient = remember { AccountAuthClient() }
 
-  var advancedOpen by rememberSaveable { mutableStateOf(false) }
-  var inputMode by
+  val initialInputMode =
     remember(cloudEnabled, gatewayCloudBaseUrl, gatewayAccountToken, manualEnabled, manualHost, gatewayToken) {
-      mutableStateOf(
-        if (cloudEnabled || gatewayCloudBaseUrl.isNotBlank() || gatewayAccountToken.trim().isNotEmpty()) {
-          ConnectInputMode.Cloud
-        } else if (manualEnabled || manualHost.isNotBlank() || gatewayToken.trim().isNotEmpty()) {
-          ConnectInputMode.Manual
-        } else {
-          ConnectInputMode.SetupCode
-        },
+      resolveInitialConnectInputMode(
+        cloudEnabled = cloudEnabled,
+        gatewayCloudBaseUrl = gatewayCloudBaseUrl,
+        gatewayAccountToken = gatewayAccountToken,
+        manualEnabled = manualEnabled,
+        manualHost = manualHost,
+        gatewayToken = gatewayToken,
       )
     }
+  var advancedOpen by
+    rememberSaveable(initialInputMode) {
+      mutableStateOf(resolveInitialConnectAdvancedOpen(initialInputMode))
+    }
+  var inputMode by remember(initialInputMode) { mutableStateOf(initialInputMode) }
   var setupCode by rememberSaveable { mutableStateOf("") }
   var cloudBaseUrlInput by rememberSaveable { mutableStateOf(gatewayCloudBaseUrl) }
   var cloudEmailInput by rememberSaveable { mutableStateOf("") }
