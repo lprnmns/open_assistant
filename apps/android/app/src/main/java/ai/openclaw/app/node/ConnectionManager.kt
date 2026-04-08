@@ -32,6 +32,7 @@ class ConnectionManager(
       val stableId = endpoint.stableId
       val stored = storedFingerprint?.trim().takeIf { !it.isNullOrEmpty() }
       val isManual = stableId.startsWith("manual|")
+      val isCloud = stableId.startsWith("cloud|")
 
       if (isManual) {
         if (!manualTlsEnabled) return null
@@ -41,6 +42,7 @@ class ConnectionManager(
             expectedFingerprint = stored,
             allowTOFU = false,
             stableId = stableId,
+            requiresManualTrustPrompt = false,
           )
         }
         return GatewayTlsParams(
@@ -48,6 +50,7 @@ class ConnectionManager(
           expectedFingerprint = null,
           allowTOFU = false,
           stableId = stableId,
+          requiresManualTrustPrompt = true,
         )
       }
 
@@ -58,17 +61,20 @@ class ConnectionManager(
           expectedFingerprint = stored,
           allowTOFU = false,
           stableId = stableId,
+          requiresManualTrustPrompt = false,
         )
       }
 
       val hinted = endpoint.tlsEnabled || !endpoint.tlsFingerprintSha256.isNullOrBlank()
       if (hinted) {
-        // TXT is unauthenticated. Do not treat the advertised fingerprint as authoritative.
+        // Cloud endpoints rely on public PKI, while discovery/manual-first endpoints still need
+        // out-of-band trust before we pin anything locally.
         return GatewayTlsParams(
           required = true,
           expectedFingerprint = null,
           allowTOFU = false,
           stableId = stableId,
+          requiresManualTrustPrompt = !isCloud,
         )
       }
 

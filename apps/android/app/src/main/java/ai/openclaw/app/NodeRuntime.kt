@@ -810,7 +810,7 @@ class NodeRuntime(
 
   fun connect(endpoint: GatewayEndpoint) {
     val tls = connectionManager.resolveTlsParams(endpoint)
-    if (tls?.required == true && tls.expectedFingerprint.isNullOrBlank()) {
+    if (tls?.requiresManualTrustPrompt == true) {
       // First-time TLS: capture fingerprint, ask user to verify out-of-band, then store and connect.
       _statusText.value = "Verify gateway TLS fingerprint…"
       scope.launch {

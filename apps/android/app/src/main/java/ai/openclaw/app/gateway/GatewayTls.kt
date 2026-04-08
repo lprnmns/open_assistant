@@ -24,6 +24,7 @@ data class GatewayTlsParams(
   val expectedFingerprint: String?,
   val allowTOFU: Boolean,
   val stableId: String,
+  val requiresManualTrustPrompt: Boolean = false,
 )
 
 data class GatewayTlsConfig(

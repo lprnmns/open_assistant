@@ -27,6 +27,7 @@ class ConnectionManagerTest {
 
     assertEquals("legit", params?.expectedFingerprint)
     assertEquals(false, params?.allowTOFU)
+    assertEquals(false, params?.requiresManualTrustPrompt)
   }
 
   @Test
@@ -50,6 +51,7 @@ class ConnectionManagerTest {
 
     assertNull(params?.expectedFingerprint)
     assertEquals(false, params?.allowTOFU)
+    assertEquals(true, params?.requiresManualTrustPrompt)
   }
 
   @Test
@@ -72,5 +74,23 @@ class ConnectionManagerTest {
       )
     assertNull(on?.expectedFingerprint)
     assertEquals(false, on?.allowTOFU)
+    assertEquals(true, on?.requiresManualTrustPrompt)
+  }
+
+  @Test
+  fun resolveTlsParamsForEndpoint_cloudUsesSystemTrustWithoutManualPrompt() {
+    val endpoint = GatewayEndpoint.cloud("https://cloud.openclaw.ai")
+
+    val params =
+      ConnectionManager.resolveTlsParamsForEndpoint(
+        endpoint = endpoint!!,
+        storedFingerprint = null,
+        manualTlsEnabled = false,
+      )
+
+    assertEquals(true, params?.required)
+    assertNull(params?.expectedFingerprint)
+    assertEquals(false, params?.allowTOFU)
+    assertEquals(false, params?.requiresManualTrustPrompt)
   }
 }
