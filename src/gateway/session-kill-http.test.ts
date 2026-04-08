@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveUserSessionStorePath } from "../accounts/user-dir.js";
 
 const TEST_GATEWAY_TOKEN = "test-gateway-token-1234567890";
 
@@ -164,6 +165,35 @@ describe("POST /sessions/:sessionKey/kill", () => {
     await expect(response.json()).resolves.toEqual({ ok: true, killed: true });
     expect(killSubagentRunAdminMock).toHaveBeenCalledWith({
       cfg,
+      sessionKey: "agent:main:subagent:worker",
+    });
+  });
+
+  it("scopes account-token kills to the caller's user session store", async () => {
+    isLocalDirectRequestMock.mockReturnValue(false);
+    authMock.mockResolvedValueOnce({ ok: true, method: "account-token", user: "user-a" });
+    loadSessionEntryMock.mockReturnValue({
+      entry: { sessionId: "sess-worker", updatedAt: Date.now() },
+      canonicalKey: "agent:main:subagent:worker",
+    });
+    killSubagentRunAdminMock.mockResolvedValue({ found: true, killed: true });
+
+    const response = await post("/sessions/agent%3Amain%3Asubagent%3Aworker/kill", "acct_test");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ ok: true, killed: true });
+    expect(loadSessionEntryMock).toHaveBeenCalledWith("agent:main:subagent:worker", {
+      cfg: expect.objectContaining({
+        session: expect.objectContaining({
+          store: resolveUserSessionStorePath("user-a"),
+        }),
+      }),
+    });
+    expect(killSubagentRunAdminMock).toHaveBeenCalledWith({
+      cfg: expect.objectContaining({
+        session: expect.objectContaining({
+          store: resolveUserSessionStorePath("user-a"),
+        }),
+      }),
       sessionKey: "agent:main:subagent:worker",
     });
   });

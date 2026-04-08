@@ -14,7 +14,13 @@ export function resolveGatewaySessionScopedConfig(
   client: GatewayClient | null | undefined,
   baseCfg: OpenClawConfig = loadConfig(),
 ): OpenClawConfig {
-  const accountUserId = resolveGatewayAccountUserId(client);
+  return resolveGatewaySessionScopedConfigForUserId(resolveGatewayAccountUserId(client), baseCfg);
+}
+
+export function resolveGatewaySessionScopedConfigForUserId(
+  accountUserId: string | undefined,
+  baseCfg: OpenClawConfig = loadConfig(),
+): OpenClawConfig {
   if (!accountUserId) {
     return baseCfg;
   }

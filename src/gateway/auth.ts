@@ -1,4 +1,5 @@
 import type { IncomingMessage } from "node:http";
+import { verifyAccountToken } from "../accounts/token.js";
 import type {
   GatewayAuthConfig,
   GatewayTailscaleMode,
@@ -8,6 +9,7 @@ import { resolveSecretInputRef } from "../config/types.secrets.js";
 import { readTailscaleWhoisIdentity, type TailscaleWhoisIdentity } from "../infra/tailscale.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
 import {
+  AUTH_RATE_LIMIT_SCOPE_ACCOUNT_AUTH,
   AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET,
   type AuthRateLimiter,
   type RateLimitCheckResult,
@@ -478,6 +480,41 @@ export async function authorizeGatewayConnect(
 export async function authorizeHttpGatewayConnect(
   params: Omit<AuthorizeGatewayConnectParams, "authSurface">,
 ): Promise<GatewayAuthResult> {
+  const accountTokenCandidate = params.connectAuth?.token?.trim();
+  if (accountTokenCandidate?.startsWith("acct_")) {
+    const limiter = params.rateLimiter;
+    const ip =
+      params.clientIp ??
+      resolveRequestClientIp(
+        params.req,
+        params.trustedProxies,
+        params.allowRealIpFallback === true,
+      ) ??
+      params.req?.socket?.remoteAddress;
+    const accountRateCheck = limiter?.check(ip, AUTH_RATE_LIMIT_SCOPE_ACCOUNT_AUTH);
+    if (accountRateCheck && !accountRateCheck.allowed) {
+      return {
+        ok: false,
+        reason: "rate_limited",
+        rateLimited: true,
+        retryAfterMs: accountRateCheck.retryAfterMs,
+      };
+    }
+
+    const accountResult = await verifyAccountToken({ token: accountTokenCandidate });
+    if (accountResult.ok) {
+      limiter?.reset(ip, AUTH_RATE_LIMIT_SCOPE_ACCOUNT_AUTH);
+      return {
+        ok: true,
+        method: "account-token",
+        user: accountResult.userId,
+      };
+    }
+
+    limiter?.recordFailure(ip, AUTH_RATE_LIMIT_SCOPE_ACCOUNT_AUTH);
+    return { ok: false, reason: accountResult.reason };
+  }
+
   return authorizeGatewayConnect({
     ...params,
     authSurface: "http",

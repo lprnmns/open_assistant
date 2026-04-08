@@ -2,6 +2,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
+import { issueAccountToken } from "../accounts/token.js";
+import { resolveUserSessionStorePath } from "../accounts/user-dir.js";
 import { appendAssistantMessageToSessionTranscript } from "../config/sessions/transcript.js";
 import { testState } from "./test-helpers.mocks.js";
 import {
@@ -139,6 +141,82 @@ describe("session history HTTP endpoints", () => {
           message: "Session not found: agent:main:missing",
         },
       });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  test("account-token history requests use user-scoped stores", async () => {
+    const accountTokenA = await issueAccountToken({ userId: "user-a" });
+    const accountTokenB = await issueAccountToken({ userId: "user-b" });
+    const userStorePathA = resolveUserSessionStorePath("user-a");
+    const userStorePathB = resolveUserSessionStorePath("user-b");
+
+    await writeSessionStore({
+      storePath: userStorePathA,
+      entries: {
+        main: {
+          sessionId: "sess-user-a",
+          updatedAt: Date.now(),
+        },
+      },
+    });
+    await writeSessionStore({
+      storePath: userStorePathB,
+      entries: {
+        main: {
+          sessionId: "sess-user-b",
+          updatedAt: Date.now(),
+        },
+      },
+    });
+    await fs.writeFile(
+      path.join(path.dirname(userStorePathA), "sess-user-a.jsonl"),
+      `${JSON.stringify({
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "history from account a" }],
+        },
+      })}\n`,
+      "utf-8",
+    );
+    await fs.writeFile(
+      path.join(path.dirname(userStorePathB), "sess-user-b.jsonl"),
+      `${JSON.stringify({
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "history from account b" }],
+        },
+      })}\n`,
+      "utf-8",
+    );
+
+    const harness = await createGatewaySuiteHarness();
+    try {
+      const resA = await fetch(
+        `http://127.0.0.1:${harness.port}/sessions/${encodeURIComponent("agent:main:main")}/history`,
+        {
+          headers: { Authorization: `Bearer ${accountTokenA}` },
+        },
+      );
+      const resB = await fetch(
+        `http://127.0.0.1:${harness.port}/sessions/${encodeURIComponent("agent:main:main")}/history`,
+        {
+          headers: { Authorization: `Bearer ${accountTokenB}` },
+        },
+      );
+
+      expect(resA.status).toBe(200);
+      expect(resB.status).toBe(200);
+
+      const bodyA = (await resA.json()) as {
+        messages?: Array<{ content?: Array<{ text?: string }> }>;
+      };
+      const bodyB = (await resB.json()) as {
+        messages?: Array<{ content?: Array<{ text?: string }> }>;
+      };
+      expect(bodyA.messages?.[0]?.content?.[0]?.text).toBe("history from account a");
+      expect(bodyB.messages?.[0]?.content?.[0]?.text).toBe("history from account b");
     } finally {
       await harness.close();
     }

@@ -12,6 +12,7 @@ import {
   isLocalDirectRequest,
   type ResolvedGatewayAuth,
 } from "./auth.js";
+import { resolveGatewaySessionScopedConfigForUserId } from "./account-session-scope.js";
 import { sendGatewayAuthFailure, sendJson, sendMethodNotAllowed } from "./http-common.js";
 import { getBearerToken } from "./http-utils.js";
 import { ADMIN_SCOPE, WRITE_SCOPE, authorizeOperatorScopesForMethod } from "./method-scopes.js";
@@ -56,7 +57,7 @@ export async function handleSessionKillHttpRequest(
     rateLimiter?: AuthRateLimiter;
   },
 ): Promise<boolean> {
-  const cfg = loadConfig();
+  const baseCfg = loadConfig();
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   const sessionKey = resolveSessionKeyFromPath(url.pathname);
   if (!sessionKey) {
@@ -73,8 +74,8 @@ export async function handleSessionKillHttpRequest(
     auth: opts.auth,
     connectAuth: token ? { token, password: token } : null,
     req,
-    trustedProxies: opts.trustedProxies ?? cfg.gateway?.trustedProxies,
-    allowRealIpFallback: opts.allowRealIpFallback ?? cfg.gateway?.allowRealIpFallback,
+    trustedProxies: opts.trustedProxies ?? baseCfg.gateway?.trustedProxies,
+    allowRealIpFallback: opts.allowRealIpFallback ?? baseCfg.gateway?.allowRealIpFallback,
     rateLimiter: opts.rateLimiter,
   });
   if (!authResult.ok) {
@@ -82,7 +83,11 @@ export async function handleSessionKillHttpRequest(
     return true;
   }
 
-  const { entry, canonicalKey } = loadSessionEntry(sessionKey);
+  const cfg = resolveGatewaySessionScopedConfigForUserId(
+    authResult.method === "account-token" ? authResult.user : undefined,
+    baseCfg,
+  );
+  const { entry, canonicalKey } = loadSessionEntry(sessionKey, { cfg });
   if (!entry) {
     sendJson(res, 404, {
       ok: false,
@@ -94,8 +99,8 @@ export async function handleSessionKillHttpRequest(
     return true;
   }
 
-  const trustedProxies = opts.trustedProxies ?? cfg.gateway?.trustedProxies;
-  const allowRealIpFallback = opts.allowRealIpFallback ?? cfg.gateway?.allowRealIpFallback;
+  const trustedProxies = opts.trustedProxies ?? baseCfg.gateway?.trustedProxies;
+  const allowRealIpFallback = opts.allowRealIpFallback ?? baseCfg.gateway?.allowRealIpFallback;
   const requesterSessionKey = req.headers[REQUESTER_SESSION_KEY_HEADER]?.toString().trim();
   const allowLocalAdminKill = isLocalDirectRequest(req, trustedProxies, allowRealIpFallback);
   const allowBearerOperatorKill = canBearerTokenKillSessions(token, authResult.ok);

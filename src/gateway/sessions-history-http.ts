@@ -5,6 +5,7 @@ import { loadConfig } from "../config/config.js";
 import { loadSessionStore } from "../config/sessions.js";
 import { onSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
+import { resolveGatewaySessionScopedConfigForUserId } from "./account-session-scope.js";
 import { authorizeHttpGatewayConnect, type ResolvedGatewayAuth } from "./auth.js";
 import {
   sendGatewayAuthFailure,
@@ -153,14 +154,14 @@ export async function handleSessionHistoryHttpRequest(
     return true;
   }
 
-  const cfg = loadConfig();
+  const baseCfg = loadConfig();
   const token = getBearerToken(req);
   const authResult = await authorizeHttpGatewayConnect({
     auth: opts.auth,
     connectAuth: token ? { token, password: token } : null,
     req,
-    trustedProxies: opts.trustedProxies ?? cfg.gateway?.trustedProxies,
-    allowRealIpFallback: opts.allowRealIpFallback ?? cfg.gateway?.allowRealIpFallback,
+    trustedProxies: opts.trustedProxies ?? baseCfg.gateway?.trustedProxies,
+    allowRealIpFallback: opts.allowRealIpFallback ?? baseCfg.gateway?.allowRealIpFallback,
     rateLimiter: opts.rateLimiter,
   });
   if (!authResult.ok) {
@@ -168,6 +169,10 @@ export async function handleSessionHistoryHttpRequest(
     return true;
   }
 
+  const cfg = resolveGatewaySessionScopedConfigForUserId(
+    authResult.method === "account-token" ? authResult.user : undefined,
+    baseCfg,
+  );
   const target = resolveGatewaySessionStoreTarget({ cfg, key: sessionKey });
   const store = loadSessionStore(target.storePath);
   const entry = target.storeKeys.map((key) => store[key]).find(Boolean);
