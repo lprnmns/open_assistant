@@ -113,11 +113,24 @@ private enum class OnboardingStep(val index: Int, val label: String) {
   FinalCheck(4, "Connect"),
 }
 
-private enum class GatewayInputMode {
+internal enum class GatewayInputMode {
   SetupCode,
   Cloud,
   Manual,
 }
+
+internal fun resolveInitialGatewayInputMode(
+  persistedGatewayCloudBaseUrl: String,
+  persistedGatewayAccountToken: String,
+): GatewayInputMode =
+  if (persistedGatewayCloudBaseUrl.isNotBlank() || persistedGatewayAccountToken.isNotBlank()) {
+    GatewayInputMode.Cloud
+  } else {
+    GatewayInputMode.SetupCode
+  }
+
+internal fun resolveInitialGatewayAdvancedOpen(inputMode: GatewayInputMode): Boolean =
+  inputMode == GatewayInputMode.Cloud
 
 private enum class PermissionToggle {
   Discovery,
@@ -228,17 +241,18 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
   var setupCode by rememberSaveable { mutableStateOf("") }
   var gatewayUrl by rememberSaveable { mutableStateOf("") }
   var gatewayPassword by rememberSaveable { mutableStateOf("") }
-  var gatewayInputMode by
-    rememberSaveable {
-      mutableStateOf(
-        if (persistedGatewayCloudBaseUrl.isNotBlank() || persistedGatewayAccountToken.isNotBlank()) {
-          GatewayInputMode.Cloud
-        } else {
-          GatewayInputMode.SetupCode
-        },
+  val initialGatewayInputMode =
+    remember(persistedGatewayCloudBaseUrl, persistedGatewayAccountToken) {
+      resolveInitialGatewayInputMode(
+        persistedGatewayCloudBaseUrl = persistedGatewayCloudBaseUrl,
+        persistedGatewayAccountToken = persistedGatewayAccountToken,
       )
     }
-  var gatewayAdvancedOpen by rememberSaveable { mutableStateOf(false) }
+  var gatewayInputMode by rememberSaveable { mutableStateOf(initialGatewayInputMode) }
+  var gatewayAdvancedOpen by
+    rememberSaveable(initialGatewayInputMode) {
+      mutableStateOf(resolveInitialGatewayAdvancedOpen(initialGatewayInputMode))
+    }
   var manualHost by rememberSaveable { mutableStateOf("10.0.2.2") }
   var manualPort by rememberSaveable { mutableStateOf("18789") }
   var manualTls by rememberSaveable { mutableStateOf(false) }
@@ -624,6 +638,7 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
               onAdvancedOpenChange = { gatewayAdvancedOpen = it },
               onInputModeChange = {
                 gatewayInputMode = it
+                gatewayAdvancedOpen = true
                 gatewayError = null
               },
               onSetupCodeChange = {
