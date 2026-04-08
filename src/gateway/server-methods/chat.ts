@@ -5,14 +5,12 @@ import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { rewriteTranscriptEntriesInSessionFile } from "../../agents/pi-embedded-runner/transcript-rewrite.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
-import { resolveUserSessionStorePath } from "../../accounts/user-dir.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import type { MsgContext } from "../../auto-reply/templating.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import type { ReplyPayload } from "../../auto-reply/types.js";
 import type { OpenClawConfig } from "../../config/config.js";
-import { loadConfig } from "../../config/config.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import type { DeliveryTarget } from "../../consciousness/delivery-target.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
@@ -71,6 +69,7 @@ import {
 } from "../session-utils.js";
 import { DEFAULT_UPLOAD_MAX_BYTES } from "../upload-constants.js";
 import { formatForLog } from "../ws-log.js";
+import { resolveGatewaySessionScopedConfig } from "../account-session-scope.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import { setGatewayDedupeEntry } from "./agent-wait-dedupe.js";
 import { normalizeRpcAttachmentsToChatAttachments } from "./attachment-normalize.js";
@@ -1168,30 +1167,6 @@ function normalizeOptionalText(value?: string | null): string | undefined {
   return trimmed || undefined;
 }
 
-function resolveGatewayAccountUserId(
-  client: GatewayRequestHandlerOptions["client"],
-): string | undefined {
-  const userId = client?.internal?.accountUserId?.trim();
-  return userId || undefined;
-}
-
-function resolveChatScopedConfig(
-  client: GatewayRequestHandlerOptions["client"],
-): OpenClawConfig {
-  const cfg = loadConfig();
-  const accountUserId = resolveGatewayAccountUserId(client);
-  if (!accountUserId) {
-    return cfg;
-  }
-  return {
-    ...cfg,
-    session: {
-      ...(cfg.session ?? {}),
-      store: resolveUserSessionStorePath(accountUserId),
-    },
-  };
-}
-
 function resolveChatSendActiveDeliveryTarget(
   client: GatewayRequestHandlerOptions["client"],
 ): DeliveryTarget | undefined {
@@ -1409,7 +1384,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       limit?: number;
     };
-    const cfg = resolveChatScopedConfig(client);
+    const cfg = resolveGatewaySessionScopedConfig(client);
     const { storePath, entry } = loadSessionEntry(sessionKey, { cfg });
     const sessionId = entry?.sessionId;
     const rawMessages =
@@ -1474,7 +1449,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       runId?: string;
     };
-    const cfg = resolveChatScopedConfig(client);
+    const cfg = resolveGatewaySessionScopedConfig(client);
 
     const ops = createChatAbortOps(context);
     const requester = resolveChatAbortRequester(client);
@@ -1626,7 +1601,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         return;
       }
     }
-    const cfg = resolveChatScopedConfig(client);
+    const cfg = resolveGatewaySessionScopedConfig(client);
     const rawSessionKey = p.sessionKey;
     const { entry, canonicalKey: sessionKey } = loadSessionEntry(rawSessionKey, { cfg });
     const timeoutMs = resolveAgentTimeoutMs({
@@ -2048,7 +2023,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     };
 
     // Load session to find transcript file
-    const cfg = resolveChatScopedConfig(client);
+    const cfg = resolveGatewaySessionScopedConfig(client);
     const rawSessionKey = p.sessionKey;
     const { storePath, entry } = loadSessionEntry(rawSessionKey, { cfg });
     const sessionId = entry?.sessionId;

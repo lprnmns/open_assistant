@@ -66,6 +66,7 @@ import {
 import { applySessionsPatchToStore } from "../sessions-patch.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
 import { chatHandlers } from "./chat.js";
+import { resolveGatewaySessionScopedConfig } from "../account-session-scope.js";
 import type {
   GatewayClient,
   GatewayRequestContext,
@@ -92,8 +93,11 @@ function requireSessionKey(key: unknown, respond: RespondFn): string | null {
   return normalized;
 }
 
-function resolveGatewaySessionTargetFromKey(key: string) {
-  const cfg = loadConfig();
+function resolveGatewaySessionTargetFromKey(
+  key: string,
+  client?: GatewayClient | null,
+) {
+  const cfg = resolveGatewaySessionScopedConfig(client, loadConfig());
   const target = resolveGatewaySessionStoreTarget({ cfg, key });
   return { cfg, target, storePath: target.storePath };
 }
@@ -370,7 +374,8 @@ async function handleSessionSend(params: {
   if (!key) {
     return;
   }
-  const { entry, canonicalKey, storePath } = loadSessionEntry(key);
+  const cfg = resolveGatewaySessionScopedConfig(params.client, loadConfig());
+  const { entry, canonicalKey, storePath } = loadSessionEntry(key, { cfg });
   if (!entry?.sessionId) {
     params.respond(
       false,
@@ -471,12 +476,12 @@ async function handleSessionSend(params: {
   }
 }
 export const sessionsHandlers: GatewayRequestHandlers = {
-  "sessions.list": ({ params, respond }) => {
+  "sessions.list": ({ params, respond, client }) => {
     if (!assertValidParams(params, validateSessionsListParams, "sessions.list", respond)) {
       return;
     }
     const p = params;
-    const cfg = loadConfig();
+    const cfg = resolveGatewaySessionScopedConfig(client, loadConfig());
     const { storePath, store } = loadCombinedSessionStoreForGateway(cfg);
     const result = listSessionsFromStore({
       cfg,
@@ -516,7 +521,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     if (!key) {
       return;
     }
-    const { canonicalKey } = loadSessionEntry(key);
+    const cfg = resolveGatewaySessionScopedConfig(client, loadConfig());
+    const { canonicalKey } = loadSessionEntry(key, { cfg });
     if (connId) {
       context.subscribeSessionMessageEvents(connId, canonicalKey);
       respond(true, { subscribed: true, key: canonicalKey }, undefined);
@@ -540,13 +546,14 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     if (!key) {
       return;
     }
-    const { canonicalKey } = loadSessionEntry(key);
+    const cfg = resolveGatewaySessionScopedConfig(client, loadConfig());
+    const { canonicalKey } = loadSessionEntry(key, { cfg });
     if (connId) {
       context.unsubscribeSessionMessageEvents(connId, canonicalKey);
     }
     respond(true, { subscribed: false, key: canonicalKey }, undefined);
   },
-  "sessions.preview": ({ params, respond }) => {
+  "sessions.preview": ({ params, respond, client }) => {
     if (!assertValidParams(params, validateSessionsPreviewParams, "sessions.preview", respond)) {
       return;
     }
@@ -568,7 +575,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const cfg = loadConfig();
+    const cfg = resolveGatewaySessionScopedConfig(client, loadConfig());
     const storeCache = new Map<string, Record<string, SessionEntry>>();
     const previews: SessionsPreviewEntry[] = [];
 
@@ -608,12 +615,12 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     respond(true, { ts: Date.now(), previews } satisfies SessionsPreviewResult, undefined);
   },
-  "sessions.resolve": async ({ params, respond }) => {
+  "sessions.resolve": async ({ params, respond, client }) => {
     if (!assertValidParams(params, validateSessionsResolveParams, "sessions.resolve", respond)) {
       return;
     }
     const p = params;
-    const cfg = loadConfig();
+    const cfg = resolveGatewaySessionScopedConfig(client, loadConfig());
 
     const resolved = await resolveSessionKeyFromResolveParams({ cfg, p });
     if (!resolved.ok) {
@@ -627,7 +634,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
-    const cfg = loadConfig();
+    const cfg = resolveGatewaySessionScopedConfig(client, loadConfig());
     const requestedKey = typeof p.key === "string" && p.key.trim() ? p.key.trim() : undefined;
     const agentId = normalizeAgentId(
       typeof p.agentId === "string" && p.agentId.trim() ? p.agentId : resolveDefaultAgentId(cfg),
@@ -657,7 +664,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         : undefined;
     let canonicalParentSessionKey: string | undefined;
     if (parentSessionKey) {
-      const parent = loadSessionEntry(parentSessionKey);
+      const parent = loadSessionEntry(parentSessionKey, { cfg });
       if (!parent.entry?.sessionId) {
         respond(
           false,
@@ -814,7 +821,8 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     if (!key) {
       return;
     }
-    const { canonicalKey } = loadSessionEntry(key);
+    const cfg = resolveGatewaySessionScopedConfig(client, loadConfig());
+    const { canonicalKey } = loadSessionEntry(key, { cfg });
     const abortSessionKey = resolveAbortSessionKey({
       context,
       requestedKey: key,
@@ -877,7 +885,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key, client);
     const applied = await updateSessionStore(storePath, async (store) => {
       const { primaryKey } = migrateAndPruneGatewaySessionStoreKey({ cfg, key, store });
       return await applySessionsPatchToStore({
@@ -950,7 +958,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
 
-    const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key, client);
     const mainKey = resolveMainSessionKey(cfg);
     if (target.canonicalKey === mainKey) {
       respond(
@@ -963,7 +971,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     const deleteTranscript = typeof p.deleteTranscript === "boolean" ? p.deleteTranscript : true;
 
-    const { entry, legacyKey, canonicalKey } = loadSessionEntry(key);
+    const { entry, legacyKey, canonicalKey } = loadSessionEntry(key, { cfg });
     const mutationCleanupError = await cleanupSessionBeforeMutation({
       cfg,
       key,
@@ -1014,7 +1022,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       });
     }
   },
-  "sessions.get": ({ params, respond }) => {
+  "sessions.get": ({ params, respond, client }) => {
     const p = params;
     const key = requireSessionKey(p.key ?? p.sessionKey, respond);
     if (!key) {
@@ -1025,7 +1033,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         ? Math.max(1, Math.floor(p.limit))
         : 200;
 
-    const { target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    const { target, storePath } = resolveGatewaySessionTargetFromKey(key, client);
     const store = loadSessionStore(storePath);
     const entry = target.storeKeys.map((k) => store[k]).find(Boolean);
     if (!entry?.sessionId) {
@@ -1036,7 +1044,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
     const messages = limit < allMessages.length ? allMessages.slice(-limit) : allMessages;
     respond(true, { messages }, undefined);
   },
-  "sessions.compact": async ({ params, respond, context }) => {
+  "sessions.compact": async ({ params, respond, context, client }) => {
     if (!assertValidParams(params, validateSessionsCompactParams, "sessions.compact", respond)) {
       return;
     }
@@ -1051,7 +1059,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         ? Math.max(1, Math.floor(p.maxLines))
         : 400;
 
-    const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key);
+    const { cfg, target, storePath } = resolveGatewaySessionTargetFromKey(key, client);
     // Lock + read in a short critical section; transcript work happens outside.
     const compactTarget = await updateSessionStore(storePath, (store) => {
       const { entry, primaryKey } = migrateAndPruneGatewaySessionStoreKey({ cfg, key, store });

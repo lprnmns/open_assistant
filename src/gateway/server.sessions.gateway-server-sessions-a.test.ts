@@ -4,6 +4,8 @@ import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import { DEFAULT_PROVIDER } from "../agents/defaults.js";
+import { issueAccountToken } from "../accounts/token.js";
+import { resolveUserSessionStorePath } from "../accounts/user-dir.js";
 import { GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "./protocol/client-info.js";
 import { startGatewayServerHarness, type GatewayServerHarness } from "./server.e2e-ws-harness.js";
 import { createToolSummaryPreviewTranscriptLines } from "./session-preview.test-helpers.js";
@@ -942,6 +944,100 @@ describe("gateway server sessions", () => {
     expect(entry?.items[1]?.text).toContain("call weather");
 
     ws.close();
+  });
+
+  test("account-token sessions RPCs use user-scoped stores", async () => {
+    const identityDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-acct-session-rpc-"));
+    const accountTokenA = await issueAccountToken({ userId: "user-a" });
+    const accountTokenB = await issueAccountToken({ userId: "user-b" });
+
+    try {
+      const userStorePathA = resolveUserSessionStorePath("user-a");
+      const userStorePathB = resolveUserSessionStorePath("user-b");
+      await writeSessionStore({
+        storePath: userStorePathA,
+        entries: {
+          main: {
+            sessionId: "sess-user-a",
+            updatedAt: Date.now(),
+          },
+          "dashboard:alpha": {
+            sessionId: "sess-user-a-dashboard",
+            updatedAt: Date.now() - 1_000,
+            label: "Account A Dashboard",
+          },
+        },
+      });
+      await writeSessionStore({
+        storePath: userStorePathB,
+        entries: {
+          main: {
+            sessionId: "sess-user-b",
+            updatedAt: Date.now(),
+          },
+        },
+      });
+      await fs.writeFile(
+        path.join(path.dirname(userStorePathA), "sess-user-a.jsonl"),
+        [
+          JSON.stringify({ type: "session", version: 1, id: "sess-user-a" }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "preview from account a" }],
+            },
+          }),
+        ].join("\n"),
+        "utf-8",
+      );
+      await fs.writeFile(
+        path.join(path.dirname(userStorePathB), "sess-user-b.jsonl"),
+        [
+          JSON.stringify({ type: "session", version: 1, id: "sess-user-b" }),
+          JSON.stringify({
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "preview from account b" }],
+            },
+          }),
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const { ws: wsUserA } = await openClient({
+        skipDefaultAuth: true,
+        accountToken: accountTokenA,
+        deviceIdentityPath: path.join(identityDir, "user-a-device.json"),
+      });
+      const { ws: wsUserB } = await openClient({
+        skipDefaultAuth: true,
+        accountToken: accountTokenB,
+        deviceIdentityPath: path.join(identityDir, "user-b-device.json"),
+      });
+
+      try {
+        const listedA = await rpcReq<{ sessions: Array<{ key: string }> }>(wsUserA, "sessions.list", {});
+        const listedB = await rpcReq<{ sessions: Array<{ key: string }> }>(wsUserB, "sessions.list", {});
+
+        expect(listedA.ok).toBe(true);
+        expect(listedB.ok).toBe(true);
+        expect(listedA.payload?.sessions.map((session) => session.key)).toEqual([
+          "agent:main:main",
+          "agent:main:dashboard:alpha",
+        ]);
+        expect(listedB.payload?.sessions.map((session) => session.key)).toEqual(["agent:main:main"]);
+
+        const previewA = await getMainPreviewEntry(wsUserA);
+        const previewB = await getMainPreviewEntry(wsUserB);
+        expect(previewA?.items[0]?.text).toContain("preview from account a");
+        expect(previewB?.items[0]?.text).toContain("preview from account b");
+      } finally {
+        wsUserA.close();
+        wsUserB.close();
+      }
+    } finally {
+      await fs.rm(identityDir, { recursive: true, force: true });
+    }
   });
 
   test("sessions.reset recomputes model from defaults instead of stale runtime model", async () => {
