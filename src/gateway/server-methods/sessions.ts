@@ -919,7 +919,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       reason: "patch",
     });
   },
-  "sessions.reset": async ({ params, respond, context }) => {
+  "sessions.reset": async ({ params, respond, context, client }) => {
     if (!assertValidParams(params, validateSessionsResetParams, "sessions.reset", respond)) {
       return;
     }
@@ -934,6 +934,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       key,
       reason,
       commandSource: "gateway:sessions.reset",
+      cfg: resolveGatewaySessionScopedConfig(client, loadConfig()),
     });
     if (!result.ok) {
       respond(false, undefined, result.error);

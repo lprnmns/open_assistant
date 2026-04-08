@@ -1040,6 +1040,75 @@ describe("gateway server sessions", () => {
     }
   });
 
+  test("account-token sessions.reset uses user-scoped stores", async () => {
+    const identityDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-acct-session-reset-"));
+    const accountTokenA = await issueAccountToken({ userId: "user-a" });
+    const accountTokenB = await issueAccountToken({ userId: "user-b" });
+
+    try {
+      const userStorePathA = resolveUserSessionStorePath("user-a");
+      const userStorePathB = resolveUserSessionStorePath("user-b");
+      await writeSessionStore({
+        storePath: userStorePathA,
+        entries: {
+          main: {
+            sessionId: "sess-user-a",
+            updatedAt: Date.now(),
+          },
+        },
+      });
+      await writeSessionStore({
+        storePath: userStorePathB,
+        entries: {
+          main: {
+            sessionId: "sess-user-b",
+            updatedAt: Date.now(),
+          },
+        },
+      });
+
+      const { ws: wsUserA } = await openClient({
+        skipDefaultAuth: true,
+        accountToken: accountTokenA,
+        deviceIdentityPath: path.join(identityDir, "user-a-device.json"),
+      });
+      const { ws: wsUserB } = await openClient({
+        skipDefaultAuth: true,
+        accountToken: accountTokenB,
+        deviceIdentityPath: path.join(identityDir, "user-b-device.json"),
+      });
+
+      try {
+        const resetA = await rpcReq<{
+          ok: true;
+          key: string;
+          entry: { sessionId: string };
+        }>(wsUserA, "sessions.reset", { key: "main" });
+
+        expect(resetA.ok).toBe(true);
+        expect(resetA.payload?.key).toBe("agent:main:main");
+        expect(resetA.payload?.entry.sessionId).not.toBe("sess-user-a");
+
+        const storeA = JSON.parse(await fs.readFile(userStorePathA, "utf-8")) as Record<
+          string,
+          { sessionId?: string }
+        >;
+        const storeB = JSON.parse(await fs.readFile(userStorePathB, "utf-8")) as Record<
+          string,
+          { sessionId?: string }
+        >;
+
+        expect(Object.values(storeA)[0]?.sessionId).toBe(resetA.payload?.entry.sessionId);
+        expect(Object.values(storeB)[0]?.sessionId).toBe("sess-user-b");
+      } finally {
+        wsUserA.close();
+        wsUserB.close();
+      }
+    } finally {
+      await fs.rm(identityDir, { recursive: true, force: true });
+    }
+  });
+
   test("sessions.reset recomputes model from defaults instead of stale runtime model", async () => {
     await createSessionStoreDir();
     testState.agentConfig = {
