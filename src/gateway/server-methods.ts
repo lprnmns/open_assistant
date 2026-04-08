@@ -101,6 +101,8 @@ export async function handleGatewayRequest(
   opts: GatewayRequestOptions & { extraHandlers?: GatewayRequestHandlers },
 ): Promise<void> {
   const { req, respond, client, isWebchatConnect, context } = opts;
+  const scopedCronContext = context.resolveCronContextForClient?.(client);
+  const requestContext = scopedCronContext ? { ...context, ...scopedCronContext } : context;
   const authError = authorizeGatewayMethod(req.method, client);
   if (authError) {
     respond(false, undefined, authError);
@@ -148,10 +150,13 @@ export async function handleGatewayRequest(
       client,
       isWebchatConnect,
       respond,
-      context,
+      context: requestContext,
     });
   // All handlers run inside a request scope so that plugin runtime
   // subagent methods (e.g. context engine tools spawning sub-agents
   // during tool execution) can dispatch back into the gateway.
-  await withPluginRuntimeGatewayRequestScope({ context, client, isWebchatConnect }, invokeHandler);
+  await withPluginRuntimeGatewayRequestScope(
+    { context: requestContext, client, isWebchatConnect },
+    invokeHandler,
+  );
 }

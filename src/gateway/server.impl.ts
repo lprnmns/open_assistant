@@ -1,4 +1,5 @@
 import path from "node:path";
+import { resolveUserCronStorePath } from "../accounts/user-dir.js";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { getActiveEmbeddedRunCount } from "../agents/pi-embedded-runner/runs.js";
 import { registerSkillsChangeListener } from "../agents/skills/refresh.js";
@@ -74,6 +75,7 @@ import { onSessionLifecycleEvent } from "../sessions/session-lifecycle-events.js
 import { onSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import { runSetupWizard } from "../wizard/setup.js";
 import { createAuthRateLimiter, type AuthRateLimiter } from "./auth-rate-limit.js";
+import { resolveGatewayAccountUserId } from "./account-session-scope.js";
 import { startChannelHealthMonitor } from "./channel-health-monitor.js";
 import { startGatewayConfigReloader } from "./config-reload.js";
 import type { ControlUiRootState } from "./control-ui.js";
@@ -94,7 +96,7 @@ import {
   createSessionMessageSubscriberRegistry,
 } from "./server-chat.js";
 import { createGatewayCloseHandler } from "./server-close.js";
-import { buildGatewayCronService } from "./server-cron.js";
+import { buildGatewayCronService, type GatewayCronState } from "./server-cron.js";
 import { startGatewayDiscovery } from "./server-discovery-runtime.js";
 import { applyGatewayLaneConcurrency } from "./server-lanes.js";
 import { startGatewayMaintenanceTimers } from "./server-maintenance.js";
@@ -764,6 +766,69 @@ export async function startGatewayServer(
     broadcast,
   });
   let { cron, storePath: cronStorePath } = cronState;
+  const scopedCronStates = new Map<string, GatewayCronState>();
+
+  const stopScopedCronStates = () => {
+    for (const state of scopedCronStates.values()) {
+      state.cron.stop();
+    }
+    scopedCronStates.clear();
+  };
+
+  const broadcastScopedCronEvent = (
+    accountUserId: string,
+    event: string,
+    payload: unknown,
+    opts?: { dropIfSlow?: boolean },
+  ) => {
+    const connIds = new Set<string>();
+    for (const gatewayClient of clients) {
+      if (gatewayClient.internal?.accountUserId === accountUserId) {
+        connIds.add(gatewayClient.connId);
+      }
+    }
+    if (connIds.size === 0) {
+      return;
+    }
+    broadcastToConnIds(event, payload, connIds, opts);
+  };
+
+  const getCronStateForClient = (
+    client: import("./server-methods/types.js").GatewayClient | null | undefined,
+  ): GatewayCronState => {
+    const accountUserId = resolveGatewayAccountUserId(client);
+    if (!accountUserId) {
+      return cronState;
+    }
+
+    const existing = scopedCronStates.get(accountUserId);
+    if (existing) {
+      return existing;
+    }
+
+    const runtimeConfig = loadConfig();
+    const nextState = buildGatewayCronService({
+      cfg: {
+        ...runtimeConfig,
+        cron: {
+          ...(runtimeConfig.cron ?? {}),
+          store: resolveUserCronStorePath(accountUserId),
+        },
+      },
+      deps,
+      broadcast: (event, payload, opts) =>
+        broadcastScopedCronEvent(accountUserId, event, payload, opts),
+    });
+    if (!minimalTestGateway) {
+      void nextState.cron
+        .start()
+        .catch((err) =>
+          logCron.error(`failed to start scoped cron for ${accountUserId}: ${String(err)}`),
+        );
+    }
+    scopedCronStates.set(accountUserId, nextState);
+    return nextState;
+  };
 
   const { getRuntimeSnapshot, startChannels, startChannel, stopChannel, markChannelLoggedOut } =
     channelManager;
@@ -1081,6 +1146,13 @@ export async function startGatewayServer(
     deps,
     cron,
     cronStorePath,
+    resolveCronContextForClient: (client) => {
+      const state = getCronStateForClient(client);
+      return {
+        cron: state.cron,
+        cronStorePath: state.storePath,
+      };
+    },
     execApprovalManager,
     loadGatewayModelCatalog,
     getHealthCache,
@@ -1247,6 +1319,9 @@ export async function startGatewayServer(
             channelHealthMonitor,
           }),
           setState: (nextState) => {
+            if (nextState.cronState !== cronState) {
+              stopScopedCronStates();
+            }
             hooksConfig = nextState.hooksConfig;
             hookClientIpConfig = nextState.hookClientIpConfig;
             heartbeatRunner = nextState.heartbeatRunner;
@@ -1321,7 +1396,12 @@ export async function startGatewayServer(
     releasePluginRouteRegistry,
     stopChannel,
     pluginServices,
-    cron,
+    cron: {
+      stop: () => {
+        cron.stop();
+        stopScopedCronStates();
+      },
+    },
     heartbeatRunner,
     updateCheckStop: stopGatewayUpdateCheck,
     nodePresenceTimers,

@@ -39,6 +39,9 @@ export type GatewayRequestContext = {
   deps: ReturnType<typeof createDefaultDeps>;
   cron: CronService;
   cronStorePath: string;
+  resolveCronContextForClient?: (
+    client: GatewayClient | null | undefined,
+  ) => { cron: CronService; cronStorePath: string };
   execApprovalManager?: ExecApprovalManager;
   loadGatewayModelCatalog: () => Promise<ModelCatalogEntry[]>;
   getHealthCache: () => HealthSummary | null;

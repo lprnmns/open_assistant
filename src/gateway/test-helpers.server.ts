@@ -546,7 +546,7 @@ async function waitForWebSocketOpen(ws: WebSocket, timeoutMs = 10_000): Promise<
   });
 }
 
-async function openTrackedWebSocket(params: {
+export async function openTrackedWebSocket(params: {
   port: number;
   headers?: Record<string, string>;
 }): Promise<WebSocket> {

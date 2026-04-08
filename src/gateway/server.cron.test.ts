@@ -3,13 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { setImmediate as setImmediatePromise } from "node:timers/promises";
 import { afterAll, beforeEach, describe, expect, test, vi } from "vitest";
-import type WebSocket from "ws";
+import { issueAccountToken } from "../accounts/token.js";
+import { resolveUserCronStorePath } from "../accounts/user-dir.js";
 import type { GuardedFetchOptions } from "../infra/net/fetch-guard.js";
 import {
   connectOk,
   cronIsolatedRun,
   installGatewayTestHooks,
   onceMessage,
+  openTrackedWebSocket,
   rpcReq,
   startServerWithClient,
   testState,
@@ -559,6 +561,111 @@ describe("gateway server cron", () => {
       await cleanupCronTestRun({ ws, server, prevSkipCron });
     }
   }, 45_000);
+
+  test("account-token cron RPCs use user-scoped stores and events", async () => {
+    const { prevSkipCron } = await setupCronTestRun({
+      tempPrefix: "openclaw-gw-cron-account-",
+      cronEnabled: true,
+    });
+
+    const { server, ws: wsUserA, port } = await startServerWithClient();
+    const wsUserB = await openTrackedWebSocket({ port });
+
+    const accountTokenA = await issueAccountToken({ userId: "user-a" });
+    const accountTokenB = await issueAccountToken({ userId: "user-b" });
+
+    await connectOk(wsUserA, {
+      skipDefaultAuth: true,
+      accountToken: accountTokenA,
+    });
+    await connectOk(wsUserB, {
+      skipDefaultAuth: true,
+      accountToken: accountTokenB,
+    });
+
+    try {
+      const addEventA = onceMessage(
+        wsUserA,
+        (obj) =>
+          obj.type === "event" &&
+          obj.event === "cron" &&
+          ((obj.payload as { action?: unknown } | null)?.action === "added"),
+        CRON_WAIT_TIMEOUT_MS,
+      );
+      const addARes = await rpcReq(wsUserA, "cron.add", {
+        name: "account a job",
+        enabled: true,
+        schedule: { kind: "every", everyMs: 60_000 },
+        sessionTarget: "main",
+        wakeMode: "next-heartbeat",
+        payload: { kind: "systemEvent", text: "from account a" },
+      });
+      const jobIdA = expectCronJobIdFromResponse(addARes);
+      const addedA = await addEventA;
+      expect((addedA.payload as { jobId?: unknown } | null)?.jobId).toBe(jobIdA);
+
+      await expect(
+        onceMessage(
+          wsUserB,
+          (obj) =>
+            obj.type === "event" &&
+            obj.event === "cron" &&
+            ((obj.payload as { jobId?: unknown } | null)?.jobId === jobIdA),
+          300,
+        ),
+      ).rejects.toThrow(/timeout/i);
+
+      const addBRes = await rpcReq(wsUserB, "cron.add", {
+        name: "account b job",
+        enabled: true,
+        schedule: { kind: "every", everyMs: 60_000 },
+        sessionTarget: "main",
+        wakeMode: "next-heartbeat",
+        payload: { kind: "systemEvent", text: "from account b" },
+      });
+      expectCronJobIdFromResponse(addBRes);
+
+      const listARes = await rpcReq(wsUserA, "cron.list", { includeDisabled: true });
+      const listBRes = await rpcReq(wsUserB, "cron.list", { includeDisabled: true });
+      expect(listARes.ok).toBe(true);
+      expect(listBRes.ok).toBe(true);
+      expect(
+        ((listARes.payload as { jobs?: Array<{ name?: string }> } | null)?.jobs ?? []).map(
+          (job) => job.name,
+        ),
+      ).toEqual(["account a job"]);
+      expect(
+        ((listBRes.payload as { jobs?: Array<{ name?: string }> } | null)?.jobs ?? []).map(
+          (job) => job.name,
+        ),
+      ).toEqual(["account b job"]);
+
+      const statusARes = await rpcReq(wsUserA, "cron.status", {});
+      const statusBRes = await rpcReq(wsUserB, "cron.status", {});
+      expect((statusARes.payload as { storePath?: unknown } | null)?.storePath).toBe(
+        resolveUserCronStorePath("user-a"),
+      );
+      expect((statusBRes.payload as { storePath?: unknown } | null)?.storePath).toBe(
+        resolveUserCronStorePath("user-b"),
+      );
+
+      const storeA = JSON.parse(
+        await fs.readFile(resolveUserCronStorePath("user-a"), "utf-8"),
+      ) as { jobs?: Array<{ name?: string }> };
+      const storeB = JSON.parse(
+        await fs.readFile(resolveUserCronStorePath("user-b"), "utf-8"),
+      ) as { jobs?: Array<{ name?: string }> };
+      const sharedStore = JSON.parse(await fs.readFile(testState.cronStorePath!, "utf-8")) as {
+        jobs?: Array<{ name?: string }>;
+      };
+      expect(storeA.jobs?.map((job) => job.name)).toEqual(["account a job"]);
+      expect(storeB.jobs?.map((job) => job.name)).toEqual(["account b job"]);
+      expect(sharedStore.jobs ?? []).toHaveLength(0);
+    } finally {
+      wsUserB.close();
+      await cleanupCronTestRun({ ws: wsUserA, server, prevSkipCron });
+    }
+  }, 20_000);
 
   test("returns from cron.run immediately while isolated work continues in background", async () => {
     const { prevSkipCron } = await setupCronTestRun({
