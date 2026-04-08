@@ -36,6 +36,7 @@ export interface RateLimitConfig {
 }
 
 export const AUTH_RATE_LIMIT_SCOPE_DEFAULT = "default";
+export const AUTH_RATE_LIMIT_SCOPE_ACCOUNT_AUTH = "account-auth";
 export const AUTH_RATE_LIMIT_SCOPE_SHARED_SECRET = "shared-secret";
 export const AUTH_RATE_LIMIT_SCOPE_DEVICE_TOKEN = "device-token";
 export const AUTH_RATE_LIMIT_SCOPE_HOOK_AUTH = "hook-auth";

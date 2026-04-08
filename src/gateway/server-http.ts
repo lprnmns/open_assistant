@@ -23,6 +23,9 @@ import {
   type AuthRateLimiter,
 } from "./auth-rate-limit.js";
 import {
+  handleAccountAuthHttpRequest,
+} from "./account-auth-http.js";
+import {
   authorizeHttpGatewayConnect,
   isLocalDirectRequest,
   type GatewayAuthResult,
@@ -809,6 +812,15 @@ export function createGatewayHttpServer(opts: {
         ? resolvePluginRoutePathContext(requestPath)
         : null;
       const requestStages: GatewayHttpRequestStage[] = [
+        {
+          name: "account-auth",
+          run: () =>
+            handleAccountAuthHttpRequest(req, res, {
+              rateLimiter,
+              trustedProxies,
+              allowRealIpFallback,
+            }),
+        },
         {
           name: "hooks",
           run: () => handleHooksRequest(req, res),
