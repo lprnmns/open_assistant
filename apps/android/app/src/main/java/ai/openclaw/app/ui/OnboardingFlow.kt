@@ -75,6 +75,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -96,10 +97,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.openclaw.app.BuildConfig
 import ai.openclaw.app.LocationMode
 import ai.openclaw.app.MainViewModel
+import ai.openclaw.app.cloud.AccountAuthClient
+import ai.openclaw.app.cloud.AccountAuthException
+import ai.openclaw.app.gateway.GatewayEndpoint
 import ai.openclaw.app.node.DeviceNotificationListenerService
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import kotlinx.coroutines.launch
 
 private enum class OnboardingStep(val index: Int, val label: String) {
   Welcome(1, "Welcome"),
@@ -110,7 +115,13 @@ private enum class OnboardingStep(val index: Int, val label: String) {
 
 private enum class GatewayInputMode {
   SetupCode,
+  Cloud,
   Manual,
+}
+
+private enum class CloudAuthMode {
+  Register,
+  Login,
 }
 
 private enum class PermissionToggle {
@@ -213,22 +224,41 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
   val isConnected by viewModel.isConnected.collectAsState()
   val serverName by viewModel.serverName.collectAsState()
   val remoteAddress by viewModel.remoteAddress.collectAsState()
+  val persistedGatewayCloudBaseUrl by viewModel.gatewayCloudBaseUrl.collectAsState()
   val persistedGatewayToken by viewModel.gatewayToken.collectAsState()
+  val persistedGatewayAccountToken by viewModel.gatewayAccountToken.collectAsState()
   val pendingTrust by viewModel.pendingGatewayTrust.collectAsState()
 
   var step by rememberSaveable { mutableStateOf(OnboardingStep.Welcome) }
   var setupCode by rememberSaveable { mutableStateOf("") }
   var gatewayUrl by rememberSaveable { mutableStateOf("") }
   var gatewayPassword by rememberSaveable { mutableStateOf("") }
-  var gatewayInputMode by rememberSaveable { mutableStateOf(GatewayInputMode.SetupCode) }
+  var gatewayInputMode by
+    rememberSaveable {
+      mutableStateOf(
+        if (persistedGatewayCloudBaseUrl.isNotBlank() || persistedGatewayAccountToken.isNotBlank()) {
+          GatewayInputMode.Cloud
+        } else {
+          GatewayInputMode.SetupCode
+        },
+      )
+    }
   var gatewayAdvancedOpen by rememberSaveable { mutableStateOf(false) }
   var manualHost by rememberSaveable { mutableStateOf("10.0.2.2") }
   var manualPort by rememberSaveable { mutableStateOf("18789") }
   var manualTls by rememberSaveable { mutableStateOf(false) }
+  var cloudBaseUrl by rememberSaveable { mutableStateOf(persistedGatewayCloudBaseUrl) }
+  var cloudEmail by rememberSaveable { mutableStateOf("") }
+  var cloudPassword by rememberSaveable { mutableStateOf("") }
+  var cloudInviteCode by rememberSaveable { mutableStateOf("") }
+  var cloudAuthMode by rememberSaveable { mutableStateOf(CloudAuthMode.Login) }
+  var cloudAuthSubmitting by rememberSaveable { mutableStateOf(false) }
   var gatewayError by rememberSaveable { mutableStateOf<String?>(null) }
   var attemptedConnect by rememberSaveable { mutableStateOf(false) }
 
   val lifecycleOwner = LocalLifecycleOwner.current
+  val coroutineScope = rememberCoroutineScope()
+  val accountAuthClient = remember { AccountAuthClient() }
   val qrScannerOptions =
     remember {
       GmsBarcodeScannerOptions.Builder()
@@ -473,6 +503,16 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
     onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
   }
 
+  val gatewayAddressForReview =
+    remember(gatewayInputMode, gatewayUrl, cloudBaseUrl) {
+      when (gatewayInputMode) {
+        GatewayInputMode.Cloud -> cloudGatewayAddress(cloudBaseUrl) ?: "Invalid cloud gateway URL"
+        GatewayInputMode.SetupCode,
+        GatewayInputMode.Manual,
+        -> parseGatewayEndpoint(gatewayUrl)?.displayUrl ?: "Invalid gateway URL"
+      }
+    }
+
   if (pendingTrust != null) {
     val prompt = pendingTrust!!
     AlertDialog(
@@ -552,6 +592,12 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
               manualHost = manualHost,
               manualPort = manualPort,
               manualTls = manualTls,
+              cloudBaseUrl = cloudBaseUrl,
+              cloudEmail = cloudEmail,
+              cloudPassword = cloudPassword,
+              cloudInviteCode = cloudInviteCode,
+              cloudAuthMode = cloudAuthMode,
+              cloudAuthSubmitting = cloudAuthSubmitting,
               gatewayToken = persistedGatewayToken,
               gatewayPassword = gatewayPassword,
               gatewayError = gatewayError,
@@ -598,6 +644,26 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                 gatewayError = null
               },
               onManualTlsChange = { manualTls = it },
+              onCloudBaseUrlChange = {
+                cloudBaseUrl = it
+                gatewayError = null
+              },
+              onCloudEmailChange = {
+                cloudEmail = it
+                gatewayError = null
+              },
+              onCloudPasswordChange = {
+                cloudPassword = it
+                gatewayError = null
+              },
+              onCloudInviteCodeChange = {
+                cloudInviteCode = it
+                gatewayError = null
+              },
+              onCloudAuthModeChange = {
+                cloudAuthMode = it
+                gatewayError = null
+              },
               onTokenChange = viewModel::setGatewayToken,
               onPasswordChange = { gatewayPassword = it },
             )
@@ -730,14 +796,19 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
             )
           OnboardingStep.FinalCheck ->
             FinalStep(
-              parsedGateway = parseGatewayEndpoint(gatewayUrl),
+              gatewayAddress = gatewayAddressForReview,
               statusText = statusText,
               isConnected = isConnected,
               serverName = serverName,
               remoteAddress = remoteAddress,
               attemptedConnect = attemptedConnect,
               enabledPermissions = enabledPermissionSummary,
-              methodLabel = if (gatewayInputMode == GatewayInputMode.SetupCode) "QR / Setup Code" else "Manual",
+              methodLabel =
+                when (gatewayInputMode) {
+                  GatewayInputMode.SetupCode -> "QR / Setup Code"
+                  GatewayInputMode.Cloud -> "Cloud account"
+                  GatewayInputMode.Manual -> "Manual"
+                },
             )
         }
       }
@@ -790,47 +861,115 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
           OnboardingStep.Gateway -> {
             Button(
               onClick = {
-                if (gatewayInputMode == GatewayInputMode.SetupCode) {
-                  val parsedSetup = decodeGatewaySetupCode(setupCode)
-                  if (parsedSetup == null) {
-                    gatewayError = "Scan QR code first, or use Advanced setup."
-                    return@Button
+                when (gatewayInputMode) {
+                  GatewayInputMode.SetupCode -> {
+                    val parsedSetup = decodeGatewaySetupCode(setupCode)
+                    if (parsedSetup == null) {
+                      gatewayError = "Scan QR code first, or use Advanced setup."
+                      return@Button
+                    }
+                    val parsedGateway = parseGatewayEndpoint(parsedSetup.url)
+                    if (parsedGateway == null) {
+                      gatewayError = "Setup code has invalid gateway URL."
+                      return@Button
+                    }
+                    gatewayUrl = parsedSetup.url
+                    viewModel.setGatewayBootstrapToken(parsedSetup.bootstrapToken.orEmpty())
+                    val sharedToken = parsedSetup.token.orEmpty().trim()
+                    val password = parsedSetup.password.orEmpty().trim()
+                    if (sharedToken.isNotEmpty()) {
+                      viewModel.setGatewayToken(sharedToken)
+                    } else if (!parsedSetup.bootstrapToken.isNullOrBlank()) {
+                      viewModel.setGatewayToken("")
+                    }
+                    gatewayPassword = password
+                    if (password.isEmpty() && !parsedSetup.bootstrapToken.isNullOrBlank()) {
+                      viewModel.setGatewayPassword("")
+                    }
+                    step = OnboardingStep.Permissions
                   }
-                  val parsedGateway = parseGatewayEndpoint(parsedSetup.url)
-                  if (parsedGateway == null) {
-                    gatewayError = "Setup code has invalid gateway URL."
-                    return@Button
+                  GatewayInputMode.Cloud -> {
+                    if (cloudAuthSubmitting) {
+                      return@Button
+                    }
+                    val normalizedBaseUrl = cloudBaseUrl.trim()
+                    if (GatewayEndpoint.cloud(normalizedBaseUrl) == null) {
+                      gatewayError = "Enter a valid cloud gateway URL."
+                      return@Button
+                    }
+                    val normalizedEmail = cloudEmail.trim()
+                    if (normalizedEmail.isEmpty()) {
+                      gatewayError = "Email is required."
+                      return@Button
+                    }
+                    if (cloudPassword.isBlank()) {
+                      gatewayError = "Password is required."
+                      return@Button
+                    }
+                    gatewayError = null
+                    cloudAuthSubmitting = true
+                    attemptedConnect = false
+                    coroutineScope.launch {
+                      try {
+                        val authResult =
+                          when (cloudAuthMode) {
+                            CloudAuthMode.Register ->
+                              accountAuthClient.register(
+                                baseUrl = normalizedBaseUrl,
+                                email = normalizedEmail,
+                                password = cloudPassword,
+                                inviteCode = cloudInviteCode,
+                              )
+                            CloudAuthMode.Login ->
+                              accountAuthClient.login(
+                                baseUrl = normalizedBaseUrl,
+                                email = normalizedEmail,
+                                password = cloudPassword,
+                              )
+                          }
+                        gatewayUrl = normalizedBaseUrl
+                        viewModel.setGatewayCloudBaseUrl(normalizedBaseUrl)
+                        viewModel.setGatewayAccountToken(authResult.token)
+                        viewModel.setCloudEnabled(true)
+                        viewModel.setManualEnabled(false)
+                        viewModel.setGatewayBootstrapToken("")
+                        viewModel.setGatewayPassword("")
+                        viewModel.setGatewayToken("")
+                        gatewayPassword = ""
+                        cloudPassword = ""
+                        step = OnboardingStep.Permissions
+                      } catch (err: Throwable) {
+                        gatewayError =
+                          (err as? AccountAuthException)?.message
+                            ?: err.message
+                            ?: "Cloud sign-in failed."
+                      } finally {
+                        cloudAuthSubmitting = false
+                      }
+                    }
                   }
-                  gatewayUrl = parsedSetup.url
-                  viewModel.setGatewayBootstrapToken(parsedSetup.bootstrapToken.orEmpty())
-                  val sharedToken = parsedSetup.token.orEmpty().trim()
-                  val password = parsedSetup.password.orEmpty().trim()
-                  if (sharedToken.isNotEmpty()) {
-                    viewModel.setGatewayToken(sharedToken)
-                  } else if (!parsedSetup.bootstrapToken.isNullOrBlank()) {
-                    viewModel.setGatewayToken("")
+                  GatewayInputMode.Manual -> {
+                    val manualUrl = composeGatewayManualUrl(manualHost, manualPort, manualTls)
+                    val parsedGateway = manualUrl?.let(::parseGatewayEndpoint)
+                    if (parsedGateway == null) {
+                      gatewayError = "Manual endpoint is invalid."
+                      return@Button
+                    }
+                    gatewayUrl = parsedGateway.displayUrl
+                    viewModel.setGatewayBootstrapToken("")
+                    step = OnboardingStep.Permissions
                   }
-                  gatewayPassword = password
-                  if (password.isEmpty() && !parsedSetup.bootstrapToken.isNullOrBlank()) {
-                    viewModel.setGatewayPassword("")
-                  }
-                } else {
-                  val manualUrl = composeGatewayManualUrl(manualHost, manualPort, manualTls)
-                  val parsedGateway = manualUrl?.let(::parseGatewayEndpoint)
-                  if (parsedGateway == null) {
-                    gatewayError = "Manual endpoint is invalid."
-                    return@Button
-                  }
-                  gatewayUrl = parsedGateway.displayUrl
-                  viewModel.setGatewayBootstrapToken("")
                 }
-                step = OnboardingStep.Permissions
               },
               modifier = Modifier.weight(1f).height(52.dp),
               shape = RoundedCornerShape(14.dp),
+              enabled = !cloudAuthSubmitting,
               colors = onboardingPrimaryButtonColors(),
             ) {
-              Text("Next", style = onboardingHeadlineStyle.copy(fontWeight = FontWeight.Bold))
+              Text(
+                if (gatewayInputMode == GatewayInputMode.Cloud && cloudAuthSubmitting) "Signing in…" else "Next",
+                style = onboardingHeadlineStyle.copy(fontWeight = FontWeight.Bold),
+              )
             }
           }
           OnboardingStep.Permissions -> {
@@ -860,6 +999,24 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
             } else {
               Button(
                 onClick = {
+                  attemptedConnect = true
+                  if (gatewayInputMode == GatewayInputMode.Cloud) {
+                    if (GatewayEndpoint.cloud(cloudBaseUrl) == null) {
+                      step = OnboardingStep.Gateway
+                      gatewayError = "Invalid cloud gateway URL."
+                      return@Button
+                    }
+                    if (persistedGatewayAccountToken.trim().isEmpty()) {
+                      step = OnboardingStep.Gateway
+                      gatewayError = "Sign in to your cloud account first."
+                      return@Button
+                    }
+                    viewModel.setGatewayCloudBaseUrl(cloudBaseUrl.trim())
+                    viewModel.setCloudEnabled(true)
+                    viewModel.setManualEnabled(false)
+                    viewModel.connectCloud()
+                    return@Button
+                  }
                   val parsed = parseGatewayEndpoint(gatewayUrl)
                   if (parsed == null) {
                     step = OnboardingStep.Gateway
@@ -868,7 +1025,6 @@ fun OnboardingFlow(viewModel: MainViewModel, modifier: Modifier = Modifier) {
                   }
                   val token = persistedGatewayToken.trim()
                   val password = gatewayPassword.trim()
-                  attemptedConnect = true
                   viewModel.setManualEnabled(true)
                   viewModel.setManualHost(parsed.host)
                   viewModel.setManualPort(parsed.port)
@@ -1005,6 +1161,12 @@ private fun GatewayStep(
   manualHost: String,
   manualPort: String,
   manualTls: Boolean,
+  cloudBaseUrl: String,
+  cloudEmail: String,
+  cloudPassword: String,
+  cloudInviteCode: String,
+  cloudAuthMode: CloudAuthMode,
+  cloudAuthSubmitting: Boolean,
   gatewayToken: String,
   gatewayPassword: String,
   gatewayError: String?,
@@ -1015,30 +1177,57 @@ private fun GatewayStep(
   onManualHostChange: (String) -> Unit,
   onManualPortChange: (String) -> Unit,
   onManualTlsChange: (Boolean) -> Unit,
+  onCloudBaseUrlChange: (String) -> Unit,
+  onCloudEmailChange: (String) -> Unit,
+  onCloudPasswordChange: (String) -> Unit,
+  onCloudInviteCodeChange: (String) -> Unit,
+  onCloudAuthModeChange: (CloudAuthMode) -> Unit,
   onTokenChange: (String) -> Unit,
   onPasswordChange: (String) -> Unit,
 ) {
   val resolvedEndpoint = remember(setupCode) { decodeGatewaySetupCode(setupCode)?.url?.let { parseGatewayEndpoint(it)?.displayUrl } }
   val manualResolvedEndpoint = remember(manualHost, manualPort, manualTls) { composeGatewayManualUrl(manualHost, manualPort, manualTls)?.let { parseGatewayEndpoint(it)?.displayUrl } }
+  val cloudResolvedEndpoint = remember(cloudBaseUrl) { cloudGatewayAddress(cloudBaseUrl) }
 
   StepShell(title = "Gateway Connection") {
-    Text(
-      "Run `openclaw qr` on your gateway host, then scan the code with this device.",
-      style = onboardingCalloutStyle,
-      color = onboardingTextSecondary,
-    )
-    CommandBlock("openclaw qr")
-    Button(
-      onClick = onScanQrClick,
-      modifier = Modifier.fillMaxWidth().height(48.dp),
-      shape = RoundedCornerShape(12.dp),
-      colors = onboardingPrimaryButtonColors(),
-    ) {
-      Text("Scan QR code", style = onboardingHeadlineStyle.copy(fontWeight = FontWeight.Bold))
-    }
-    if (!resolvedEndpoint.isNullOrBlank()) {
-      Text("QR captured. Review endpoint below.", style = onboardingCalloutStyle, color = onboardingSuccess)
-      ResolvedEndpoint(endpoint = resolvedEndpoint)
+    if (inputMode == GatewayInputMode.Cloud) {
+      Text(
+        "Sign in with your hosted account, then connect this phone without pairing codes or manual host setup.",
+        style = onboardingCalloutStyle,
+        color = onboardingTextSecondary,
+      )
+      Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = onboardingAccentSoft,
+        border = androidx.compose.foundation.BorderStroke(1.dp, onboardingAccent.copy(alpha = 0.2f)),
+      ) {
+        Text(
+          "Cloud mode uses the hosted gateway's normal HTTPS certificate chain. No manual fingerprint approval is required.",
+          modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+          style = onboardingCalloutStyle,
+          color = onboardingAccent,
+        )
+      }
+    } else {
+      Text(
+        "Run `openclaw qr` on your gateway host, then scan the code with this device.",
+        style = onboardingCalloutStyle,
+        color = onboardingTextSecondary,
+      )
+      CommandBlock("openclaw qr")
+      Button(
+        onClick = onScanQrClick,
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = onboardingPrimaryButtonColors(),
+      ) {
+        Text("Scan QR code", style = onboardingHeadlineStyle.copy(fontWeight = FontWeight.Bold))
+      }
+      if (!resolvedEndpoint.isNullOrBlank()) {
+        Text("QR captured. Review endpoint below.", style = onboardingCalloutStyle, color = onboardingSuccess)
+        ResolvedEndpoint(endpoint = resolvedEndpoint)
+      }
     }
 
     Surface(
@@ -1055,7 +1244,7 @@ private fun GatewayStep(
       ) {
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
           Text("Advanced setup", style = onboardingHeadlineStyle, color = onboardingText)
-          Text("Paste setup code or enter host/port manually.", style = onboardingCaption1Style, color = onboardingTextSecondary)
+          Text("Paste setup code, sign in to cloud, or enter host/port manually.", style = onboardingCaption1Style, color = onboardingTextSecondary)
         }
         Icon(
           imageVector = if (advancedOpen) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -1086,6 +1275,86 @@ private fun GatewayStep(
           )
           if (!resolvedEndpoint.isNullOrBlank()) {
             ResolvedEndpoint(endpoint = resolvedEndpoint)
+          }
+        } else if (inputMode == GatewayInputMode.Cloud) {
+          Text("CLOUD ACCOUNT", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            GatewayModeChip(
+              label = "Sign In",
+              active = cloudAuthMode == CloudAuthMode.Login,
+              onClick = { onCloudAuthModeChange(CloudAuthMode.Login) },
+              modifier = Modifier.weight(1f),
+            )
+            GatewayModeChip(
+              label = "Create Account",
+              active = cloudAuthMode == CloudAuthMode.Register,
+              onClick = { onCloudAuthModeChange(CloudAuthMode.Register) },
+              modifier = Modifier.weight(1f),
+            )
+          }
+
+          Text("CLOUD URL", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+          OutlinedTextField(
+            value = cloudBaseUrl,
+            onValueChange = onCloudBaseUrlChange,
+            placeholder = { Text("https://your-cloud-gateway.example", color = onboardingTextTertiary, style = onboardingBodyStyle) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            textStyle = onboardingBodyStyle.copy(color = onboardingText),
+            shape = RoundedCornerShape(14.dp),
+            colors = onboardingTextFieldColors(),
+          )
+
+          Text("EMAIL", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+          OutlinedTextField(
+            value = cloudEmail,
+            onValueChange = onCloudEmailChange,
+            placeholder = { Text("you@example.com", color = onboardingTextTertiary, style = onboardingBodyStyle) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            textStyle = onboardingBodyStyle.copy(color = onboardingText),
+            shape = RoundedCornerShape(14.dp),
+            colors = onboardingTextFieldColors(),
+          )
+
+          Text("PASSWORD", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+          OutlinedTextField(
+            value = cloudPassword,
+            onValueChange = onCloudPasswordChange,
+            placeholder = { Text("password", color = onboardingTextTertiary, style = onboardingBodyStyle) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            textStyle = onboardingBodyStyle.copy(color = onboardingText),
+            shape = RoundedCornerShape(14.dp),
+            colors = onboardingTextFieldColors(),
+          )
+
+          if (cloudAuthMode == CloudAuthMode.Register) {
+            Text("INVITE CODE (OPTIONAL)", style = onboardingCaption1Style.copy(letterSpacing = 0.9.sp), color = onboardingTextSecondary)
+            OutlinedTextField(
+              value = cloudInviteCode,
+              onValueChange = onCloudInviteCodeChange,
+              placeholder = { Text("invite code", color = onboardingTextTertiary, style = onboardingBodyStyle) },
+              modifier = Modifier.fillMaxWidth(),
+              singleLine = true,
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+              textStyle = onboardingBodyStyle.copy(color = onboardingText),
+              shape = RoundedCornerShape(14.dp),
+              colors = onboardingTextFieldColors(),
+            )
+          }
+
+          Text(
+            if (cloudAuthSubmitting) "Signing in to cloud…" else "We'll exchange your credentials for a device session before the connection check.",
+            style = onboardingCalloutStyle,
+            color = if (cloudAuthSubmitting) onboardingAccent else onboardingTextSecondary,
+          )
+
+          if (!cloudResolvedEndpoint.isNullOrBlank()) {
+            ResolvedEndpoint(endpoint = cloudResolvedEndpoint)
           }
         } else {
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1211,6 +1480,12 @@ private fun GatewayModeToggle(
       label = "Setup Code",
       active = inputMode == GatewayInputMode.SetupCode,
       onClick = { onInputModeChange(GatewayInputMode.SetupCode) },
+      modifier = Modifier.weight(1f),
+    )
+    GatewayModeChip(
+      label = "Cloud",
+      active = inputMode == GatewayInputMode.Cloud,
+      onClick = { onInputModeChange(GatewayInputMode.Cloud) },
       modifier = Modifier.weight(1f),
     )
     GatewayModeChip(
@@ -1525,7 +1800,7 @@ private fun PermissionToggleRow(
 
 @Composable
 private fun FinalStep(
-  parsedGateway: GatewayEndpointConfig?,
+  gatewayAddress: String,
   statusText: String,
   isConnected: Boolean,
   serverName: String?,
@@ -1535,7 +1810,6 @@ private fun FinalStep(
   methodLabel: String,
 ) {
   val context = androidx.compose.ui.platform.LocalContext.current
-  val gatewayAddress = parsedGateway?.displayUrl ?: "Invalid gateway URL"
   val statusLabel = gatewayStatusForDisplay(statusText)
   val showDiagnostics = gatewayStatusHasDiagnostics(statusText)
   val pairingRequired = gatewayStatusLooksLikePairing(statusText)
@@ -1725,6 +1999,12 @@ private fun FinalStep(
       }
     }
   }
+}
+
+private fun cloudGatewayAddress(rawBaseUrl: String): String? {
+  val endpoint = GatewayEndpoint.cloud(rawBaseUrl) ?: return null
+  val scheme = if (endpoint.tlsEnabled) "https" else "http"
+  return "$scheme://${endpoint.host}:${endpoint.port}"
 }
 
 @Composable
