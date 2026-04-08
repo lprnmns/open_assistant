@@ -64,6 +64,10 @@ class SecurePrefs(
     MutableStateFlow(plainPrefs.getBoolean("gateway.manual.enabled", false))
   val manualEnabled: StateFlow<Boolean> = _manualEnabled
 
+  private val _cloudEnabled =
+    MutableStateFlow(plainPrefs.getBoolean("gateway.cloud.enabled", false))
+  val cloudEnabled: StateFlow<Boolean> = _cloudEnabled
+
   private val _manualHost =
     MutableStateFlow(plainPrefs.getString("gateway.manual.host", "") ?: "")
   val manualHost: StateFlow<String> = _manualHost
@@ -75,6 +79,9 @@ class SecurePrefs(
   private val _manualTls =
     MutableStateFlow(plainPrefs.getBoolean("gateway.manual.tls", true))
   val manualTls: StateFlow<Boolean> = _manualTls
+
+  private val _gatewayCloudBaseUrl = MutableStateFlow("")
+  val gatewayCloudBaseUrl: StateFlow<String> = _gatewayCloudBaseUrl
 
   private val _gatewayToken = MutableStateFlow("")
   val gatewayToken: StateFlow<String> = _gatewayToken
@@ -148,6 +155,11 @@ class SecurePrefs(
     _manualEnabled.value = value
   }
 
+  fun setCloudEnabled(value: Boolean) {
+    plainPrefs.edit { putBoolean("gateway.cloud.enabled", value) }
+    _cloudEnabled.value = value
+  }
+
   fun setManualHost(value: String) {
     val trimmed = value.trim()
     plainPrefs.edit { putString("gateway.manual.host", trimmed) }
@@ -162,6 +174,12 @@ class SecurePrefs(
   fun setManualTls(value: Boolean) {
     plainPrefs.edit { putBoolean("gateway.manual.tls", value) }
     _manualTls.value = value
+  }
+
+  fun setGatewayCloudBaseUrl(value: String) {
+    val trimmed = value.trim()
+    plainPrefs.edit { putString("gateway.cloud.baseUrl", trimmed) }
+    _gatewayCloudBaseUrl.value = trimmed
   }
 
   fun setGatewayToken(value: String) {
@@ -215,6 +233,18 @@ class SecurePrefs(
         val persisted = securePrefs.getString(key, null)?.trim().orEmpty()
         if (persisted.isNotEmpty()) {
           _gatewayAccountToken.value = persisted
+        }
+        persisted
+      }
+    return stored.takeIf { it.isNotEmpty() }
+  }
+
+  fun loadGatewayCloudBaseUrl(): String? {
+    val stored =
+      _gatewayCloudBaseUrl.value.trim().ifEmpty {
+        val persisted = plainPrefs.getString("gateway.cloud.baseUrl", null)?.trim().orEmpty()
+        if (persisted.isNotEmpty()) {
+          _gatewayCloudBaseUrl.value = persisted
         }
         persisted
       }

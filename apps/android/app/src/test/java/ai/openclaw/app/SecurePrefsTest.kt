@@ -52,4 +52,21 @@ class SecurePrefsTest {
     assertEquals("account-token", prefs.loadGatewayAccountToken())
     assertEquals("account-token", prefs.gatewayAccountToken.value)
   }
+
+  @Test
+  fun cloudGatewaySettings_persistAcrossReloads() {
+    val context = RuntimeEnvironment.getApplication()
+    val securePrefs = context.getSharedPreferences("openclaw.node.secure.test", Context.MODE_PRIVATE)
+    securePrefs.edit().clear().commit()
+    val plainPrefs = context.getSharedPreferences("openclaw.node", Context.MODE_PRIVATE)
+    plainPrefs.edit().clear().commit()
+
+    val prefs = SecurePrefs(context, securePrefsOverride = securePrefs)
+    prefs.setCloudEnabled(true)
+    prefs.setGatewayCloudBaseUrl("https://cloud.openclaw.ai")
+
+    assertEquals(true, prefs.cloudEnabled.value)
+    assertEquals("https://cloud.openclaw.ai", prefs.loadGatewayCloudBaseUrl())
+    assertEquals("https://cloud.openclaw.ai", prefs.gatewayCloudBaseUrl.value)
+  }
 }

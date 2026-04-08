@@ -76,9 +76,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
   val locationPreciseEnabled: StateFlow<Boolean> = prefs.locationPreciseEnabled
   val preventSleep: StateFlow<Boolean> = prefs.preventSleep
   val manualEnabled: StateFlow<Boolean> = prefs.manualEnabled
+  val cloudEnabled: StateFlow<Boolean> = prefs.cloudEnabled
   val manualHost: StateFlow<String> = prefs.manualHost
   val manualPort: StateFlow<Int> = prefs.manualPort
   val manualTls: StateFlow<Boolean> = prefs.manualTls
+  val gatewayCloudBaseUrl: StateFlow<String> = prefs.gatewayCloudBaseUrl
   val gatewayToken: StateFlow<String> = prefs.gatewayToken
   val gatewayAccountToken: StateFlow<String> = prefs.gatewayAccountToken
   val onboardingCompleted: StateFlow<Boolean> = prefs.onboardingCompleted
@@ -163,6 +165,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     prefs.setManualEnabled(value)
   }
 
+  fun setCloudEnabled(value: Boolean) {
+    prefs.setCloudEnabled(value)
+  }
+
   fun setManualHost(value: String) {
     prefs.setManualHost(value)
   }
@@ -173,6 +179,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun setManualTls(value: Boolean) {
     prefs.setManualTls(value)
+  }
+
+  fun setGatewayCloudBaseUrl(value: String) {
+    prefs.setGatewayCloudBaseUrl(value)
   }
 
   fun setGatewayToken(value: String) {
@@ -224,6 +234,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
   fun connectManual() {
     ensureRuntime().connectManual()
+  }
+
+  fun connectCloud() {
+    ensureRuntime().connectCloud()
   }
 
   fun disconnect() {

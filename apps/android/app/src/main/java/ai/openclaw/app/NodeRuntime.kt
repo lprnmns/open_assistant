@@ -543,9 +543,11 @@ class NodeRuntime(
   val locationPreciseEnabled: StateFlow<Boolean> = prefs.locationPreciseEnabled
   val preventSleep: StateFlow<Boolean> = prefs.preventSleep
   val manualEnabled: StateFlow<Boolean> = prefs.manualEnabled
+  val cloudEnabled: StateFlow<Boolean> = prefs.cloudEnabled
   val manualHost: StateFlow<String> = prefs.manualHost
   val manualPort: StateFlow<Int> = prefs.manualPort
   val manualTls: StateFlow<Boolean> = prefs.manualTls
+  val gatewayCloudBaseUrl: StateFlow<String> = prefs.gatewayCloudBaseUrl
   val gatewayToken: StateFlow<String> = prefs.gatewayToken
   val onboardingCompleted: StateFlow<Boolean> = prefs.onboardingCompleted
   fun setGatewayToken(value: String) = prefs.setGatewayToken(value)
@@ -650,6 +652,15 @@ class NodeRuntime(
   }
 
   private fun resolvePreferredGatewayEndpoint(): GatewayEndpoint? {
+    if (cloudEnabled.value) {
+      val cloudBaseUrl = prefs.loadGatewayCloudBaseUrl()
+      val accountToken = prefs.loadGatewayAccountToken()
+      if (cloudBaseUrl.isNullOrBlank() || accountToken.isNullOrBlank()) {
+        return null
+      }
+      return GatewayEndpoint.cloud(cloudBaseUrl)
+    }
+
     if (manualEnabled.value) {
       val host = manualHost.value.trim()
       val port = manualPort.value
@@ -867,6 +878,27 @@ class NodeRuntime(
       return
     }
     connect(GatewayEndpoint.manual(host = host, port = port))
+  }
+
+  fun connectCloud() {
+    val cloudBaseUrl = prefs.loadGatewayCloudBaseUrl()
+    val accountToken = prefs.loadGatewayAccountToken()
+    if (cloudBaseUrl.isNullOrBlank()) {
+      _statusText.value = "Failed: missing cloud gateway URL"
+      return
+    }
+    if (accountToken.isNullOrBlank()) {
+      _statusText.value = "Failed: missing account session"
+      return
+    }
+    val endpoint = GatewayEndpoint.cloud(cloudBaseUrl)
+    if (endpoint == null) {
+      _statusText.value = "Failed: invalid cloud gateway URL"
+      return
+    }
+    prefs.setCloudEnabled(true)
+    prefs.setManualEnabled(false)
+    connect(endpoint)
   }
 
   fun disconnect() {
