@@ -122,12 +122,7 @@ internal enum class GatewayInputMode {
 internal fun resolveInitialGatewayInputMode(
   persistedGatewayCloudBaseUrl: String,
   persistedGatewayAccountToken: String,
-): GatewayInputMode =
-  if (persistedGatewayCloudBaseUrl.isNotBlank() || persistedGatewayAccountToken.isNotBlank()) {
-    GatewayInputMode.Cloud
-  } else {
-    GatewayInputMode.SetupCode
-  }
+): GatewayInputMode = GatewayInputMode.Cloud
 
 internal fun resolveInitialGatewayAdvancedOpen(inputMode: GatewayInputMode): Boolean =
   inputMode == GatewayInputMode.Cloud

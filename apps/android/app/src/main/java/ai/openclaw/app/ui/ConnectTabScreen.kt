@@ -79,7 +79,7 @@ internal fun resolveInitialConnectInputMode(
   } else if (manualEnabled || manualHost.isNotBlank() || gatewayToken.trim().isNotEmpty()) {
     ConnectInputMode.Manual
   } else {
-    ConnectInputMode.SetupCode
+    ConnectInputMode.Cloud
   }
 
 internal fun resolveInitialConnectAdvancedOpen(inputMode: ConnectInputMode): Boolean =

@@ -25,9 +25,9 @@ class OnboardingFlowDefaultsTest {
   }
 
   @Test
-  fun `without cloud credentials onboarding defaults to setup code`() {
+  fun `without cloud credentials onboarding still defaults to cloud mode`() {
     assertEquals(
-      GatewayInputMode.SetupCode,
+      GatewayInputMode.Cloud,
       resolveInitialGatewayInputMode(
         persistedGatewayCloudBaseUrl = "",
         persistedGatewayAccountToken = "",

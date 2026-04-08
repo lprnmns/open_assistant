@@ -53,4 +53,19 @@ class ConnectTabScreenDefaultsTest {
     assertTrue(resolveInitialConnectAdvancedOpen(ConnectInputMode.Manual))
     assertFalse(resolveInitialConnectAdvancedOpen(ConnectInputMode.SetupCode))
   }
+
+  @Test
+  fun `without saved state connect tab defaults to cloud mode`() {
+    assertEquals(
+      ConnectInputMode.Cloud,
+      resolveInitialConnectInputMode(
+        cloudEnabled = false,
+        gatewayCloudBaseUrl = "",
+        gatewayAccountToken = "",
+        manualEnabled = false,
+        manualHost = "",
+        gatewayToken = "",
+      ),
+    )
+  }
 }
