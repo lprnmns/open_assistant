@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
+  buildPdfStructuredPrompt,
   coercePdfAssistantText,
+  coercePdfStructuredResult,
   coercePdfModelConfig,
   parsePageRange,
   providerSupportsNativePdf,
@@ -540,7 +542,9 @@ describe("createPdfTool", () => {
       expect(loadSpy).not.toHaveBeenCalled();
       expect(analyzeSpy).toHaveBeenCalledWith(
         expect.objectContaining({
-          pdfs: [{ base64: Buffer.from("%PDF-1.4 uploaded").toString("base64"), filename: "exam.pdf" }],
+          pdfs: [
+            { base64: Buffer.from("%PDF-1.4 uploaded").toString("base64"), filename: "exam.pdf" },
+          ],
         }),
       );
       expect(result).toMatchObject({
@@ -604,6 +608,264 @@ describe("createPdfTool", () => {
     });
   });
 
+  it("returns structured schedule extraction JSON when extract=schedule", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, { provider: "openai", input: ["text"] });
+
+      const extractModule = await import("../../media/pdf-extract.js");
+      vi.spyOn(extractModule, "extractPdfContent").mockResolvedValue({
+        text: "Team sync Friday at 14:00",
+        images: [],
+      });
+
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              timezone: "Europe/Istanbul",
+              notes: [],
+              items: [
+                {
+                  kind: "event",
+                  title: "Team sync",
+                  dateText: "Friday at 14:00",
+                  startAt: "2026-04-10T14:00:00+03:00",
+                  endAt: null,
+                  dueAt: null,
+                  allDay: false,
+                  confidence: "high",
+                  sourceSnippet: "Team sync Friday at 14:00",
+                },
+              ],
+            }),
+          },
+        ],
+      } as never);
+
+      const cfg = withPdfModel(OPENAI_PDF_MODEL);
+      const tool = requirePdfTool(createPdfTool({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        extract: "schedule",
+        pdf: "/tmp/doc.pdf",
+        prompt: "Extract events and reminders.",
+      });
+
+      const [, context] = completeMock.mock.calls[0] as [
+        unknown,
+        { messages?: Array<{ content?: Array<{ type?: string; text?: string }> }> },
+      ];
+      const promptBlock = context.messages?.[0]?.content?.at(-1);
+      expect(promptBlock).toMatchObject({
+        type: "text",
+        text: expect.stringContaining("Return raw JSON only."),
+      });
+      expect(promptBlock).toMatchObject({
+        type: "text",
+        text: expect.stringContaining(
+          "Additional extraction request: Extract events and reminders.",
+        ),
+      });
+      expect(result).toMatchObject({
+        content: [
+          {
+            type: "text",
+            text: expect.stringContaining('"kind": "schedule_extract"'),
+          },
+        ],
+        details: {
+          native: false,
+          model: OPENAI_PDF_MODEL,
+          extraction: "schedule",
+          structuredContent: {
+            kind: "schedule_extract",
+            timezone: "Europe/Istanbul",
+            items: [
+              expect.objectContaining({
+                kind: "event",
+                title: "Team sync",
+              }),
+            ],
+            cronCandidates: [],
+            calendarCandidates: [],
+          },
+        },
+      });
+    });
+  });
+
+  it("adds calendarCandidates for event items with valid ISO start/end", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, { provider: "openai", input: ["text"] });
+
+      const extractModule = await import("../../media/pdf-extract.js");
+      vi.spyOn(extractModule, "extractPdfContent").mockResolvedValue({
+        text: "Team sync April 21 10:00-11:00",
+        images: [],
+      });
+
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              timezone: "Europe/Istanbul",
+              notes: [],
+              items: [
+                {
+                  kind: "event",
+                  title: "Team sync",
+                  dateText: "April 21 10:00-11:00",
+                  startAt: "2026-04-21T10:00:00+03:00",
+                  endAt: "2026-04-21T11:00:00+03:00",
+                  dueAt: null,
+                  allDay: false,
+                  confidence: "high",
+                  sourceSnippet: "Team sync April 21 10:00-11:00",
+                },
+              ],
+            }),
+          },
+        ],
+      } as never);
+
+      const cfg = withPdfModel(OPENAI_PDF_MODEL);
+      const tool = requirePdfTool(createPdfTool({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        extract: "schedule",
+        pdf: "/tmp/doc.pdf",
+      });
+
+      expect(result).toMatchObject({
+        content: [
+          {
+            type: "text",
+            text: expect.stringContaining('"calendarCandidates"'),
+          },
+        ],
+        details: {
+          extraction: "schedule",
+          structuredContent: {
+            calendarCandidates: [
+              {
+                sourceItemIndex: 0,
+                reason: "event",
+                toolName: "nodes",
+                toolInput: {
+                  action: "invoke",
+                  invokeCommand: "calendar.add",
+                  invokeParamsJson:
+                    '{"title":"Team sync","startISO":"2026-04-21T07:00:00.000Z","endISO":"2026-04-21T08:00:00.000Z","notes":"Team sync April 21 10:00-11:00"}',
+                },
+                nodeRequirement: "required_unless_single_calendar_capable_node",
+                params: {
+                  title: "Team sync",
+                  startISO: "2026-04-21T07:00:00.000Z",
+                  endISO: "2026-04-21T08:00:00.000Z",
+                  notes: "Team sync April 21 10:00-11:00",
+                },
+                assumptions: [],
+              },
+            ],
+          },
+        },
+      });
+    });
+  });
+
+  it("adds cronCandidates for task-like schedule items in structured mode", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      await stubPdfToolInfra(agentDir, { provider: "openai", input: ["text"] });
+
+      const extractModule = await import("../../media/pdf-extract.js");
+      vi.spyOn(extractModule, "extractPdfContent").mockResolvedValue({
+        text: "Submit expense report by April 20 at 09:00",
+        images: [],
+      });
+
+      completeMock.mockResolvedValue({
+        role: "assistant",
+        stopReason: "stop",
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              timezone: "Europe/Istanbul",
+              notes: [],
+              items: [
+                {
+                  kind: "task",
+                  title: "Submit expense report",
+                  dateText: "April 20 at 09:00",
+                  startAt: null,
+                  endAt: null,
+                  dueAt: "2026-04-20T09:00:00+03:00",
+                  allDay: false,
+                  confidence: "high",
+                  sourceSnippet: "Submit expense report by April 20 at 09:00",
+                },
+              ],
+            }),
+          },
+        ],
+      } as never);
+
+      const cfg = withPdfModel(OPENAI_PDF_MODEL);
+      const tool = requirePdfTool(createPdfTool({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        extract: "schedule",
+        pdf: "/tmp/doc.pdf",
+      });
+
+      expect(result).toMatchObject({
+        content: [
+          {
+            type: "text",
+            text: expect.stringContaining('"cronCandidates"'),
+          },
+        ],
+        details: {
+          extraction: "schedule",
+          structuredContent: {
+            cronCandidates: [
+              {
+                sourceItemIndex: 0,
+                reason: "dueAt",
+                toolName: "cron",
+                toolInput: {
+                  action: "add",
+                  job: {
+                    name: "Submit expense report",
+                    schedule: { kind: "at", at: "2026-04-20T06:00:00.000Z" },
+                    payload: {
+                      kind: "systemEvent",
+                      text: "Reminder: Submit expense report",
+                    },
+                  },
+                },
+                job: {
+                  name: "Submit expense report",
+                  schedule: { kind: "at", at: "2026-04-20T06:00:00.000Z" },
+                  payload: {
+                    kind: "systemEvent",
+                    text: "Reminder: Submit expense report",
+                  },
+                },
+              },
+            ],
+          },
+        },
+      });
+    });
+  });
+
   it("tool parameters have correct schema shape", async () => {
     await withAnthropicPdfTool(async (tool) => {
       const schema = tool.parameters;
@@ -614,6 +876,7 @@ describe("createPdfTool", () => {
       expect(props.pdf).toBeDefined();
       expect(props.pdfs).toBeDefined();
       expect(props.pages).toBeDefined();
+      expect(props.extract).toBeDefined();
       expect(props.model).toBeDefined();
       expect(props.maxBytesMb).toBeDefined();
     });
@@ -834,6 +1097,15 @@ describe("native PDF provider API calls", () => {
 // ---------------------------------------------------------------------------
 
 describe("pdf-tool.helpers", () => {
+  it("buildPdfStructuredPrompt documents raw JSON schedule extraction", () => {
+    expect(buildPdfStructuredPrompt({ mode: "schedule", request: "deadlines only" })).toContain(
+      "Return raw JSON only.",
+    );
+    expect(buildPdfStructuredPrompt({ mode: "schedule", request: "deadlines only" })).toContain(
+      "Additional extraction request: deadlines only",
+    );
+  });
+
   it("resolvePdfToolMaxTokens respects model limit", () => {
     expect(resolvePdfToolMaxTokens(2048, 4096)).toBe(2048);
     expect(resolvePdfToolMaxTokens(8192, 4096)).toBe(4096);
@@ -883,6 +1155,185 @@ describe("pdf-tool.helpers", () => {
         } as never,
       }),
     ).toThrow("PDF model failed (google/gemini-2.5-pro): bad request");
+  });
+
+  it("coercePdfStructuredResult normalizes schedule extraction JSON", () => {
+    expect(
+      coercePdfStructuredResult({
+        mode: "schedule",
+        raw: JSON.stringify({
+          timezone: " Europe/Istanbul ",
+          notes: ["  ambiguous timezone  ", ""],
+          items: [
+            {
+              kind: "event",
+              title: " Demo day ",
+              dateText: "April 12 at 10:00",
+              startAt: "2026-04-12T10:00:00+03:00",
+              endAt: "2026-04-12T11:00:00+03:00",
+              dueAt: null,
+              allDay: false,
+              confidence: "high",
+              sourceSnippet: "Demo day - April 12 at 10:00",
+            },
+            {
+              kind: "task",
+              title: "Follow up",
+              dateText: "next week",
+              dueAt: "2026-04-19T09:00:00+03:00",
+              sourceSnippet: "follow up next week",
+            },
+            {
+              kind: "deadline",
+              title: "",
+              dateText: "missing title should drop",
+            },
+          ],
+        }),
+      }),
+    ).toEqual({
+      kind: "schedule_extract",
+      timezone: "Europe/Istanbul",
+      notes: ["ambiguous timezone"],
+      items: [
+        {
+          kind: "event",
+          title: "Demo day",
+          dateText: "April 12 at 10:00",
+          startAt: "2026-04-12T10:00:00+03:00",
+          endAt: "2026-04-12T11:00:00+03:00",
+          dueAt: null,
+          allDay: false,
+          confidence: "high",
+          sourceSnippet: "Demo day - April 12 at 10:00",
+        },
+        {
+          kind: "task",
+          title: "Follow up",
+          dateText: "next week",
+          startAt: null,
+          endAt: null,
+          dueAt: "2026-04-19T09:00:00+03:00",
+          allDay: false,
+          confidence: "medium",
+          sourceSnippet: "follow up next week",
+        },
+      ],
+      cronCandidates: [
+        {
+          sourceItemIndex: 1,
+          reason: "dueAt",
+          toolName: "cron",
+          toolInput: {
+            action: "add",
+            job: {
+              name: "Follow up",
+              schedule: { kind: "at", at: "2026-04-19T06:00:00.000Z" },
+              payload: { kind: "systemEvent", text: "Reminder: Follow up" },
+            },
+          },
+          job: {
+            name: "Follow up",
+            schedule: { kind: "at", at: "2026-04-19T06:00:00.000Z" },
+            payload: { kind: "systemEvent", text: "Reminder: Follow up" },
+          },
+        },
+      ],
+      calendarCandidates: [
+        {
+          sourceItemIndex: 0,
+          reason: "event",
+          toolName: "nodes",
+          toolInput: {
+            action: "invoke",
+            invokeCommand: "calendar.add",
+            invokeParamsJson:
+              '{"title":"Demo day","startISO":"2026-04-12T07:00:00.000Z","endISO":"2026-04-12T08:00:00.000Z","notes":"Demo day - April 12 at 10:00"}',
+          },
+          nodeRequirement: "required_unless_single_calendar_capable_node",
+          params: {
+            title: "Demo day",
+            startISO: "2026-04-12T07:00:00.000Z",
+            endISO: "2026-04-12T08:00:00.000Z",
+            notes: "Demo day - April 12 at 10:00",
+          },
+          assumptions: [],
+        },
+      ],
+    });
+  });
+
+  it("coercePdfStructuredResult throws a clear error for invalid JSON", () => {
+    expect(() =>
+      coercePdfStructuredResult({
+        mode: "schedule",
+        raw: "not valid json",
+      }),
+    ).toThrow("PDF structured extraction returned invalid JSON");
+  });
+
+  it("coercePdfStructuredResult only emits cronCandidates for ISO datetime values", () => {
+    expect(
+      coercePdfStructuredResult({
+        mode: "schedule",
+        raw: JSON.stringify({
+          timezone: null,
+          notes: [],
+          items: [
+            {
+              kind: "task",
+              title: "Loose date wording",
+              dateText: "next week",
+              dueAt: "next week",
+            },
+          ],
+        }),
+      }).cronCandidates,
+    ).toEqual([]);
+  });
+
+  it("coercePdfStructuredResult infers all-day calendar candidate end time when needed", () => {
+    expect(
+      coercePdfStructuredResult({
+        mode: "schedule",
+        raw: JSON.stringify({
+          timezone: null,
+          notes: [],
+          items: [
+            {
+              kind: "event",
+              title: "Conference day",
+              dateText: "April 25",
+              startAt: "2026-04-25T00:00:00Z",
+              endAt: null,
+              allDay: true,
+              sourceSnippet: "Conference day",
+            },
+          ],
+        }),
+      }).calendarCandidates,
+    ).toEqual([
+      {
+        sourceItemIndex: 0,
+        reason: "event",
+        toolName: "nodes",
+        toolInput: {
+          action: "invoke",
+          invokeCommand: "calendar.add",
+          invokeParamsJson:
+            '{"title":"Conference day","startISO":"2026-04-25T00:00:00.000Z","endISO":"2026-04-26T00:00:00.000Z","isAllDay":true,"notes":"Conference day"}',
+        },
+        nodeRequirement: "required_unless_single_calendar_capable_node",
+        params: {
+          title: "Conference day",
+          startISO: "2026-04-25T00:00:00.000Z",
+          endISO: "2026-04-26T00:00:00.000Z",
+          isAllDay: true,
+          notes: "Conference day",
+        },
+        assumptions: ["endISO inferred as startISO + 1 day for all-day event"],
+      },
+    ]);
   });
 });
 

@@ -5,6 +5,8 @@ import { readUploadFileRef, resolveUploadFileRefId } from "../../gateway/upload-
 import { extractPdfContent, type PdfExtractedContent } from "../../media/pdf-extract.js";
 import { loadWebMediaRaw } from "../../media/web-media.js";
 import { resolveUserPath } from "../../utils.js";
+import { optionalStringEnum } from "../schema/typebox.js";
+import { textResult } from "./common.js";
 import {
   coerceImageModelConfig,
   type ImageModelConfig,
@@ -21,9 +23,12 @@ import {
 import { hasAuthForProvider, resolveDefaultModelRef } from "./model-config.helpers.js";
 import { anthropicAnalyzePdf, geminiAnalyzePdf } from "./pdf-native-providers.js";
 import {
+  buildPdfStructuredPrompt,
   coercePdfAssistantText,
+  coercePdfStructuredResult,
   coercePdfModelConfig,
   parsePageRange,
+  PDF_EXTRACTION_MODES,
   providerSupportsNativePdf,
   resolvePdfToolMaxTokens,
 } from "./pdf-tool.helpers.js";
@@ -333,7 +338,7 @@ export function createPdfTool(options?: {
   });
 
   const description =
-    "Analyze one or more PDF documents with a model. Supports native PDF analysis for Anthropic and Google models, with text/image extraction fallback for other providers. Use pdf for a single path/URL/upload fileRef, or pdfs for multiple (up to 10). Provide a prompt describing what to analyze.";
+    "Analyze one or more PDF documents with a model. Supports native PDF analysis for Anthropic and Google models, with text/image extraction fallback for other providers. Use pdf for a single path/URL/upload fileRef, or pdfs for multiple (up to 10). Provide a prompt describing what to analyze. Use extract=schedule to return structured schedule/reminder candidates as JSON, including cronCandidates and calendarCandidates with ready-to-pass toolInput payloads.";
 
   return {
     label: "PDF",
@@ -341,9 +346,7 @@ export function createPdfTool(options?: {
     description,
     parameters: Type.Object({
       prompt: Type.Optional(Type.String()),
-      pdf: Type.Optional(
-        Type.String({ description: "Single PDF path, upload fileRef, or URL." }),
-      ),
+      pdf: Type.Optional(Type.String({ description: "Single PDF path, upload fileRef, or URL." })),
       pdfs: Type.Optional(
         Type.Array(Type.String(), {
           description: "Multiple PDF paths, upload fileRefs, or URLs (up to 10).",
@@ -354,6 +357,10 @@ export function createPdfTool(options?: {
           description: 'Page range to process, e.g. "1-5", "1,3,5-7". Defaults to all pages.',
         }),
       ),
+      extract: optionalStringEnum(PDF_EXTRACTION_MODES, {
+        description:
+          "Optional structured extraction mode. Use schedule for reminders, deadlines, and calendar candidates with toolInput stubs.",
+      }),
       model: Type.Optional(Type.String()),
       maxBytesMb: Type.Optional(Type.Number()),
     }),
@@ -400,6 +407,14 @@ export function createPdfTool(options?: {
         record,
         DEFAULT_PROMPT,
       );
+      const extractMode = record.extract === "schedule" ? "schedule" : undefined;
+      const effectivePrompt =
+        extractMode === "schedule"
+          ? buildPdfStructuredPrompt({
+              mode: "schedule",
+              request: promptRaw !== DEFAULT_PROMPT ? promptRaw : undefined,
+            })
+          : promptRaw;
       const maxBytesMbRaw = typeof record.maxBytesMb === "number" ? record.maxBytesMb : undefined;
       const maxBytesMb =
         typeof maxBytesMbRaw === "number" && Number.isFinite(maxBytesMbRaw) && maxBytesMbRaw > 0
@@ -558,7 +573,7 @@ export function createPdfTool(options?: {
         agentDir,
         pdfModelConfig,
         modelOverride,
-        prompt: promptRaw,
+        prompt: effectivePrompt,
         pdfBuffers: loadedPdfs.map((p) => ({ base64: p.base64, filename: p.filename })),
         pageNumbers,
         getExtractions,
@@ -578,6 +593,21 @@ export function createPdfTool(options?: {
                 ...(p.rewrittenFrom ? { rewrittenFrom: p.rewrittenFrom } : {}),
               })),
             };
+
+      if (extractMode === "schedule") {
+        const structuredContent = coercePdfStructuredResult({
+          mode: extractMode,
+          raw: result.text,
+        });
+        return textResult(JSON.stringify(structuredContent, null, 2), {
+          model: `${result.provider}/${result.model}`,
+          native: result.native,
+          ...pdfDetails,
+          extraction: extractMode,
+          structuredContent,
+          attempts: result.attempts,
+        });
+      }
 
       return buildTextToolResult(result, { native: result.native, ...pdfDetails });
     },
