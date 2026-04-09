@@ -31,8 +31,75 @@ INPUT_PATHS=(
   "$A2UI_APP_DIR"
 )
 
+resolve_node_bin() {
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return 0
+  fi
+
+  normalize_windows_path_for_bash() {
+    local candidate="$1"
+    if [[ "$candidate" =~ ^([A-Za-z]):\\(.*)$ ]]; then
+      local drive_letter="${BASH_REMATCH[1],,}"
+      local remainder="${BASH_REMATCH[2]//\\//}"
+      printf '/mnt/%s/%s\n' "$drive_letter" "$remainder"
+      return 0
+    fi
+    printf '%s\n' "$candidate"
+  }
+
+  if command -v cmd.exe >/dev/null 2>&1; then
+    local candidate
+    candidate="$(
+      cmd.exe /d /s /c "where node 2>NUL" 2>/dev/null \
+        | tr -d '\r' \
+        | head -n 1
+    )"
+    if [[ -n "$candidate" ]] && command -v cygpath >/dev/null 2>&1; then
+      candidate="$(cygpath -u "$candidate" 2>/dev/null || printf '%s' "$candidate")"
+    elif [[ -n "$candidate" ]]; then
+      candidate="$(normalize_windows_path_for_bash "$candidate")"
+    fi
+    if [[ -n "$candidate" && -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+NODE_BIN="$(resolve_node_bin || true)"
+if [[ -z "$NODE_BIN" ]]; then
+  echo "node: command not found" >&2
+  exit 1
+fi
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+
+to_native_node_path() {
+  local candidate="$1"
+  if [[ "$NODE_BIN" =~ \.exe$ ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      cygpath -w "$candidate" 2>/dev/null && return 0
+    fi
+    if [[ "$candidate" =~ ^/mnt/([A-Za-z])/(.*)$ ]]; then
+      local drive_letter="${BASH_REMATCH[1]^^}"
+      local remainder="${BASH_REMATCH[2]//\//\\}"
+      printf '%s:\\%s\n' "$drive_letter" "$remainder"
+      return 0
+    fi
+  fi
+  printf '%s\n' "$candidate"
+}
+
+ROOT_DIR_FOR_NODE="$(to_native_node_path "$ROOT_DIR")"
+INPUT_PATHS_FOR_NODE=()
+for input_path in "${INPUT_PATHS[@]}"; do
+  INPUT_PATHS_FOR_NODE+=("$(to_native_node_path "$input_path")")
+done
+
 compute_hash() {
-  ROOT_DIR="$ROOT_DIR" node --input-type=module --eval '
+  ROOT_DIR="$ROOT_DIR_FOR_NODE" "$NODE_BIN" --input-type=module --eval '
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -73,7 +140,7 @@ for (const filePath of files) {
 }
 
 process.stdout.write(hash.digest("hex"));
-' "${INPUT_PATHS[@]}"
+' "${INPUT_PATHS_FOR_NODE[@]}"
 }
 
 current_hash="$(compute_hash)"
@@ -85,14 +152,17 @@ if [[ -f "$HASH_FILE" ]]; then
   fi
 fi
 
-pnpm -s exec tsc -p "$A2UI_RENDERER_DIR/tsconfig.json"
-if command -v rolldown >/dev/null 2>&1 && rolldown --version >/dev/null 2>&1; then
-  rolldown -c "$A2UI_APP_DIR/rolldown.config.mjs"
+"$NODE_BIN" "$(to_native_node_path "$ROOT_DIR/node_modules/typescript/bin/tsc")" \
+  -p "$(to_native_node_path "$A2UI_RENDERER_DIR/tsconfig.json")"
+if [[ -f "$ROOT_DIR/node_modules/rolldown/bin/cli.mjs" ]]; then
+  "$NODE_BIN" "$(to_native_node_path "$ROOT_DIR/node_modules/rolldown/bin/cli.mjs")" \
+    -c "$(to_native_node_path "$A2UI_APP_DIR/rolldown.config.mjs")"
 elif [[ -f "$ROOT_DIR/node_modules/.pnpm/node_modules/rolldown/bin/cli.mjs" ]]; then
-  node "$ROOT_DIR/node_modules/.pnpm/node_modules/rolldown/bin/cli.mjs" -c "$A2UI_APP_DIR/rolldown.config.mjs"
+  "$NODE_BIN" "$(to_native_node_path "$ROOT_DIR/node_modules/.pnpm/node_modules/rolldown/bin/cli.mjs")" \
+    -c "$(to_native_node_path "$A2UI_APP_DIR/rolldown.config.mjs")"
 elif [[ -f "$ROOT_DIR/node_modules/.pnpm/rolldown@1.0.0-rc.9/node_modules/rolldown/bin/cli.mjs" ]]; then
-  node "$ROOT_DIR/node_modules/.pnpm/rolldown@1.0.0-rc.9/node_modules/rolldown/bin/cli.mjs" \
-    -c "$A2UI_APP_DIR/rolldown.config.mjs"
+  "$NODE_BIN" "$(to_native_node_path "$ROOT_DIR/node_modules/.pnpm/rolldown@1.0.0-rc.9/node_modules/rolldown/bin/cli.mjs")" \
+    -c "$(to_native_node_path "$A2UI_APP_DIR/rolldown.config.mjs")"
 else
   pnpm -s dlx rolldown -c "$A2UI_APP_DIR/rolldown.config.mjs"
 fi
