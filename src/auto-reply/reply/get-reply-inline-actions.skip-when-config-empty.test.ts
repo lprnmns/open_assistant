@@ -8,6 +8,7 @@ import type { TypingController } from "./typing.js";
 
 const handleCommandsMock = vi.fn();
 const getChannelPluginMock = vi.fn();
+const createOpenClawToolsMock = vi.fn();
 
 let handleInlineActions: typeof import("./get-reply-inline-actions.js").handleInlineActions;
 type HandleInlineActionsInput = Parameters<
@@ -27,6 +28,9 @@ async function loadFreshInlineActionsModuleForTest() {
       getChannelPlugin: (...args: unknown[]) => getChannelPluginMock(...args),
     };
   });
+  vi.doMock("../../agents/openclaw-tools.runtime.js", () => ({
+    createOpenClawTools: (...args: unknown[]) => createOpenClawToolsMock(...args),
+  }));
   ({ handleInlineActions } = await import("./get-reply-inline-actions.js"));
 }
 
@@ -115,6 +119,8 @@ describe("handleInlineActions", () => {
     handleCommandsMock.mockReset();
     handleCommandsMock.mockResolvedValue({ shouldContinue: true, reply: undefined });
     getChannelPluginMock.mockReset();
+    createOpenClawToolsMock.mockReset();
+    createOpenClawToolsMock.mockReturnValue([]);
     getChannelPluginMock.mockImplementation((channelId?: string) =>
       channelId === "whatsapp" ? { commands: { skipWhenConfigEmpty: true } } : undefined,
     );
@@ -290,6 +296,77 @@ describe("handleInlineActions", () => {
         ctx: expect.objectContaining({
           Body: "Act as an engineering advisor.\n\nFocus on:\nbuild me a deployment plan",
         }),
+      }),
+    );
+  });
+
+  it("forwards consciousness runtime scope into slash tool dispatch", async () => {
+    const typing = createTypingController();
+    const execute = vi.fn().mockResolvedValue({ content: "done" });
+    createOpenClawToolsMock.mockReturnValue([
+      {
+        name: "memory_search",
+        label: "Memory Search",
+        description: "test",
+        parameters: { type: "object", properties: {} },
+        ownerOnly: false,
+        execute,
+      },
+    ]);
+
+    const ctx = buildTestCtx({
+      Body: "/recall project alpha",
+      CommandBody: "/recall project alpha",
+    });
+    const skillCommands: SkillCommandSpec[] = [
+      {
+        name: "recall",
+        skillName: "memory-recall",
+        description: "Recall memory",
+        sourceFilePath: "/tmp/plugin/commands/recall.md",
+        dispatch: {
+          kind: "tool",
+          toolName: "memory_search",
+        },
+      },
+    ];
+
+    const result = await handleInlineActions(
+      createHandleInlineActionsInput({
+        ctx,
+        typing,
+        cleanedBody: "/recall project alpha",
+        command: {
+          isAuthorizedSender: true,
+          senderIsOwner: true,
+          senderId: "sender-1",
+          abortKey: "sender-1",
+          rawBodyNormalized: "/recall project alpha",
+          commandBodyNormalized: "/recall project alpha",
+        },
+        overrides: {
+          allowTextCommands: true,
+          cfg: { commands: { text: true } },
+          skillCommands,
+          opts: {
+            consciousnessRuntimeScope: "account:user-123",
+          },
+        },
+      }),
+    );
+
+    expect(result).toEqual({ kind: "reply", reply: { text: "done" } });
+    expect(createOpenClawToolsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        memoryRuntimeScope: "account:user-123",
+      }),
+    );
+    expect(execute).toHaveBeenCalledWith(
+      expect.stringMatching(/^cmd_/),
+      expect.objectContaining({
+        command: "project alpha",
+        commandName: "recall",
+        skillName: "memory-recall",
       }),
     );
   });

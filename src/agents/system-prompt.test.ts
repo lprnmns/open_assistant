@@ -244,7 +244,9 @@ describe("buildAgentSystemPrompt", () => {
     expect(executivePrompt).toContain("Current reply mode: executive.");
     expect(executivePrompt).toContain("Be brief, direct, and action-first.");
     expect(executivePrompt).toContain("Do not use emoji in this mode.");
-    expect(executivePrompt).toContain("Do not add filler phrases, pleasantries, or motivational commentary.");
+    expect(executivePrompt).toContain(
+      "Do not add filler phrases, pleasantries, or motivational commentary.",
+    );
     expect(companionPrompt).toContain("Current reply mode: companion.");
     expect(companionPrompt).toContain("Be warm, collaborative, and lightly explanatory.");
   });
@@ -325,7 +327,28 @@ describe("buildAgentSystemPrompt", () => {
 
     expect(prompt).toContain("- pdf: Analyze PDF documents");
     expect(prompt).toContain("upload fileRefs");
+    expect(prompt).toContain("`extract=schedule`");
+    expect(prompt).toContain("structured JSON schedule/reminder candidates");
+    expect(prompt).toContain("cronCandidates");
+    expect(prompt).toContain("calendarCandidates");
+    expect(prompt).toContain("toolInput");
+    expect(prompt).toContain(
+      "add a `node` when using a calendarCandidate with `nodes` unless there is exactly one calendar-capable node",
+    );
+    expect(prompt).toContain("prefer those candidate payloads over reparsing dates yourself");
     expect(prompt).toContain("before creating calendar events or reminders");
+  });
+
+  it("documents nodes tool as a generic node command invoke surface", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["nodes"],
+    });
+
+    expect(prompt).toContain("- nodes:");
+    expect(prompt).toContain("invoke supported node commands");
+    expect(prompt).toContain("calendar actions");
+    expect(prompt).toContain("location");
   });
 
   it("documents ACP sessions_spawn agent targeting requirements", () => {

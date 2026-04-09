@@ -102,6 +102,9 @@ describe("createNodesTool screen_record duration guardrails", () => {
     gatewayMocks.readGatewayCallOptions.mockReturnValue({});
     nodeUtilsMocks.resolveNodeId.mockClear();
     nodeUtilsMocks.resolveNode.mockClear();
+    nodeUtilsMocks.listNodes.mockReset();
+    nodeUtilsMocks.listNodes.mockResolvedValue([]);
+    nodeUtilsMocks.resolveNodeIdFromList.mockClear();
     screenMocks.parseScreenRecordPayload.mockClear();
     screenMocks.writeScreenRecordToFile.mockClear();
     nodesCameraMocks.cameraTempPath.mockClear();
@@ -113,6 +116,70 @@ describe("createNodesTool screen_record duration guardrails", () => {
   it("marks nodes as owner-only", () => {
     const tool = createNodesTool();
     expect(tool.ownerOnly).toBe(true);
+  });
+
+  it("documents calendar.add auto node selection in the tool description", () => {
+    const tool = createNodesTool();
+    expect(tool.description).toContain('invokeCommand="calendar.add"');
+    expect(tool.description).toContain("exactly one calendar-capable node");
+  });
+
+  it("auto-selects the sole calendar-capable node for calendar.add invoke", async () => {
+    gatewayMocks.callGatewayTool.mockResolvedValue({ ok: true });
+    nodeUtilsMocks.listNodes.mockResolvedValue([
+      {
+        nodeId: "phone-1",
+        commands: ["calendar.add"],
+      },
+    ]);
+    const tool = createNodesTool();
+
+    await tool.execute("call-1", {
+      action: "invoke",
+      invokeCommand: "calendar.add",
+      invokeParamsJson:
+        '{"title":"Team sync","startISO":"2026-04-21T07:00:00.000Z","endISO":"2026-04-21T08:00:00.000Z"}',
+    });
+
+    expect(nodeUtilsMocks.resolveNodeId).not.toHaveBeenCalled();
+    expect(nodeUtilsMocks.listNodes).toHaveBeenCalledTimes(1);
+    expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith(
+      "node.invoke",
+      {},
+      expect.objectContaining({
+        nodeId: "phone-1",
+        command: "calendar.add",
+        params: {
+          title: "Team sync",
+          startISO: "2026-04-21T07:00:00.000Z",
+          endISO: "2026-04-21T08:00:00.000Z",
+        },
+      }),
+    );
+  });
+
+  it("requires node for calendar.add invoke when multiple calendar-capable nodes are available", async () => {
+    nodeUtilsMocks.listNodes.mockResolvedValue([
+      {
+        nodeId: "phone-1",
+        commands: ["calendar.add"],
+      },
+      {
+        nodeId: "phone-2",
+        commands: ["calendar.add"],
+      },
+    ]);
+    const tool = createNodesTool();
+
+    await expect(
+      tool.execute("call-1", {
+        action: "invoke",
+        invokeCommand: "calendar.add",
+      }),
+    ).rejects.toThrow(
+      'node required for invokeCommand "calendar.add" (multiple calendar-capable nodes available)',
+    );
+    expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
   });
 
   it("caps durationMs schema at 300000", () => {

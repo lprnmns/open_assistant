@@ -70,6 +70,7 @@ const NODE_READ_ACTION_COMMANDS = {
   device_permissions: "device.permissions",
   device_health: "device.health",
 } as const;
+const AUTO_INVOKE_NODE_COMMANDS = new Set(["calendar.add"]);
 type GatewayCallOptions = ReturnType<typeof readGatewayCallOptions>;
 
 async function invokeNodeCommandPayload(params: {
@@ -86,6 +87,65 @@ async function invokeNodeCommandPayload(params: {
     idempotencyKey: crypto.randomUUID(),
   });
   return raw?.payload ?? {};
+}
+
+function nodeSupportsInvokeCommand(
+  node: Awaited<ReturnType<typeof listNodes>>[number],
+  command: string,
+): boolean {
+  const normalized = command.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  const namespace = normalized.split(".")[0];
+  const commands = Array.isArray(node.commands)
+    ? node.commands
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim().toLowerCase())
+    : [];
+  if (commands.includes(normalized)) {
+    return true;
+  }
+  const caps = Array.isArray(node.caps)
+    ? node.caps
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim().toLowerCase())
+    : [];
+  return caps.includes(namespace);
+}
+
+async function resolveInvokeNodeId(params: {
+  gatewayOpts: GatewayCallOptions;
+  nodeQuery?: string;
+  invokeCommand: string;
+}): Promise<string> {
+  const trimmedNode = params.nodeQuery?.trim();
+  if (trimmedNode) {
+    return await resolveNodeId(params.gatewayOpts, trimmedNode);
+  }
+
+  const normalizedCommand = params.invokeCommand.trim().toLowerCase();
+  if (!AUTO_INVOKE_NODE_COMMANDS.has(normalizedCommand)) {
+    throw new Error(`node required for invokeCommand "${params.invokeCommand}"`);
+  }
+
+  const nodes = await listNodes(params.gatewayOpts);
+  const supportedNodes = nodes.filter((node) => nodeSupportsInvokeCommand(node, normalizedCommand));
+  const connectedSupportedNodes = supportedNodes.filter((node) => node.connected !== false);
+  const candidates = connectedSupportedNodes.length > 0 ? connectedSupportedNodes : supportedNodes;
+  if (candidates.length === 1) {
+    return candidates[0].nodeId;
+  }
+
+  const capabilityLabel = normalizedCommand.split(".")[0] ?? "target";
+  if (candidates.length === 0) {
+    throw new Error(
+      `node required for invokeCommand "${params.invokeCommand}" (no ${capabilityLabel}-capable node available)`,
+    );
+  }
+  throw new Error(
+    `node required for invokeCommand "${params.invokeCommand}" (multiple ${capabilityLabel}-capable nodes available)`,
+  );
 }
 
 function isPairingRequiredMessage(message: string): boolean {
@@ -177,7 +237,7 @@ export function createNodesTool(options?: {
     name: "nodes",
     ownerOnly: true,
     description:
-      "Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/run/invoke).",
+      'Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/run/invoke). For invokeCommand="calendar.add", node may be omitted when exactly one calendar-capable node is available.',
     parameters: NodesToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -764,9 +824,12 @@ export function createNodesTool(options?: {
             return jsonResult(raw?.payload ?? {});
           }
           case "invoke": {
-            const node = readStringParam(params, "node", { required: true });
-            const nodeId = await resolveNodeId(gatewayOpts, node);
             const invokeCommand = readStringParam(params, "invokeCommand", { required: true });
+            const nodeId = await resolveInvokeNodeId({
+              gatewayOpts,
+              nodeQuery: readStringParam(params, "node"),
+              invokeCommand,
+            });
             const invokeCommandNormalized = invokeCommand.trim().toLowerCase();
             const dedicatedAction =
               MEDIA_INVOKE_ACTIONS[invokeCommandNormalized as keyof typeof MEDIA_INVOKE_ACTIONS];

@@ -177,10 +177,7 @@ function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readT
   ];
 }
 
-function buildCognitiveModeSection(params: {
-  cognitiveMode?: CognitiveMode;
-  isMinimal: boolean;
-}) {
+function buildCognitiveModeSection(params: { cognitiveMode?: CognitiveMode; isMinimal: boolean }) {
   if (params.isMinimal || !params.cognitiveMode || params.cognitiveMode === "standard") {
     return [];
   }
@@ -273,7 +270,8 @@ export function buildAgentSystemPrompt(params: {
     // Channel docking: add login tools here when a channel needs interactive linking.
     browser: "Control web browser",
     canvas: "Present/eval/snapshot the Canvas",
-    nodes: "List/describe/notify/camera/screen on paired nodes",
+    nodes:
+      "List/describe paired nodes and invoke supported node commands such as notifications, camera, screen, location, device info, and calendar actions",
     cron: "Manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
     message: "Send messages and channel actions",
     gateway: "Restart, apply config, or run updates on the running OpenClaw process",
@@ -289,7 +287,7 @@ export function buildAgentSystemPrompt(params: {
     subagents: "List, steer, or kill sub-agent runs for this requester session",
     session_status:
       "Show a /status-equivalent status card (usage + time + Reasoning/Verbose/Elevated); use for model-use questions (📊 session_status); optional per-session model override",
-    pdf: "Analyze PDF documents from local paths, upload fileRefs, or URLs; use it to extract schedules, dates, and tasks before creating calendar events or reminders",
+    pdf: "Analyze PDF documents from local paths, upload fileRefs, or URLs; use `extract=schedule` to get structured JSON schedule/reminder candidates plus cronCandidates and calendarCandidates with ready-to-pass toolInput payloads before creating calendar events or reminders, add a `node` when using a calendarCandidate with `nodes` unless there is exactly one calendar-capable node, and prefer those candidate payloads over reparsing dates yourself",
     image: "Analyze an image with the configured image model",
     image_generate: "Generate images with the configured image-generation model",
   };
@@ -464,7 +462,7 @@ export function buildAgentSystemPrompt(params: {
           `- ${processToolName}: manage background exec sessions`,
           "- browser: control OpenClaw's dedicated browser",
           "- canvas: present/eval/snapshot the Canvas",
-          "- nodes: list/describe/notify/camera/screen on paired nodes",
+          "- nodes: list/describe paired nodes and invoke supported node commands such as notifications, camera, screen, location, device info, and calendar actions",
           "- cron: manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
           "- sessions_list: list sessions",
           "- sessions_history: fetch session history",
