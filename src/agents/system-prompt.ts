@@ -42,6 +42,7 @@ function buildMemorySection(params: {
   isMinimal: boolean;
   availableTools: Set<string>;
   citationsMode?: MemoryCitationsMode;
+  consciousnessRuntimeScope?: string;
 }) {
   if (params.isMinimal) {
     return [];
@@ -49,7 +50,7 @@ function buildMemorySection(params: {
   return buildMemoryPromptSection({
     availableTools: params.availableTools,
     citationsMode: params.citationsMode,
-    hasPrimaryRecallContext: Boolean(getConsciousnessRuntime()),
+    hasPrimaryRecallContext: Boolean(getConsciousnessRuntime(params.consciousnessRuntimeScope)),
   });
 }
 
@@ -252,6 +253,7 @@ export function buildAgentSystemPrompt(params: {
     channel: string;
   };
   memoryCitationsMode?: MemoryCitationsMode;
+  consciousnessRuntimeScope?: string;
 }) {
   const acpEnabled = params.acpEnabled !== false;
   const sandboxedRuntime = params.sandboxInfo?.enabled === true;
@@ -287,6 +289,7 @@ export function buildAgentSystemPrompt(params: {
     subagents: "List, steer, or kill sub-agent runs for this requester session",
     session_status:
       "Show a /status-equivalent status card (usage + time + Reasoning/Verbose/Elevated); use for model-use questions (📊 session_status); optional per-session model override",
+    pdf: "Analyze PDF documents from local paths, upload fileRefs, or URLs; use it to extract schedules, dates, and tasks before creating calendar events or reminders",
     image: "Analyze an image with the configured image model",
     image_generate: "Generate images with the configured image-generation model",
   };
@@ -315,6 +318,7 @@ export function buildAgentSystemPrompt(params: {
     "sessions_send",
     "subagents",
     "session_status",
+    "pdf",
     "image",
     "image_generate",
   ];
@@ -424,6 +428,7 @@ export function buildAgentSystemPrompt(params: {
     isMinimal,
     availableTools,
     citationsMode: params.memoryCitationsMode,
+    consciousnessRuntimeScope: params.consciousnessRuntimeScope,
   });
   const docsSection = buildDocsSection({
     docsPath: params.docsPath,

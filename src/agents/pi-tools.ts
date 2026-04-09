@@ -262,6 +262,8 @@ export function createOpenClawCodingTools(options?: {
   sessionId?: string;
   /** Stable run identifier for this agent invocation. */
   runId?: string;
+  /** Optional memory backend runtime scope for per-user isolation. */
+  memoryRuntimeScope?: string;
   /** What initiated this run (for trigger-specific tool restrictions). */
   trigger?: string;
   /** Relative workspace path that memory-triggered writes may append to. */
@@ -566,6 +568,7 @@ export function createOpenClawCodingTools(options?: {
       agentGroupId: options?.groupId ?? null,
       agentGroupChannel: options?.groupChannel ?? null,
       agentGroupSpace: options?.groupSpace ?? null,
+      memoryRuntimeScope: options?.memoryRuntimeScope,
       agentDir: options?.agentDir,
       sandboxRoot,
       sandboxFsBridge,

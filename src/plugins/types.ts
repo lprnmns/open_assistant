@@ -108,6 +108,8 @@ export type OpenClawPluginToolContext = {
   sessionKey?: string;
   /** Ephemeral session UUID — regenerated on /new and /reset. Use for per-conversation isolation. */
   sessionId?: string;
+  /** Optional memory backend runtime scope for per-user isolation. */
+  memoryRuntimeScope?: string;
   messageChannel?: string;
   agentAccountId?: string;
   /** Trusted sender id from inbound context (runtime-provided, not tool args). */

@@ -11,6 +11,7 @@ import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { isFileMissingError, statRegularFile } from "./fs-utils.js";
 import { resolveCliSpawnInvocation, runCliCommand } from "./qmd-process.js";
 import { deriveQmdScopeChannel, deriveQmdScopeChatType, isQmdScopeAllowed } from "./qmd-scope.js";
+import { resolveScopedQmdDir } from "./runtime-scope.js";
 import {
   listSessionFilesForAgent,
   buildSessionEntry,
@@ -140,12 +141,18 @@ export class QmdMemoryManager implements MemorySearchManager {
     agentId: string;
     resolved: ResolvedMemoryBackendConfig;
     mode?: QmdManagerMode;
+    runtimeScope?: string;
   }): Promise<QmdMemoryManager | null> {
     const resolved = params.resolved.qmd;
     if (!resolved) {
       return null;
     }
-    const manager = new QmdMemoryManager({ cfg: params.cfg, agentId: params.agentId, resolved });
+    const manager = new QmdMemoryManager({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      resolved,
+      runtimeScope: params.runtimeScope,
+    });
     await manager.initialize(params.mode ?? "full");
     return manager;
   }
@@ -195,14 +202,22 @@ export class QmdMemoryManager implements MemorySearchManager {
     cfg: OpenClawConfig;
     agentId: string;
     resolved: ResolvedQmdConfig;
+    runtimeScope?: string;
   }) {
     this.cfg = params.cfg;
     this.agentId = params.agentId;
     this.qmd = params.resolved;
     this.workspaceDir = resolveAgentWorkspaceDir(params.cfg, params.agentId);
     this.stateDir = resolveStateDir(process.env, os.homedir);
-    this.agentStateDir = path.join(this.stateDir, "agents", this.agentId);
-    this.qmdDir = path.join(this.agentStateDir, "qmd");
+    const scopedQmdDir = resolveScopedQmdDir({
+      agentId: this.agentId,
+      runtimeScope: params.runtimeScope,
+      stateDir: this.stateDir,
+    });
+    this.agentStateDir = scopedQmdDir
+      ? path.dirname(scopedQmdDir)
+      : path.join(this.stateDir, "agents", this.agentId);
+    this.qmdDir = scopedQmdDir ?? path.join(this.agentStateDir, "qmd");
     // QMD uses XDG base dirs for its internal state.
     // Collections are managed via `qmd collection add` and stored inside the index DB.
     // - config:  $XDG_CONFIG_HOME (contexts, etc.)
@@ -220,9 +235,12 @@ export class QmdMemoryManager implements MemorySearchManager {
       XDG_CACHE_HOME: this.xdgCacheHome,
       NO_COLOR: "1",
     };
+    const scopedSessionExportDir = params.runtimeScope
+      ? path.join(this.qmdDir, "sessions")
+      : this.qmd.sessions.exportDir;
     this.sessionExporter = this.qmd.sessions.enabled
       ? {
-          dir: this.qmd.sessions.exportDir ?? path.join(this.qmdDir, "sessions"),
+          dir: scopedSessionExportDir ?? path.join(this.qmdDir, "sessions"),
           retentionMs: this.qmd.sessions.retentionDays
             ? this.qmd.sessions.retentionDays * 24 * 60 * 60 * 1000
             : undefined,

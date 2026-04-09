@@ -44,6 +44,7 @@ export function buildSystemPrompt(params: {
   config?: OpenClawConfig;
   defaultThinkLevel?: ThinkLevel;
   extraSystemPrompt?: string;
+  consciousnessRuntimeScope?: string;
   cognitiveMode?: CognitiveMode;
   ownerNumbers?: string[];
   heartbeatPrompt?: string;
@@ -79,6 +80,7 @@ export function buildSystemPrompt(params: {
     workspaceDir: params.workspaceDir,
     defaultThinkLevel: params.defaultThinkLevel,
     extraSystemPrompt: params.extraSystemPrompt,
+    consciousnessRuntimeScope: params.consciousnessRuntimeScope,
     cognitiveMode: params.cognitiveMode,
     ownerNumbers: params.ownerNumbers,
     ownerDisplay: ownerDisplay.ownerDisplay,

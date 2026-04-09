@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HandleCommandsParams } from "./commands-types.js";
 
-const { createOpenClawCodingToolsMock } = vi.hoisted(() => ({
+const { createOpenClawCodingToolsMock, buildAgentSystemPromptMock } = vi.hoisted(() => ({
   createOpenClawCodingToolsMock: vi.fn(() => []),
+  buildAgentSystemPromptMock: vi.fn(() => "system prompt"),
 }));
 
 vi.mock("../../agents/bootstrap-files.js", () => ({
@@ -46,7 +47,7 @@ vi.mock("../../agents/system-prompt-params.js", () => ({
 }));
 
 vi.mock("../../agents/system-prompt.js", () => ({
-  buildAgentSystemPrompt: vi.fn(() => "system prompt"),
+  buildAgentSystemPrompt: buildAgentSystemPromptMock,
 }));
 
 vi.mock("../../agents/tool-summaries.js", () => ({
@@ -60,8 +61,6 @@ vi.mock("../../infra/skills-remote.js", () => ({
 vi.mock("../../tts/tts.js", () => ({
   buildTtsSystemPromptHint: vi.fn(() => undefined),
 }));
-
-import { resolveCommandsSystemPromptBundle } from "./commands-system-prompt.js";
 
 function makeParams(): HandleCommandsParams {
   return {
@@ -85,6 +84,7 @@ function makeParams(): HandleCommandsParams {
       failures: [],
     },
     agentId: "main",
+    agentDir: "/tmp/agent",
     sessionEntry: {
       sessionId: "session-1",
       groupId: "group-1",
@@ -106,21 +106,47 @@ function makeParams(): HandleCommandsParams {
   } as unknown as HandleCommandsParams;
 }
 
+async function loadResolveCommandsSystemPromptBundle() {
+  const module = await import("./commands-system-prompt.js");
+  return module.resolveCommandsSystemPromptBundle;
+}
+
 describe("resolveCommandsSystemPromptBundle", () => {
   beforeEach(() => {
+    vi.resetModules();
     createOpenClawCodingToolsMock.mockClear();
     createOpenClawCodingToolsMock.mockReturnValue([]);
+    buildAgentSystemPromptMock.mockClear();
+    buildAgentSystemPromptMock.mockReturnValue("system prompt");
   });
 
   it("opts command tool builds into gateway subagent binding", async () => {
+    const resolveCommandsSystemPromptBundle = await loadResolveCommandsSystemPromptBundle();
     await resolveCommandsSystemPromptBundle(makeParams());
 
     expect(createOpenClawCodingToolsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         allowGatewaySubagentBinding: true,
+        agentDir: "/tmp/agent",
         sessionKey: "agent:main:default",
         workspaceDir: "/tmp/workspace",
         messageProvider: "telegram",
+      }),
+    );
+  });
+
+  it("passes consciousness runtime scope through to the system prompt builder", async () => {
+    const resolveCommandsSystemPromptBundle = await loadResolveCommandsSystemPromptBundle();
+    await resolveCommandsSystemPromptBundle({
+      ...makeParams(),
+      opts: {
+        consciousnessRuntimeScope: "account:user-a",
+      } as HandleCommandsParams["opts"],
+    });
+
+    expect(buildAgentSystemPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        consciousnessRuntimeScope: "account:user-a",
       }),
     );
   });

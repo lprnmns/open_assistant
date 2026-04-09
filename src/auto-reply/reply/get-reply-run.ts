@@ -303,6 +303,7 @@ export async function runPreparedReply(
       ctx.Body ??
       "",
     sessionKey,
+    runtimeScope: opts?.consciousnessRuntimeScope,
     storePath,
   });
   const extraSystemPromptParts = [

@@ -6,10 +6,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeAgentAssistantMessage } from "../agents/test-helpers/agent-message-fixtures.js";
 import type { ProductionBrain } from "./brain/brain-factory.js";
 import { buildReactiveRecallSection, formatReactiveRecallSection } from "./reactive-recall.js";
+import { __resetConsciousnessRuntimesForTest, setConsciousnessRuntime } from "./runtime.js";
 
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  await __resetConsciousnessRuntimesForTest();
   await Promise.allSettled(
     tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
   );
@@ -127,6 +129,52 @@ describe("reactive-recall", () => {
     expect(section).toContain("Recent conversation:");
     expect(section).toContain("[user]: launchi gecen sali konustuk");
     expect(section).toContain("[assistant]: evet, deadline cuma demistim");
+  });
+
+  it("uses the scoped runtime when runtimeScope is provided", async () => {
+    const defaultRuntime = { brain: makeFakeBrain() };
+    const scopedRuntime = { brain: makeFakeBrain() };
+
+    vi.mocked(defaultRuntime.brain.recall.recall).mockResolvedValue({
+      recent: [
+        {
+          id: "default",
+          content: "default recent",
+          type: "episodic",
+          createdAt: 1,
+          sessionKey: "main",
+        },
+      ],
+      recalled: [],
+    });
+    vi.mocked(scopedRuntime.brain.recall.recall).mockResolvedValue({
+      recent: [
+        {
+          id: "scoped",
+          content: "scoped recent",
+          type: "episodic",
+          createdAt: 1,
+          sessionKey: "main",
+        },
+      ],
+      recalled: [],
+    });
+
+    setConsciousnessRuntime(defaultRuntime);
+    setConsciousnessRuntime(scopedRuntime, "account:user-a");
+
+    const section = await buildReactiveRecallSection({
+      text: "what did we discuss",
+      sessionKey: "agent:main:webchat:direct:123",
+      runtimeScope: "account:user-a",
+    });
+
+    expect(defaultRuntime.brain.recall.recall).not.toHaveBeenCalled();
+    expect(scopedRuntime.brain.recall.recall).toHaveBeenCalledWith({
+      text: "what did we discuss",
+      sessionKey: "agent:main:webchat:direct:123",
+    });
+    expect(section).toContain("scoped recent");
   });
 
   it("includes transcript ground truth for temporal questions before semantic recall", async () => {

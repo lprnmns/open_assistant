@@ -19,6 +19,10 @@ const hookMocks = vi.hoisted(() => ({
   ),
 }));
 
+const authMocks = vi.hoisted(() => ({
+  authorizeHttpGatewayConnect: vi.fn(async () => ({ ok: true })),
+}));
+
 let cfg: Record<string, unknown> = {};
 let lastCreateOpenClawToolsContext: Record<string, unknown> | undefined;
 
@@ -50,7 +54,7 @@ vi.mock("../config/sessions.js", () => ({
 }));
 
 vi.mock("./auth.js", () => ({
-  authorizeHttpGatewayConnect: async () => ({ ok: true }),
+  authorizeHttpGatewayConnect: authMocks.authorizeHttpGatewayConnect,
 }));
 
 vi.mock("../logger.js", () => ({
@@ -63,6 +67,12 @@ vi.mock("../plugins/config-state.js", () => ({
 
 vi.mock("../plugins/tools.js", () => ({
   getPluginToolMeta: () => undefined,
+}));
+
+vi.mock("../agents/agent-scope.js", () => ({
+  resolveSessionAgentId: () => "main",
+  resolveAgentDir: () => "/tmp/http-agent",
+  resolveAgentWorkspaceDir: () => "/tmp/http-workspace",
 }));
 
 // Perf: the real tool factory instantiates many tools per request; for these HTTP
@@ -250,6 +260,8 @@ beforeEach(() => {
   pluginHttpHandlers = [];
   cfg = {};
   lastCreateOpenClawToolsContext = undefined;
+  authMocks.authorizeHttpGatewayConnect.mockClear();
+  authMocks.authorizeHttpGatewayConnect.mockResolvedValue({ ok: true });
   hookMocks.resolveToolLoopDetectionConfig.mockClear();
   hookMocks.resolveToolLoopDetectionConfig.mockImplementation(() => ({ warnAt: 3 }));
   hookMocks.runBeforeToolCallHook.mockClear();
@@ -567,6 +579,22 @@ describe("POST /tools/invoke", () => {
       agentTo: "channel:24514",
       agentThreadId: "thread-24514",
     });
+    expect(lastCreateOpenClawToolsContext?.agentDir).toBe("/tmp/http-agent");
+    expect(lastCreateOpenClawToolsContext?.workspaceDir).toBe("/tmp/http-workspace");
+  });
+
+  it("passes account-scoped memory runtime scope for account-token auth", async () => {
+    setMainAllowedTools({ allow: ["agents_list"] });
+    authMocks.authorizeHttpGatewayConnect.mockResolvedValueOnce({
+      ok: true,
+      method: "account-token",
+      user: "user-123",
+    });
+
+    const res = await invokeAgentsListAuthed({ sessionKey: "main" });
+
+    expect(res.status).toBe(200);
+    expect(lastCreateOpenClawToolsContext?.memoryRuntimeScope).toBe("account:user-123");
   });
 
   it("denies sessions_send via HTTP gateway", async () => {

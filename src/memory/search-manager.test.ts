@@ -173,6 +173,35 @@ describe("getMemorySearchManager caching", () => {
     expect(createQmdManagerMock).toHaveBeenCalledTimes(1);
   });
 
+  it("separates cached qmd managers by runtime scope", async () => {
+    const cfg = createQmdCfg("main");
+
+    const first = await getMemorySearchManager({
+      cfg,
+      agentId: "main",
+      runtimeScope: "account:user-a",
+    });
+    const second = await getMemorySearchManager({
+      cfg,
+      agentId: "main",
+      runtimeScope: "account:user-b",
+    });
+
+    expect(first.manager).not.toBe(second.manager);
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(createQmdManagerMock).toHaveBeenCalledTimes(2);
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(createQmdManagerMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ runtimeScope: "account:user-a" }),
+    );
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    expect(createQmdManagerMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ runtimeScope: "account:user-b" }),
+    );
+  });
+
   it("evicts failed qmd wrapper so next call retries qmd", async () => {
     const retryAgentId = "retry-agent";
     const {

@@ -251,6 +251,7 @@ export async function dispatchReplyFromConfig(params: {
     direction: "user",
     sessionKey: acpDispatchSessionKey,
     text: ctx.BodyForAgent ?? ctx.Body ?? "",
+    runtimeScope: params.replyOptions?.consciousnessRuntimeScope,
   });
   // Restore route thread context only from the active turn or the thread-scoped session key.
   // Do not read thread ids from the normalised session store here: `origin.threadId` can be

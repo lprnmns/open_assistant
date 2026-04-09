@@ -115,7 +115,11 @@ describe("QmdMemoryManager", () => {
     return manager;
   }
 
-  async function createManager(params?: { mode?: "full" | "status"; cfg?: OpenClawConfig }) {
+  async function createManager(params?: {
+    mode?: "full" | "status";
+    cfg?: OpenClawConfig;
+    runtimeScope?: string;
+  }) {
     const cfgToUse = params?.cfg ?? cfg;
     const resolved = resolveMemoryBackendConfig({ cfg: cfgToUse, agentId });
     const manager = trackManager(
@@ -124,6 +128,7 @@ describe("QmdMemoryManager", () => {
         agentId,
         resolved,
         mode: params?.mode ?? "status",
+        runtimeScope: params?.runtimeScope,
       }),
     );
     expect(manager).toBeTruthy();
@@ -220,6 +225,27 @@ describe("QmdMemoryManager", () => {
     expect(spawnMock.mock.calls.length).toBe(baselineCalls + 2);
 
     await manager.close();
+  });
+
+  it("stores account-scoped qmd state under the user memory root", async () => {
+    const { manager } = await createManager({ runtimeScope: "account:user-a" });
+
+    expect((manager as unknown as { qmdDir: string }).qmdDir).toBe(
+      path.join(stateDir, "users", "user-a", "memory", "qmd", agentId),
+    );
+    expect((manager as unknown as { indexPath: string }).indexPath).toBe(
+      path.join(
+        stateDir,
+        "users",
+        "user-a",
+        "memory",
+        "qmd",
+        agentId,
+        "xdg-cache",
+        "qmd",
+        "index.sqlite",
+      ),
+    );
   });
 
   it("runs boot update in background by default", async () => {

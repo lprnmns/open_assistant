@@ -191,6 +191,21 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("memory-context: loaded");
   });
 
+  it("uses scoped consciousness recall context when a runtime scope is provided", () => {
+    registerMemoryPromptSection(({ hasPrimaryRecallContext }) => [
+      hasPrimaryRecallContext ? "memory-context: loaded" : "memory-context: legacy",
+    ]);
+    setConsciousnessRuntime({ brain: {} as never }, "account:user-a");
+
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["memory_search"],
+      consciousnessRuntimeScope: "account:user-a",
+    });
+
+    expect(prompt).toContain("memory-context: loaded");
+  });
+
   it("includes safety guardrails in full prompts", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",
@@ -300,6 +315,17 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("sessions_list");
     expect(prompt).toContain("sessions_history");
     expect(prompt).toContain("sessions_send");
+  });
+
+  it("documents the pdf tool for schedule extraction workflows", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["pdf", "cron"],
+    });
+
+    expect(prompt).toContain("- pdf: Analyze PDF documents");
+    expect(prompt).toContain("upload fileRefs");
+    expect(prompt).toContain("before creating calendar events or reminders");
   });
 
   it("documents ACP sessions_spawn agent targeting requirements", () => {

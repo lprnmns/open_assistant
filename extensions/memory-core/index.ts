@@ -63,6 +63,7 @@ export default definePluginEntry({
         api.runtime.tools.createMemorySearchTool({
           config: ctx.config,
           agentSessionKey: ctx.sessionKey,
+          memoryRuntimeScope: ctx.memoryRuntimeScope,
         }),
       { names: ["memory_search"] },
     );
@@ -72,6 +73,7 @@ export default definePluginEntry({
         api.runtime.tools.createMemoryGetTool({
           config: ctx.config,
           agentSessionKey: ctx.sessionKey,
+          memoryRuntimeScope: ctx.memoryRuntimeScope,
         }),
       { names: ["memory_get"] },
     );

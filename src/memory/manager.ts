@@ -22,6 +22,7 @@ import { MemoryManagerEmbeddingOps } from "./manager-embedding-ops.js";
 import { searchKeyword, searchVector } from "./manager-search.js";
 import { extractKeywords } from "./query-expansion.js";
 import { readMemoryFile } from "./read-file.js";
+import { resolveScopedMemoryStorePath } from "./runtime-scope.js";
 import type {
   MemoryEmbeddingProbeResult,
   MemoryProviderStatus,
@@ -166,15 +167,27 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
     cfg: OpenClawConfig;
     agentId: string;
     purpose?: "default" | "status";
+    runtimeScope?: string;
   }): Promise<MemoryIndexManager | null> {
     const { cfg, agentId } = params;
     const settings = resolveMemorySearchConfig(cfg, agentId);
     if (!settings) {
       return null;
     }
+    const runtimeScope = params.runtimeScope?.trim() || undefined;
+    const scopedStorePath = resolveScopedMemoryStorePath({ agentId, runtimeScope });
+    const effectiveSettings = scopedStorePath
+      ? {
+          ...settings,
+          store: {
+            ...settings.store,
+            path: scopedStorePath,
+          },
+        }
+      : settings;
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
     const purpose = params.purpose === "status" ? "status" : "default";
-    const key = `${agentId}:${workspaceDir}:${JSON.stringify(settings)}:${purpose}`;
+    const key = `${agentId}:${runtimeScope ?? "global"}:${workspaceDir}:${JSON.stringify(effectiveSettings)}:${purpose}`;
     const statusOnly = params.purpose === "status";
     const existing = INDEX_CACHE.get(key);
     if (existing) {
@@ -190,7 +203,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
         cfg,
         agentId,
         workspaceDir,
-        settings,
+        settings: effectiveSettings,
         purpose: params.purpose,
       });
       INDEX_CACHE.set(key, manager);
@@ -200,7 +213,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
       const providerResult = await MemoryIndexManager.loadProviderResult({
         cfg,
         agentId,
-        settings,
+        settings: effectiveSettings,
       });
       const refreshed = INDEX_CACHE.get(key);
       if (refreshed) {
@@ -211,7 +224,7 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
         cfg,
         agentId,
         workspaceDir,
-        settings,
+        settings: effectiveSettings,
         providerResult,
         purpose: params.purpose,
       });

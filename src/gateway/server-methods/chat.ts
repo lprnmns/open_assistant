@@ -69,6 +69,7 @@ import {
 } from "../session-utils.js";
 import { DEFAULT_UPLOAD_MAX_BYTES } from "../upload-constants.js";
 import { formatForLog } from "../ws-log.js";
+import { ensureGatewayConsciousnessRuntime } from "../account-consciousness-scope.js";
 import { resolveGatewaySessionScopedConfig } from "../account-session-scope.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import { setGatewayDedupeEntry } from "./agent-wait-dedupe.js";
@@ -1692,6 +1693,10 @@ export const chatHandlers: GatewayRequestHandlers = {
       const messageForAgent = systemProvenanceReceipt
         ? [systemProvenanceReceipt, parsedMessage].filter(Boolean).join("\n\n")
         : parsedMessage;
+      const consciousnessRuntimeScope = await ensureGatewayConsciousnessRuntime({
+        client,
+        cfg,
+      });
       const clientInfo = client?.connect?.client;
       const {
         originatingChannel,
@@ -1826,6 +1831,7 @@ export const chatHandlers: GatewayRequestHandlers = {
         dispatcher,
         replyOptions: {
           runId: clientRunId,
+          consciousnessRuntimeScope,
           abortSignal: abortController.signal,
           images: parsedImages.length > 0 ? parsedImages : undefined,
           onAgentRunStart: (runId) => {

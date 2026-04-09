@@ -1,4 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  resolveAgentDir,
+  resolveAgentWorkspaceDir,
+  resolveSessionAgentId,
+} from "../agents/agent-scope.js";
 import { createOpenClawTools } from "../agents/openclaw-tools.js";
 import { runBeforeToolCallHook } from "../agents/pi-tools.before-tool-call.js";
 import { resolveToolLoopDetectionConfig } from "../agents/pi-tools.js";
@@ -256,6 +261,13 @@ export async function handleToolsInvokeHttpRequest(
   const subagentPolicy = isSubagentSessionKey(sessionKey)
     ? resolveSubagentToolPolicy(cfg)
     : undefined;
+  const resolvedAgentId = agentId ?? resolveSessionAgentId({ sessionKey, config: cfg });
+  const agentDir = resolveAgentDir(cfg, resolvedAgentId);
+  const workspaceDir = resolveAgentWorkspaceDir(cfg, resolvedAgentId);
+  const memoryRuntimeScope =
+    authResult.method === "account-token" && typeof authResult.user === "string"
+      ? `account:${authResult.user}`
+      : undefined;
 
   // Build tool list (core + plugin tools).
   const allTools = createOpenClawTools({
@@ -264,6 +276,9 @@ export async function handleToolsInvokeHttpRequest(
     agentAccountId: accountId,
     agentTo,
     agentThreadId,
+    agentDir,
+    workspaceDir,
+    memoryRuntimeScope,
     allowGatewaySubagentBinding: true,
     // HTTP callers consume tool output directly; preserve raw media invoke payloads.
     allowMediaInvokeCommands: true,

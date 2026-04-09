@@ -39,8 +39,9 @@ export async function ingestConversationTurn(params: {
   direction: ConversationTurnDirection;
   sessionKey?: string;
   text?: string | null;
+  runtimeScope?: string;
 }): Promise<boolean> {
-  const runtime = getConsciousnessRuntime();
+  const runtime = getConsciousnessRuntime(params.runtimeScope);
   if (!runtime || !params.sessionKey) {
     return false;
   }
@@ -68,6 +69,7 @@ export async function ingestAssistantPayloads(params: {
   payloads: readonly ReplyPayload[];
   sessionKey?: string;
   direction?: Extract<ConversationTurnDirection, "assistant" | "assistant/proactive">;
+  runtimeScope?: string;
 }): Promise<number> {
   if (!params.sessionKey) {
     return 0;
@@ -80,6 +82,7 @@ export async function ingestAssistantPayloads(params: {
         direction: params.direction ?? "assistant",
         sessionKey: params.sessionKey,
         text,
+        runtimeScope: params.runtimeScope,
       })
     ) {
       ingested += 1;

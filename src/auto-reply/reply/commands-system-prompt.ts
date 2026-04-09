@@ -55,6 +55,7 @@ export async function resolveCommandsSystemPromptBundle(
       return createOpenClawCodingTools({
         config: params.cfg,
         agentId: params.agentId,
+        agentDir: params.agentDir,
         workspaceDir,
         sessionKey: params.sessionKey,
         allowGatewaySubagentBinding: true,
@@ -131,6 +132,7 @@ export async function resolveCommandsSystemPromptBundle(
     runtimeInfo,
     sandboxInfo,
     memoryCitationsMode: params.cfg?.memory?.citations,
+    consciousnessRuntimeScope: params.opts?.consciousnessRuntimeScope,
   });
 
   return { systemPrompt, tools, skillsPrompt, bootstrapFiles, injectedFiles, sandboxRuntime };

@@ -6,7 +6,7 @@ import {
   ingestAssistantPayloads,
   ingestConversationTurn,
 } from "./turn-ingestion.js";
-import { setConsciousnessRuntime } from "./runtime.js";
+import { __resetConsciousnessRuntimesForTest, setConsciousnessRuntime } from "./runtime.js";
 
 function makeFakeBrain(): ProductionBrain {
   return {
@@ -38,8 +38,8 @@ function makeFakeBrain(): ProductionBrain {
 }
 
 describe("turn-ingestion", () => {
-  afterEach(() => {
-    setConsciousnessRuntime(null);
+  afterEach(async () => {
+    await __resetConsciousnessRuntimesForTest();
   });
 
   it("formats user and assistant turn prefixes", () => {
@@ -117,6 +117,29 @@ describe("turn-ingestion", () => {
     expect(brain.ingestion.ingest).toHaveBeenCalledWith({
       content: "[assistant]: real answer",
       sessionKey: "main",
+    });
+  });
+
+  it("uses the scoped runtime when runtimeScope is provided", async () => {
+    const defaultRuntime = { brain: makeFakeBrain() };
+    const scopedRuntime = { brain: makeFakeBrain() };
+
+    setConsciousnessRuntime(defaultRuntime);
+    setConsciousnessRuntime(scopedRuntime, "account:user-a");
+
+    await expect(
+      ingestConversationTurn({
+        direction: "user",
+        sessionKey: "agent:main:webchat:direct:123",
+        text: "scoped hello",
+        runtimeScope: "account:user-a",
+      }),
+    ).resolves.toBe(true);
+
+    expect(defaultRuntime.brain.ingestion.ingest).not.toHaveBeenCalled();
+    expect(scopedRuntime.brain.ingestion.ingest).toHaveBeenCalledWith({
+      content: "[user]: scoped hello",
+      sessionKey: "agent:main:webchat:direct:123",
     });
   });
 });

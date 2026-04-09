@@ -601,6 +601,7 @@ export async function runReplyAgent(params: {
       payloads: guardedReplyPayloads,
       sessionKey,
       direction: "assistant",
+      runtimeScope: opts?.consciousnessRuntimeScope,
     });
 
     await signalTypingIfNeeded(guardedReplyPayloads, typingSignals);

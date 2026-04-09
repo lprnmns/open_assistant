@@ -84,6 +84,8 @@ export function createOpenClawTools(
     senderIsOwner?: boolean;
     /** Ephemeral session UUID — regenerated on /new and /reset. */
     sessionId?: string;
+    /** Optional memory backend runtime scope for per-user isolation. */
+    memoryRuntimeScope?: string;
     /**
      * Workspace directory to pass to spawned subagents for inheritance.
      * Defaults to workspaceDir. Use this to pass the actual agent workspace when the
@@ -255,6 +257,7 @@ export function createOpenClawTools(
       }),
       sessionKey: options?.agentSessionKey,
       sessionId: options?.sessionId,
+      memoryRuntimeScope: options?.memoryRuntimeScope,
       messageChannel: options?.agentChannel,
       agentAccountId: options?.agentAccountId,
       requesterSenderId: options?.requesterSenderId ?? undefined,

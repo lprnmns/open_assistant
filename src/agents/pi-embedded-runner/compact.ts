@@ -163,6 +163,7 @@ export type CompactEmbeddedPiSessionParams = {
   lane?: string;
   enqueue?: typeof enqueueCommand;
   extraSystemPrompt?: string;
+  consciousnessRuntimeScope?: string;
   ownerNumbers?: string[];
   abortSignal?: AbortSignal;
   /** Allow runtime plugins for this compaction to late-bind the gateway subagent. */
@@ -314,6 +315,7 @@ async function runPostCompactionSessionMemorySync(params: {
   config?: OpenClawConfig;
   sessionKey?: string;
   sessionFile: string;
+  consciousnessRuntimeScope?: string;
 }): Promise<void> {
   if (!params.config) {
     return;
@@ -337,6 +339,7 @@ async function runPostCompactionSessionMemorySync(params: {
     const { manager } = await getMemorySearchManager({
       cfg: params.config,
       agentId,
+      runtimeScope: params.consciousnessRuntimeScope,
     });
     if (!manager?.sync) {
       return;
@@ -355,6 +358,7 @@ function syncPostCompactionSessionMemory(params: {
   config?: OpenClawConfig;
   sessionKey?: string;
   sessionFile: string;
+  consciousnessRuntimeScope?: string;
   mode: "off" | "async" | "await";
 }): Promise<void> {
   if (params.mode === "off" || !params.config) {
@@ -365,6 +369,7 @@ function syncPostCompactionSessionMemory(params: {
     config: params.config,
     sessionKey: params.sessionKey,
     sessionFile: params.sessionFile,
+    consciousnessRuntimeScope: params.consciousnessRuntimeScope,
   });
   if (params.mode === "await") {
     return syncTask;
@@ -377,6 +382,7 @@ async function runPostCompactionSideEffects(params: {
   config?: OpenClawConfig;
   sessionKey?: string;
   sessionFile: string;
+  consciousnessRuntimeScope?: string;
 }): Promise<void> {
   const sessionFile = params.sessionFile.trim();
   if (!sessionFile) {
@@ -387,6 +393,7 @@ async function runPostCompactionSideEffects(params: {
     config: params.config,
     sessionKey: params.sessionKey,
     sessionFile,
+    consciousnessRuntimeScope: params.consciousnessRuntimeScope,
     mode: resolvePostCompactionIndexSyncMode(params.config),
   });
 }
@@ -818,6 +825,7 @@ export async function compactEmbeddedPiSessionDirect(
       sessionKey: sandboxSessionKey,
       sessionId: params.sessionId,
       runId: params.runId,
+      memoryRuntimeScope: params.consciousnessRuntimeScope,
       groupId: params.groupId,
       groupChannel: params.groupChannel,
       groupSpace: params.groupSpace,
@@ -995,6 +1003,7 @@ export async function compactEmbeddedPiSessionDirect(
       defaultThinkLevel: params.thinkLevel,
       reasoningLevel: params.reasoningLevel ?? "off",
       extraSystemPrompt: params.extraSystemPrompt,
+      consciousnessRuntimeScope: params.consciousnessRuntimeScope,
       cognitiveMode: params.cognitiveMode,
       ownerNumbers: params.ownerNumbers,
       ownerDisplay: ownerDisplay.ownerDisplay,
@@ -1217,6 +1226,7 @@ export async function compactEmbeddedPiSessionDirect(
           config: params.config,
           sessionKey: params.sessionKey,
           sessionFile: params.sessionFile,
+          consciousnessRuntimeScope: params.consciousnessRuntimeScope,
         });
         // Estimate tokens after compaction by summing token estimates for remaining messages
         const tokensAfter = estimateTokensAfterCompaction({
@@ -1414,6 +1424,7 @@ export async function compactEmbeddedPiSession(
             config: params.config,
             sessionKey: params.sessionKey,
             sessionFile: params.sessionFile,
+            consciousnessRuntimeScope: params.consciousnessRuntimeScope,
           });
         }
         if (

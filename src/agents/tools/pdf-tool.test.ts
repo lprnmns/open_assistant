@@ -370,9 +370,44 @@ describe("createPdfTool", () => {
     });
   });
 
+  it("documents upload fileRefs in schema and validation messages", async () => {
+    await withAnthropicPdfTool(async (tool) => {
+      const properties = (
+        tool.parameters as {
+          properties?: {
+            pdf?: { description?: string };
+            pdfs?: { description?: string };
+          };
+        }
+      ).properties;
+
+      expect(properties?.pdf?.description).toContain("upload fileRef");
+      expect(properties?.pdfs?.description).toContain("upload fileRefs");
+      await expect(tool.execute("t1", { prompt: "test" })).rejects.toThrow(
+        "path, upload fileRef, or URL",
+      );
+
+      const result = await tool.execute("t1", {
+        prompt: "test",
+        pdf: "ftp://example.com/doc.pdf",
+      });
+      expect(result).toMatchObject({
+        content: [
+          {
+            type: "text",
+            text: expect.stringContaining("upload fileRef"),
+          },
+        ],
+        details: { error: "unsupported_pdf_reference" },
+      });
+    });
+  });
+
   it("rejects when no pdf input provided", async () => {
     await withAnthropicPdfTool(async (tool) => {
-      await expect(tool.execute("t1", { prompt: "test" })).rejects.toThrow("pdf required");
+      await expect(tool.execute("t1", { prompt: "test" })).rejects.toThrow(
+        "pdf required: provide a path, upload fileRef, or URL to a PDF document",
+      );
     });
   });
 
@@ -467,6 +502,55 @@ describe("createPdfTool", () => {
       expect(result).toMatchObject({
         content: [{ type: "text", text: "native summary" }],
         details: { native: true, model: ANTHROPIC_PDF_MODEL },
+      });
+    });
+  });
+
+  it("reads upload fileRefs from gateway storage", async () => {
+    await withTempAgentDir(async (agentDir) => {
+      const { loadSpy } = await stubPdfToolInfra(agentDir, {
+        provider: "anthropic",
+        input: ["text", "document"],
+      });
+
+      const uploadFileRef = await import("../../gateway/upload-file-ref.js");
+      const readUploadSpy = vi.spyOn(uploadFileRef, "readUploadFileRef").mockResolvedValue({
+        buffer: Buffer.from("%PDF-1.4 uploaded"),
+        fileName: "exam.pdf",
+        realPath: "/tmp/openclaw/uploads/file-1.pdf",
+      });
+
+      const nativeProviders = await import("./pdf-native-providers.js");
+      const analyzeSpy = vi
+        .spyOn(nativeProviders, "anthropicAnalyzePdf")
+        .mockResolvedValue("uploaded summary");
+
+      const cfg = withPdfModel(ANTHROPIC_PDF_MODEL);
+      const tool = requirePdfTool(createPdfTool({ config: cfg, agentDir }));
+
+      const result = await tool.execute("t1", {
+        prompt: "summarize",
+        pdf: "upload:accounts/user-123/file-1",
+      });
+
+      expect(readUploadSpy).toHaveBeenCalledWith({
+        fileRef: "upload:accounts/user-123/file-1",
+        maxBytes: 10 * 1024 * 1024,
+      });
+      expect(loadSpy).not.toHaveBeenCalled();
+      expect(analyzeSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pdfs: [{ base64: Buffer.from("%PDF-1.4 uploaded").toString("base64"), filename: "exam.pdf" }],
+        }),
+      );
+      expect(result).toMatchObject({
+        content: [{ type: "text", text: "uploaded summary" }],
+        details: {
+          native: true,
+          model: ANTHROPIC_PDF_MODEL,
+          pdf: "/tmp/openclaw/uploads/file-1.pdf",
+          rewrittenFrom: "upload:accounts/user-123/file-1",
+        },
       });
     });
   });

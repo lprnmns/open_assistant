@@ -89,9 +89,23 @@ describe("plugin registration", () => {
       | ((ctx: unknown) => unknown)
       | undefined;
     const getFactory = registerTool.mock.calls[1]?.[0] as ((ctx: unknown) => unknown) | undefined;
-    const ctx = { config: { plugins: {} }, sessionKey: "agent:main:slack:dm:u123" };
+    const ctx = {
+      config: { plugins: {} },
+      sessionKey: "agent:main:slack:dm:u123",
+      memoryRuntimeScope: "account:user-a",
+    };
 
     expect(searchFactory?.(ctx)).toBe(searchTool);
     expect(getFactory?.(ctx)).toBeNull();
+    expect(api.runtime.tools.createMemorySearchTool).toHaveBeenCalledWith({
+      config: ctx.config,
+      agentSessionKey: ctx.sessionKey,
+      memoryRuntimeScope: ctx.memoryRuntimeScope,
+    });
+    expect(api.runtime.tools.createMemoryGetTool).toHaveBeenCalledWith({
+      config: ctx.config,
+      agentSessionKey: ctx.sessionKey,
+      memoryRuntimeScope: ctx.memoryRuntimeScope,
+    });
   });
 });

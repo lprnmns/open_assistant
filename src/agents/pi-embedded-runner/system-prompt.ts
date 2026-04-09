@@ -14,6 +14,7 @@ export function buildEmbeddedSystemPrompt(params: {
   defaultThinkLevel?: ThinkLevel;
   reasoningLevel?: ReasoningLevel;
   extraSystemPrompt?: string;
+  consciousnessRuntimeScope?: string;
   cognitiveMode?: CognitiveMode;
   ownerNumbers?: string[];
   ownerDisplay?: "raw" | "hash";
@@ -60,6 +61,7 @@ export function buildEmbeddedSystemPrompt(params: {
     defaultThinkLevel: params.defaultThinkLevel,
     reasoningLevel: params.reasoningLevel,
     extraSystemPrompt: params.extraSystemPrompt,
+    consciousnessRuntimeScope: params.consciousnessRuntimeScope,
     cognitiveMode: params.cognitiveMode,
     ownerNumbers: params.ownerNumbers,
     ownerDisplay: params.ownerDisplay,

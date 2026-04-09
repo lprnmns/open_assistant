@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { afterEach, describe, expect, test } from "vitest";
-import type { ResolvedGatewayAuth } from "./auth.js";
+import { authorizeHttpGatewayConnect, type GatewayAuthResult, type ResolvedGatewayAuth } from "./auth.js";
 import { withTempConfig } from "./test-temp-config.js";
 import { readUploadFileRef } from "./upload-file-ref.js";
 import { handleUploadHttpRequest } from "./upload-http.js";
@@ -13,6 +13,7 @@ const AUTH_TOKEN: ResolvedGatewayAuth = {
 };
 
 let currentServer: ReturnType<typeof createServer> | null = null;
+type UploadHandlerOpts = Parameters<typeof handleUploadHttpRequest>[2];
 
 afterEach(async () => {
   if (!currentServer) {
@@ -22,9 +23,9 @@ afterEach(async () => {
   currentServer = null;
 });
 
-async function listenUploadServer(): Promise<number> {
+async function listenUploadServer(opts: Omit<UploadHandlerOpts, "auth"> = {}): Promise<number> {
   currentServer = createServer((req, res) => {
-    void handleUploadHttpRequest(req, res, { auth: AUTH_TOKEN });
+    void handleUploadHttpRequest(req, res, { auth: AUTH_TOKEN, ...opts });
   });
   await new Promise<void>((resolve, reject) => {
     currentServer?.once("error", reject);
@@ -85,6 +86,47 @@ describe("upload http", () => {
         expect(payload.fileName).toBe("exam.pdf");
         expect(payload.mimeType).toBe("application/pdf");
         expect(payload.size).toBe(pdfBuffer.byteLength);
+
+        const uploaded = await readUploadFileRef({
+          fileRef: payload.fileRef,
+          maxBytes: 1024 * 1024,
+        });
+        expect(uploaded.fileName).toBe("exam.pdf");
+        expect(uploaded.buffer.equals(pdfBuffer)).toBe(true);
+      },
+    });
+  });
+
+  test("namespaces account-token uploads by account user", async () => {
+    await withTempConfig({
+      cfg: { gateway: { trustedProxies: [] } },
+      prefix: "openclaw-upload-http-account-",
+      run: async () => {
+        const port = await listenUploadServer({
+          authorizeHttpGatewayConnectFn: (async () =>
+            ({
+              ok: true,
+              method: "account-token",
+              user: "user-123",
+            }) satisfies GatewayAuthResult) as typeof authorizeHttpGatewayConnect,
+        });
+        const pdfBuffer = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n");
+        const response = await fetch(`http://127.0.0.1:${port}/upload`, {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer account-token",
+            "Content-Type": "application/pdf",
+            "X-OpenClaw-File-Name": "exam.pdf",
+          },
+          body: pdfBuffer,
+        });
+        expect(response.status).toBe(200);
+        const payload = (await response.json()) as {
+          ok: boolean;
+          fileRef: string;
+        };
+        expect(payload.ok).toBe(true);
+        expect(payload.fileRef.startsWith("upload:accounts/user-123/")).toBe(true);
 
         const uploaded = await readUploadFileRef({
           fileRef: payload.fileRef,

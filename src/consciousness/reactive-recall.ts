@@ -111,6 +111,7 @@ export async function buildReactiveRecallSection(params: {
   text?: string | null;
   sessionKey?: string;
   runtime?: ConsciousnessRuntime | null;
+  runtimeScope?: string;
   storePath?: string;
 }): Promise<string | undefined> {
   const queryText = params.text?.trim();
@@ -123,7 +124,7 @@ export async function buildReactiveRecallSection(params: {
     sessionKey: params.sessionKey,
     storePath: params.storePath,
   });
-  const runtime = params.runtime ?? getConsciousnessRuntime();
+  const runtime = params.runtime ?? getConsciousnessRuntime(params.runtimeScope);
   let recallResult: MemoryRecallResult = { recent: [], recalled: [] };
 
   if (runtime) {

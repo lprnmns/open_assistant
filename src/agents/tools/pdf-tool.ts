@@ -1,6 +1,7 @@
 import { type Context, complete } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/config.js";
+import { readUploadFileRef, resolveUploadFileRefId } from "../../gateway/upload-file-ref.js";
 import { extractPdfContent, type PdfExtractedContent } from "../../media/pdf-extract.js";
 import { loadWebMediaRaw } from "../../media/web-media.js";
 import { resolveUserPath } from "../../utils.js";
@@ -332,7 +333,7 @@ export function createPdfTool(options?: {
   });
 
   const description =
-    "Analyze one or more PDF documents with a model. Supports native PDF analysis for Anthropic and Google models, with text/image extraction fallback for other providers. Use pdf for a single path/URL, or pdfs for multiple (up to 10). Provide a prompt describing what to analyze.";
+    "Analyze one or more PDF documents with a model. Supports native PDF analysis for Anthropic and Google models, with text/image extraction fallback for other providers. Use pdf for a single path/URL/upload fileRef, or pdfs for multiple (up to 10). Provide a prompt describing what to analyze.";
 
   return {
     label: "PDF",
@@ -340,10 +341,12 @@ export function createPdfTool(options?: {
     description,
     parameters: Type.Object({
       prompt: Type.Optional(Type.String()),
-      pdf: Type.Optional(Type.String({ description: "Single PDF path or URL." })),
+      pdf: Type.Optional(
+        Type.String({ description: "Single PDF path, upload fileRef, or URL." }),
+      ),
       pdfs: Type.Optional(
         Type.Array(Type.String(), {
-          description: "Multiple PDF paths or URLs (up to 10).",
+          description: "Multiple PDF paths, upload fileRefs, or URLs (up to 10).",
         }),
       ),
       pages: Type.Optional(
@@ -377,7 +380,7 @@ export function createPdfTool(options?: {
         pdfInputs.push(trimmed);
       }
       if (pdfInputs.length === 0) {
-        throw new Error("pdf required: provide a path or URL to a PDF document");
+        throw new Error("pdf required: provide a path, upload fileRef, or URL to a PDF document");
       }
 
       // Enforce max PDFs cap
@@ -428,18 +431,27 @@ export function createPdfTool(options?: {
 
       for (const pdfRaw of pdfInputs) {
         const trimmed = pdfRaw.trim();
+        const uploadFileRefId = resolveUploadFileRefId(trimmed);
+        const isUploadFileRef = uploadFileRefId !== undefined;
         const isHttpUrl = /^https?:\/\//i.test(trimmed);
         const isFileUrl = /^file:/i.test(trimmed);
         const isDataUrl = /^data:/i.test(trimmed);
         const looksLikeWindowsDrive = /^[a-zA-Z]:[\\/]/.test(trimmed);
         const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(trimmed);
 
-        if (hasScheme && !looksLikeWindowsDrive && !isFileUrl && !isHttpUrl && !isDataUrl) {
+        if (
+          hasScheme &&
+          !looksLikeWindowsDrive &&
+          !isFileUrl &&
+          !isHttpUrl &&
+          !isDataUrl &&
+          !isUploadFileRef
+        ) {
           return {
             content: [
               {
                 type: "text",
-                text: `Unsupported PDF reference: ${pdfRaw}. Use a file path, file:// URL, or http(s) URL.`,
+                text: `Unsupported PDF reference: ${pdfRaw}. Use a file path, upload fileRef, file:// URL, or http(s) URL.`,
               },
             ],
             details: { error: "unsupported_pdf_reference", pdf: pdfRaw },
@@ -448,6 +460,21 @@ export function createPdfTool(options?: {
 
         if (sandboxConfig && isHttpUrl) {
           throw new Error("Sandboxed PDF tool does not allow remote URLs.");
+        }
+
+        if (isUploadFileRef) {
+          const uploaded = await readUploadFileRef({
+            fileRef: trimmed,
+            maxBytes,
+          });
+          loadedPdfs.push({
+            base64: uploaded.buffer.toString("base64"),
+            buffer: uploaded.buffer,
+            filename: uploaded.fileName || "document.pdf",
+            resolvedPath: uploaded.realPath,
+            rewrittenFrom: trimmed,
+          });
+          continue;
         }
 
         const resolvedPdf = (() => {

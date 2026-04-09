@@ -287,6 +287,35 @@ describe("memory index", () => {
     }
   }
 
+  it("overrides builtin memory db path for account-scoped runtime managers", async () => {
+    const scopedStateDir = path.join(fixtureRoot, "state-runtime-scope");
+    const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+    process.env.OPENCLAW_STATE_DIR = scopedStateDir;
+    try {
+      const cfg = createCfg({
+        storePath: indexMainPath,
+        vectorEnabled: false,
+      });
+      const result = await getMemorySearchManager({
+        cfg,
+        agentId: "main",
+        runtimeScope: "account:user-a",
+      });
+      const manager = requireManager(result);
+      managersForCleanup.add(manager);
+
+      expect(manager.status().dbPath).toBe(
+        path.join(scopedStateDir, "users", "user-a", "memory", "main.sqlite"),
+      );
+    } finally {
+      if (previousStateDir === undefined) {
+        delete process.env.OPENCLAW_STATE_DIR;
+      } else {
+        process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      }
+    }
+  });
+
   it.skip("indexes memory files and searches", async () => {
     const cfg = createCfg({
       storePath: indexMainPath,

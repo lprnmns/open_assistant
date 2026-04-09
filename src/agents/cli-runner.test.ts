@@ -1,9 +1,11 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setConsciousnessRuntime } from "../consciousness/runtime.js";
+import { clearMemoryPromptSection, registerMemoryPromptSection } from "../memory/prompt-section.js";
 import type { OpenClawConfig } from "../config/config.js";
-import { resolveCliNoOutputTimeoutMs } from "./cli-runner/helpers.js";
+import { buildSystemPrompt, resolveCliNoOutputTimeoutMs } from "./cli-runner/helpers.js";
 import type { EmbeddedContextFile } from "./pi-embedded-helpers.js";
 import type { WorkspaceBootstrapFile } from "./workspace.js";
 
@@ -102,6 +104,12 @@ function createManagedRun(exit: MockRunExit, pid = 1234) {
 }
 
 describe("runCliAgent with process supervisor", () => {
+  afterEach(() => {
+    clearMemoryPromptSection();
+    setConsciousnessRuntime(null);
+    setConsciousnessRuntime(null, "account:user-a");
+  });
+
   beforeEach(async () => {
     supervisorSpawnMock.mockClear();
     enqueueSystemEventMock.mockClear();
@@ -211,6 +219,22 @@ describe("runCliAgent with process supervisor", () => {
     expect(promptCarrier).toContain("[Bootstrap truncation warning]");
     expect(promptCarrier).toContain("- AGENTS.md: 200 raw -> 20 injected");
     expect(promptCarrier).toContain("hi");
+  });
+
+  it("includes scoped recall context in the generated system prompt when provided", () => {
+    registerMemoryPromptSection(({ hasPrimaryRecallContext }) => [
+      hasPrimaryRecallContext ? "memory-context: loaded" : "memory-context: legacy",
+    ]);
+    setConsciousnessRuntime({ brain: {} as never }, "account:user-a");
+
+    const prompt = buildSystemPrompt({
+      workspaceDir: "/tmp",
+      modelDisplay: "openai/gpt-5.4",
+      tools: [{ name: "memory_search" } as never],
+      consciousnessRuntimeScope: "account:user-a",
+    });
+
+    expect(prompt).toContain("memory-context: loaded");
   });
 
   it("fails with timeout when no-output watchdog trips", async () => {

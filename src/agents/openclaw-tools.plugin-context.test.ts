@@ -12,12 +12,15 @@ vi.mock("../plugins/tools.js", () => ({
   getPluginToolMeta: vi.fn(() => undefined),
 }));
 
-import { createOpenClawTools } from "./openclaw-tools.js";
-import { createOpenClawCodingTools } from "./pi-tools.js";
+let createOpenClawTools: typeof import("./openclaw-tools.js").createOpenClawTools;
+let createOpenClawCodingTools: typeof import("./pi-tools.js").createOpenClawCodingTools;
 
 describe("createOpenClawTools plugin context", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     resolvePluginToolsMock.mockClear();
+    vi.resetModules();
+    ({ createOpenClawTools } = await import("./openclaw-tools.js"));
+    ({ createOpenClawCodingTools } = await import("./pi-tools.js"));
   });
 
   it("forwards trusted requester sender identity to plugin tool context", () => {
@@ -49,6 +52,21 @@ describe("createOpenClawTools plugin context", () => {
         context: expect.objectContaining({
           sessionKey: "agent:main:telegram:direct:12345",
           sessionId: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        }),
+      }),
+    );
+  });
+
+  it("forwards memory runtime scope to plugin tool context", () => {
+    createOpenClawCodingTools({
+      config: {} as never,
+      memoryRuntimeScope: "account:user-a",
+    });
+
+    expect(resolvePluginToolsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          memoryRuntimeScope: "account:user-a",
         }),
       }),
     );

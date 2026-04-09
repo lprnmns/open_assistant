@@ -6,12 +6,20 @@ import {
 } from "../infra/http-body.js";
 import { extractOriginalFilename, saveMediaBuffer } from "../media/store.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
-import type { ResolvedGatewayAuth } from "./auth.js";
-import { authorizeGatewayBearerRequestOrReply } from "./http-auth-helpers.js";
-import { sendInvalidRequest, sendJson, sendMethodNotAllowed } from "./http-common.js";
+import {
+  authorizeHttpGatewayConnect,
+  type GatewayAuthResult,
+  type ResolvedGatewayAuth,
+} from "./auth.js";
+import {
+  sendGatewayAuthFailure,
+  sendInvalidRequest,
+  sendJson,
+  sendMethodNotAllowed,
+} from "./http-common.js";
 import { DEFAULT_UPLOAD_MAX_BYTES } from "./upload-constants.js";
-import { getHeader } from "./http-utils.js";
-import { buildUploadFileRef, UPLOADS_SUBDIR } from "./upload-file-ref.js";
+import { getBearerToken, getHeader } from "./http-utils.js";
+import { buildUploadFileRef, resolveUploadsSubdir } from "./upload-file-ref.js";
 
 export async function handleUploadHttpRequest(
   req: IncomingMessage,
@@ -22,6 +30,7 @@ export async function handleUploadHttpRequest(
     trustedProxies?: string[];
     allowRealIpFallback?: boolean;
     rateLimiter?: AuthRateLimiter;
+    authorizeHttpGatewayConnectFn?: typeof authorizeHttpGatewayConnect;
   },
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -34,17 +43,25 @@ export async function handleUploadHttpRequest(
     return true;
   }
 
-  const authorized = await authorizeGatewayBearerRequestOrReply({
-    req,
-    res,
+  const token = getBearerToken(req);
+  const authorizeHttpGatewayConnectFn =
+    opts.authorizeHttpGatewayConnectFn ?? authorizeHttpGatewayConnect;
+  const authResult: GatewayAuthResult = await authorizeHttpGatewayConnectFn({
     auth: opts.auth,
+    connectAuth: token ? { token, password: token } : null,
+    req,
     trustedProxies: opts.trustedProxies,
     allowRealIpFallback: opts.allowRealIpFallback,
     rateLimiter: opts.rateLimiter,
   });
-  if (!authorized) {
+  if (!authResult.ok) {
+    sendGatewayAuthFailure(res, authResult);
     return true;
   }
+  const accountUserId =
+    authResult.method === "account-token" && typeof authResult.user === "string"
+      ? authResult.user.trim() || undefined
+      : undefined;
 
   const maxBodyBytes = opts.maxBodyBytes ?? DEFAULT_UPLOAD_MAX_BYTES;
   let rawBody: string;
@@ -75,11 +92,17 @@ export async function handleUploadHttpRequest(
 
   const contentType = getHeader(req, "content-type")?.trim() || "application/octet-stream";
   const fileName = getHeader(req, "x-openclaw-file-name")?.trim() || undefined;
-  const saved = await saveMediaBuffer(buffer, contentType, UPLOADS_SUBDIR, maxBodyBytes, fileName);
+  const saved = await saveMediaBuffer(
+    buffer,
+    contentType,
+    resolveUploadsSubdir(accountUserId),
+    maxBodyBytes,
+    fileName,
+  );
 
   sendJson(res, 200, {
     ok: true,
-    fileRef: buildUploadFileRef(saved.id),
+    fileRef: buildUploadFileRef(saved.id, accountUserId),
     fileName: fileName ?? extractOriginalFilename(saved.path),
     mimeType: saved.contentType ?? contentType,
     size: saved.size,

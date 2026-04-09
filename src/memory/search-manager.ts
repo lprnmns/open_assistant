@@ -42,11 +42,13 @@ export async function getMemorySearchManager(params: {
   cfg: OpenClawConfig;
   agentId: string;
   purpose?: "default" | "status";
+  runtimeScope?: string;
 }): Promise<MemorySearchManagerResult> {
   const resolved = resolveMemoryBackendConfig(params);
   if (resolved.backend === "qmd" && resolved.qmd) {
     const statusOnly = params.purpose === "status";
-    const baseCacheKey = buildQmdCacheKey(params.agentId, resolved.qmd);
+    const runtimeScope = params.runtimeScope?.trim() || undefined;
+    const baseCacheKey = buildQmdCacheKey(params.agentId, resolved.qmd, runtimeScope);
     const cacheKey = `${baseCacheKey}:${statusOnly ? "status" : "full"}`;
     const cached = QMD_MANAGER_CACHE.get(cacheKey);
     if (cached) {
@@ -68,6 +70,7 @@ export async function getMemorySearchManager(params: {
         agentId: params.agentId,
         resolved,
         mode: statusOnly ? "status" : "full",
+        runtimeScope,
       });
       if (primary) {
         if (statusOnly) {
@@ -82,7 +85,12 @@ export async function getMemorySearchManager(params: {
             primary,
             fallbackFactory: async () => {
               const { MemoryIndexManager } = await loadManagerRuntime();
-              return await MemoryIndexManager.get(params);
+              return await MemoryIndexManager.get({
+                cfg: params.cfg,
+                agentId: params.agentId,
+                purpose: params.purpose,
+                runtimeScope,
+              });
             },
           },
           () => {
@@ -100,7 +108,12 @@ export async function getMemorySearchManager(params: {
 
   try {
     const { MemoryIndexManager } = await loadManagerRuntime();
-    const manager = await MemoryIndexManager.get(params);
+    const manager = await MemoryIndexManager.get({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      purpose: params.purpose,
+      runtimeScope: params.runtimeScope?.trim() || undefined,
+    });
     return { manager };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -360,8 +373,12 @@ class FallbackMemoryManager implements MemorySearchManager {
   }
 }
 
-function buildQmdCacheKey(agentId: string, config: ResolvedQmdConfig): string {
+function buildQmdCacheKey(
+  agentId: string,
+  config: ResolvedQmdConfig,
+  runtimeScope?: string,
+): string {
   // ResolvedQmdConfig is assembled in a stable field order in resolveMemoryBackendConfig.
   // Fast stringify avoids deep key-sorting overhead on this hot path.
-  return `${agentId}:${JSON.stringify(config)}`;
+  return `${agentId}:${runtimeScope ?? "global"}:${JSON.stringify(config)}`;
 }

@@ -66,6 +66,7 @@ export async function runCliAgent(params: {
   timeoutMs: number;
   runId: string;
   extraSystemPrompt?: string;
+  consciousnessRuntimeScope?: string;
   streamParams?: import("./command/types.js").AgentStreamParams;
   ownerNumbers?: string[];
   cliSessionId?: string;
@@ -160,6 +161,7 @@ export async function runCliAgent(params: {
     config: params.config,
     defaultThinkLevel: params.thinkLevel,
     extraSystemPrompt,
+    consciousnessRuntimeScope: params.consciousnessRuntimeScope,
     cognitiveMode: params.cognitiveMode,
     ownerNumbers: params.ownerNumbers,
     heartbeatPrompt,
@@ -502,6 +504,7 @@ export async function runClaudeCliAgent(params: {
   timeoutMs: number;
   runId: string;
   extraSystemPrompt?: string;
+  consciousnessRuntimeScope?: string;
   ownerNumbers?: string[];
   claudeSessionId?: string;
   images?: ImageContent[];
@@ -520,6 +523,7 @@ export async function runClaudeCliAgent(params: {
     timeoutMs: params.timeoutMs,
     runId: params.runId,
     extraSystemPrompt: params.extraSystemPrompt,
+    consciousnessRuntimeScope: params.consciousnessRuntimeScope,
     ownerNumbers: params.ownerNumbers,
     cliSessionId: params.claudeSessionId,
     images: params.images,
