@@ -237,7 +237,7 @@ export function createNodesTool(options?: {
     name: "nodes",
     ownerOnly: true,
     description:
-      'Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/run/invoke). For invokeCommand="calendar.add", node may be omitted when exactly one calendar-capable node is available.',
+      'Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/run/invoke). For invokeCommand="calendar.add", node may be omitted when exactly one calendar-capable node is available. If you already have a calendarCandidate.toolInput, call nodes with it directly before asking follow-up questions or using browser automation.',
     parameters: NodesToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;

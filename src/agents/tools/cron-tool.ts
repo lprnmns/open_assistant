@@ -314,7 +314,7 @@ export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): Any
     label: "Cron",
     name: "cron",
     ownerOnly: true,
-    description: `Manage Gateway cron jobs (status/list/add/update/remove/run/runs) and send wake events.
+    description: `Manage Gateway cron jobs (status/list/add/update/remove/run/runs) and send wake events. For reminder requests with a concrete time or a cronCandidate.toolInput payload, call add directly and prefer cron over browser/web-calendar automation. Do not stop at JSON or candidate output when the user asked you to create the reminder.
 
 ACTIONS:
 - status: Check cron scheduler status

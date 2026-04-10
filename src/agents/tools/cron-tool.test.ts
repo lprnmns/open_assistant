@@ -129,6 +129,13 @@ describe("cron tool", () => {
     expect(tool.ownerOnly).toBe(true);
   });
 
+  it("documents direct cron execution for reminder requests", () => {
+    const tool = createTestCronTool();
+    expect(tool.description).toContain("cronCandidate.toolInput");
+    expect(tool.description).toContain("Do not stop at JSON");
+    expect(tool.description).toContain("prefer cron over browser");
+  });
+
   it.each([
     [
       "update",

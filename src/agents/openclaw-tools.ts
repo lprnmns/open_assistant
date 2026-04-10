@@ -1,3 +1,4 @@
+import { shouldExposeBrowserTool } from "../browser/tool-availability.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { callGateway } from "../gateway/call.js";
 import { resolvePluginTools } from "../plugins/tools.js";
@@ -162,12 +163,15 @@ export function createOpenClawTools(
         requireExplicitTarget: options?.requireExplicitMessageTarget,
         requesterSenderId: options?.requesterSenderId ?? undefined,
       });
+  const browserTool = shouldExposeBrowserTool()
+    ? createBrowserTool({
+        sandboxBridgeUrl: options?.sandboxBrowserBridgeUrl,
+        allowHostControl: options?.allowHostBrowserControl,
+        agentSessionKey: options?.agentSessionKey,
+      })
+    : null;
   const tools: AnyAgentTool[] = [
-    createBrowserTool({
-      sandboxBridgeUrl: options?.sandboxBrowserBridgeUrl,
-      allowHostControl: options?.allowHostBrowserControl,
-      agentSessionKey: options?.agentSessionKey,
-    }),
+    ...(browserTool ? [browserTool] : []),
     createCanvasTool({ config: options?.config }),
     createNodesTool({
       agentSessionKey: options?.agentSessionKey,

@@ -1,4 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  __testing as browserToolAvailabilityTesting,
+  getBrowserToolAvailability,
+  markBrowserToolUnhealthy,
+} from "../../browser/tool-availability.js";
 
 const browserClientMocks = vi.hoisted(() => ({
   browserCloseTab: vi.fn(async (..._args: unknown[]) => ({})),
@@ -204,9 +209,11 @@ function setResolvedBrowserProfiles(
 function registerBrowserToolAfterEachReset() {
   beforeEach(() => {
     resetBrowserToolMocks();
+    browserToolAvailabilityTesting.resetBrowserToolAvailability();
   });
   afterEach(() => {
     resetBrowserToolMocks();
+    browserToolAvailabilityTesting.resetBrowserToolAvailability();
     browserToolActionsTesting.setDepsForTest(null);
     browserToolTesting.setDepsForTest(null);
   });
@@ -418,6 +425,40 @@ describe("browser tool snapshot maxChars", () => {
       }),
     );
     expect(browserClientMocks.browserStatus).not.toHaveBeenCalled();
+  });
+
+  it("documents browser as the last fallback for calendar/reminder flows", () => {
+    const tool = createBrowserTool();
+    expect(tool.description).toContain("last fallback");
+    expect(tool.description).toContain("nodes(calendar.add)");
+    expect(tool.description).toContain("cron");
+  });
+
+  it("marks browser unavailable after retry-blocking transport failures", async () => {
+    browserClientMocks.browserStatus.mockRejectedValueOnce(
+      new Error(
+        "Can't reach the OpenClaw browser control service (timed out after 1500ms). Do NOT retry the browser tool — it will keep failing.",
+      ),
+    );
+    const tool = createBrowserTool();
+
+    await expect(tool.execute?.("call-1", { action: "status", target: "host" })).rejects.toThrow(
+      "Do NOT retry the browser tool",
+    );
+
+    expect(getBrowserToolAvailability().available).toBe(false);
+  });
+
+  it("clears browser unavailable state after a successful browser call", async () => {
+    markBrowserToolUnhealthy({
+      reason: "Can't reach the OpenClaw browser control service.",
+      cooldownMs: 60_000,
+    });
+    const tool = createBrowserTool();
+
+    await tool.execute?.("call-1", { action: "status", target: "host" });
+
+    expect(getBrowserToolAvailability().available).toBe(true);
   });
 
   it("gives node.invoke extra slack beyond the default proxy timeout", async () => {

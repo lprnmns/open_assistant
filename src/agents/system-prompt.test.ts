@@ -337,6 +337,21 @@ describe("buildAgentSystemPrompt", () => {
     );
     expect(prompt).toContain("prefer those candidate payloads over reparsing dates yourself");
     expect(prompt).toContain("before creating calendar events or reminders");
+    expect(prompt).toContain("execute the matching toolInput instead of stopping at JSON output");
+  });
+
+  it("adds schedule action precedence guidance for native calendar/reminder execution", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["pdf", "nodes", "cron", "browser"],
+    });
+
+    expect(prompt).toContain("## Schedule Actions");
+    expect(prompt).toContain("calendarCandidate.toolInput");
+    expect(prompt).toContain("cronCandidate.toolInput");
+    expect(prompt).toContain("Do not ask the user to choose Google Calendar");
+    expect(prompt).toContain("Do not stop after printing JSON, candidates, ICS");
+    expect(prompt).toContain("Use `browser` for calendar/reminder flows only as a last fallback");
   });
 
   it("documents nodes tool as a generic node command invoke surface", () => {

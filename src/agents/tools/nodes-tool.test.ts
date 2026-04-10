@@ -122,6 +122,8 @@ describe("createNodesTool screen_record duration guardrails", () => {
     const tool = createNodesTool();
     expect(tool.description).toContain('invokeCommand="calendar.add"');
     expect(tool.description).toContain("exactly one calendar-capable node");
+    expect(tool.description).toContain("calendarCandidate.toolInput");
+    expect(tool.description).toContain("browser automation");
   });
 
   it("auto-selects the sole calendar-capable node for calendar.add invoke", async () => {

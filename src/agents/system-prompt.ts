@@ -159,6 +159,61 @@ function buildVoiceSection(params: { isMinimal: boolean; ttsHint?: string }) {
   return ["## Voice (TTS)", hint, ""];
 }
 
+function buildScheduleExecutionSection(params: {
+  isMinimal: boolean;
+  availableTools: Set<string>;
+}) {
+  if (params.isMinimal) {
+    return [];
+  }
+  const hasPdf = params.availableTools.has("pdf");
+  const hasNodes = params.availableTools.has("nodes");
+  const hasCron = params.availableTools.has("cron");
+  const hasBrowser = params.availableTools.has("browser");
+  if (!hasPdf && !hasNodes && !hasCron) {
+    return [];
+  }
+
+  const lines = ["## Schedule Actions"];
+  if (hasPdf) {
+    lines.push(
+      "- For PDF schedule/reminder workflows, call `pdf` with `extract=schedule` unless the needed candidate payload is already available in context.",
+    );
+  }
+  if (hasNodes) {
+    lines.push(
+      "- **CRITICAL**: When the user asks to add a calendar event, ALWAYS call `nodes(action=\"invoke\", invokeCommand=\"calendar.add\", invokeParamsJson=\"...\")` first. NEVER write an .ics file when a calendar-capable node might be connected — the nodes tool auto-resolves the target node.",
+    );
+    lines.push(
+      "- If you have a `calendarCandidate.toolInput` from a PDF extraction, pass that payload to `nodes` directly.",
+    );
+    lines.push(
+      '- For `nodes(action="invoke", invokeCommand="calendar.add")`, omit `node` unless a prior tool result says there are multiple calendar-capable nodes or no calendar-capable node is available.',
+    );
+    lines.push(
+      "- Do not ask the user to choose Google Calendar or start browser automation before trying native `nodes(calendar.add)`.",
+    );
+    lines.push(
+      "- Only write an .ics file if: (a) the user explicitly asked for a .ics file/export, or (b) the nodes tool failed because no calendar-capable node is available.",
+    );
+  }
+  if (hasCron) {
+    lines.push(
+      "- **CRITICAL**: When the user asks to create a reminder, ALWAYS call `cron(action=\"add\", ...)` first. NEVER write an .ics file for reminders. If you have a `cronCandidate.toolInput` from a PDF extraction, pass that payload to `cron` directly.",
+    );
+    lines.push(
+      "- Do not stop after printing JSON, candidates, ICS, or pseudo-reminder objects when the user asked you to actually create the reminder.",
+    );
+  }
+  if (hasBrowser) {
+    lines.push(
+      "- Use `browser` for calendar/reminder flows only as a last fallback when native `nodes`/`cron` paths are unavailable or the user explicitly asked for web automation.",
+    );
+  }
+  lines.push("");
+  return lines;
+}
+
 function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readToolName: string }) {
   const docsPath = params.docsPath?.trim();
   if (!docsPath || params.isMinimal) {
@@ -268,11 +323,12 @@ export function buildAgentSystemPrompt(params: {
     web_search: "Search the web (Brave API)",
     web_fetch: "Fetch and extract readable content from a URL",
     // Channel docking: add login tools here when a channel needs interactive linking.
-    browser: "Control web browser",
+    browser:
+      "Control web browser; use only as a last fallback for calendar/reminder flows when native nodes/cron paths are unavailable or the user explicitly asks for web automation",
     canvas: "Present/eval/snapshot the Canvas",
     nodes:
-      "List/describe paired nodes and invoke supported node commands such as notifications, camera, screen, location, device info, and calendar actions",
-    cron: "Manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
+      "List/describe paired nodes and invoke supported node commands such as notifications, camera, screen, location, device info, and calendar actions; for `calendar.add`, omit `node` when exactly one calendar-capable node exists and try native nodes before browser automation",
+    cron: "Manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate); if you already have a cronCandidate/toolInput, call cron.add instead of only printing JSON",
     message: "Send messages and channel actions",
     gateway: "Restart, apply config, or run updates on the running OpenClaw process",
     agents_list: acpSpawnRuntimeEnabled
@@ -287,7 +343,7 @@ export function buildAgentSystemPrompt(params: {
     subagents: "List, steer, or kill sub-agent runs for this requester session",
     session_status:
       "Show a /status-equivalent status card (usage + time + Reasoning/Verbose/Elevated); use for model-use questions (📊 session_status); optional per-session model override",
-    pdf: "Analyze PDF documents from local paths, upload fileRefs, or URLs; use `extract=schedule` to get structured JSON schedule/reminder candidates plus cronCandidates and calendarCandidates with ready-to-pass toolInput payloads before creating calendar events or reminders, add a `node` when using a calendarCandidate with `nodes` unless there is exactly one calendar-capable node, and prefer those candidate payloads over reparsing dates yourself",
+    pdf: "Analyze PDF documents from local paths, upload fileRefs, or URLs; use `extract=schedule` to get structured JSON schedule/reminder candidates plus cronCandidates and calendarCandidates with ready-to-pass toolInput payloads before creating calendar events or reminders, add a `node` when using a calendarCandidate with `nodes` unless there is exactly one calendar-capable node, prefer those candidate payloads over reparsing dates yourself, and if the user asked to create the event or reminder then execute the matching toolInput instead of stopping at JSON output",
     image: "Analyze an image with the configured image model",
     image_generate: "Generate images with the configured image-generation model",
   };
@@ -433,6 +489,10 @@ export function buildAgentSystemPrompt(params: {
     isMinimal,
     readToolName,
   });
+  const scheduleExecutionSection = buildScheduleExecutionSection({
+    isMinimal,
+    availableTools,
+  });
   const cognitiveModeSection = buildCognitiveModeSection({
     cognitiveMode: params.cognitiveMode,
     isMinimal,
@@ -493,6 +553,7 @@ export function buildAgentSystemPrompt(params: {
     "Treat allow-once as single-command only: if another elevated command needs approval, request a fresh /approve and do not claim prior approval covered it.",
     "When approvals are required, preserve and show the full command/script exactly as provided (including chained operators like &&, ||, |, ;, or multiline shells) so the user can approve what will actually run.",
     "",
+    ...scheduleExecutionSection,
     ...safetySection,
     "## OpenClaw CLI Quick Reference",
     "OpenClaw is controlled via subcommands. Do not invent commands.",
