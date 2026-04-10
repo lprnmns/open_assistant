@@ -33,13 +33,11 @@ const ANDROID_DEVICE_COMMANDS = [...DEVICE_COMMANDS, "device.permissions", "devi
 const CONTACTS_COMMANDS = ["contacts.search"];
 const CONTACTS_DANGEROUS_COMMANDS = ["contacts.add"];
 
-const CALENDAR_COMMANDS = ["calendar.events"];
-const CALENDAR_DANGEROUS_COMMANDS = ["calendar.add"];
+const CALENDAR_COMMANDS = ["calendar.events", "calendar.add"];
 
 const CALL_LOG_COMMANDS = ["callLog.search"];
 
-const REMINDERS_COMMANDS = ["reminders.list"];
-const REMINDERS_DANGEROUS_COMMANDS = ["reminders.add"];
+const REMINDER_COMMANDS = ["reminder.list", "reminder.schedule", "reminder.cancel"];
 
 const PHOTOS_COMMANDS = ["photos.latest"];
 
@@ -69,8 +67,6 @@ export const DEFAULT_DANGEROUS_NODE_COMMANDS = [
   ...CAMERA_DANGEROUS_COMMANDS,
   ...SCREEN_DANGEROUS_COMMANDS,
   ...CONTACTS_DANGEROUS_COMMANDS,
-  ...CALENDAR_DANGEROUS_COMMANDS,
-  ...REMINDERS_DANGEROUS_COMMANDS,
   ...SMS_DANGEROUS_COMMANDS,
 ];
 
@@ -82,7 +78,7 @@ const PLATFORM_DEFAULTS: Record<string, string[]> = {
     ...DEVICE_COMMANDS,
     ...CONTACTS_COMMANDS,
     ...CALENDAR_COMMANDS,
-    ...REMINDERS_COMMANDS,
+    ...REMINDER_COMMANDS,
     ...PHOTOS_COMMANDS,
     ...MOTION_COMMANDS,
     ...IOS_SYSTEM_COMMANDS,
@@ -97,7 +93,7 @@ const PLATFORM_DEFAULTS: Record<string, string[]> = {
     ...CONTACTS_COMMANDS,
     ...CALENDAR_COMMANDS,
     ...CALL_LOG_COMMANDS,
-    ...REMINDERS_COMMANDS,
+    ...REMINDER_COMMANDS,
     ...SMS_COMMANDS,
     ...PHOTOS_COMMANDS,
     ...MOTION_COMMANDS,
@@ -109,7 +105,7 @@ const PLATFORM_DEFAULTS: Record<string, string[]> = {
     ...DEVICE_COMMANDS,
     ...CONTACTS_COMMANDS,
     ...CALENDAR_COMMANDS,
-    ...REMINDERS_COMMANDS,
+    ...REMINDER_COMMANDS,
     ...PHOTOS_COMMANDS,
     ...MOTION_COMMANDS,
     ...SYSTEM_COMMANDS,

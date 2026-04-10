@@ -346,7 +346,10 @@ describe("resolveNodeCommandAllowlist", () => {
     expect(allow.has("system.notify")).toBe(true);
     expect(allow.has("contacts.search")).toBe(true);
     expect(allow.has("calendar.events")).toBe(true);
-    expect(allow.has("reminders.list")).toBe(true);
+    expect(allow.has("calendar.add")).toBe(true);
+    expect(allow.has("reminder.list")).toBe(true);
+    expect(allow.has("reminder.schedule")).toBe(true);
+    expect(allow.has("reminder.cancel")).toBe(true);
     expect(allow.has("photos.latest")).toBe(true);
     expect(allow.has("motion.activity")).toBe(true);
 
@@ -370,6 +373,10 @@ describe("resolveNodeCommandAllowlist", () => {
     expect(allow.has("device.health")).toBe(true);
     expect(allow.has("callLog.search")).toBe(true);
     expect(allow.has("sms.search")).toBe(true);
+    expect(allow.has("calendar.add")).toBe(true);
+    expect(allow.has("reminder.list")).toBe(true);
+    expect(allow.has("reminder.schedule")).toBe(true);
+    expect(allow.has("reminder.cancel")).toBe(true);
     expect(allow.has("system.notify")).toBe(true);
   });
 
