@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { OpenClawConfig } from "../../config/config.js";
 import { loadCronStore, resolveCronStorePath } from "../../cron/store.js";
 import { callGateway } from "../../gateway/call.js";
@@ -130,9 +131,7 @@ function buildAutoReminderNotificationBody(commitment: AutoReminderCommitment): 
   return commitment.sourceText.replace(/\s+/g, " ").slice(0, 220);
 }
 
-function resolveAutoReminderPrecision(
-  commitment: AutoReminderCommitment,
-): "exact" | "soft" {
+function resolveAutoReminderPrecision(commitment: AutoReminderCommitment): "exact" | "soft" {
   return commitment.delayMs < AUTO_REMINDER_EXACT_THRESHOLD_MS ? "exact" : "soft";
 }
 
@@ -176,6 +175,7 @@ export async function relayAutoReminderToConnectedNode(params: {
     params: {
       nodeId,
       command: "reminder.schedule",
+      idempotencyKey: randomUUID(),
       params: {
         id: params.cronJobId ?? `auto-reminder-${params.commitment.dueAtMs}`,
         title: "OpenClaw follow-up",

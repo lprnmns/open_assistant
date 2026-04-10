@@ -47,6 +47,10 @@ import {
 } from "./pi-tools.read.js";
 import { cleanToolSchemaForGemini, normalizeToolParameters } from "./pi-tools.schema.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
+import {
+  wrapExecToolWithNativeActionFallback,
+  wrapWriteToolWithNativeActionFallback,
+} from "./pi-tools.write-native-fallback.js";
 import type { SandboxContext } from "./sandbox.js";
 import { createToolFsPolicy, resolveToolFsConfig } from "./tool-fs-policy.js";
 import { wrapToolWithEnforcement } from "./tool-policy-enforce.js";
@@ -460,7 +464,13 @@ export function createOpenClawCodingTools(options?: {
       if (sandboxRoot) {
         return [];
       }
-      const wrapped = createHostWorkspaceWriteTool(workspaceRoot, { workspaceOnly });
+      const wrapped = wrapWriteToolWithNativeActionFallback(
+        createHostWorkspaceWriteTool(workspaceRoot, { workspaceOnly }),
+        {
+          config: options?.config,
+          sessionKey: options?.sessionKey,
+        },
+      );
       return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
     }
     if (tool.name === "edit") {
@@ -473,44 +483,50 @@ export function createOpenClawCodingTools(options?: {
     return [tool];
   });
   const { cleanupMs: cleanupMsOverride, ...execDefaults } = options?.exec ?? {};
-  const execTool = createExecTool({
-    ...execDefaults,
-    host: options?.exec?.host ?? execConfig.host,
-    security: options?.exec?.security ?? execConfig.security,
-    ask: options?.exec?.ask ?? execConfig.ask,
-    node: options?.exec?.node ?? execConfig.node,
-    pathPrepend: options?.exec?.pathPrepend ?? execConfig.pathPrepend,
-    safeBins: options?.exec?.safeBins ?? execConfig.safeBins,
-    strictInlineEval: options?.exec?.strictInlineEval ?? execConfig.strictInlineEval,
-    safeBinTrustedDirs: options?.exec?.safeBinTrustedDirs ?? execConfig.safeBinTrustedDirs,
-    safeBinProfiles: options?.exec?.safeBinProfiles ?? execConfig.safeBinProfiles,
-    agentId,
-    cwd: workspaceRoot,
-    allowBackground,
-    scopeKey,
-    sessionKey: options?.sessionKey,
-    messageProvider: options?.messageProvider,
-    currentChannelId: options?.currentChannelId,
-    currentThreadTs: options?.currentThreadTs,
-    accountId: options?.agentAccountId,
-    backgroundMs: options?.exec?.backgroundMs ?? execConfig.backgroundMs,
-    timeoutSec: options?.exec?.timeoutSec ?? execConfig.timeoutSec,
-    approvalRunningNoticeMs:
-      options?.exec?.approvalRunningNoticeMs ?? execConfig.approvalRunningNoticeMs,
-    notifyOnExit: options?.exec?.notifyOnExit ?? execConfig.notifyOnExit,
-    notifyOnExitEmptySuccess:
-      options?.exec?.notifyOnExitEmptySuccess ?? execConfig.notifyOnExitEmptySuccess,
-    sandbox: sandbox
-      ? {
-          containerName: sandbox.containerName,
-          workspaceDir: sandbox.workspaceDir,
-          containerWorkdir: sandbox.containerWorkdir,
-          env: sandbox.backend?.env ?? sandbox.docker.env,
-          buildExecSpec: sandbox.backend?.buildExecSpec.bind(sandbox.backend),
-          finalizeExec: sandbox.backend?.finalizeExec?.bind(sandbox.backend),
-        }
-      : undefined,
-  });
+  const execTool = wrapExecToolWithNativeActionFallback(
+    createExecTool({
+      ...execDefaults,
+      host: options?.exec?.host ?? execConfig.host,
+      security: options?.exec?.security ?? execConfig.security,
+      ask: options?.exec?.ask ?? execConfig.ask,
+      node: options?.exec?.node ?? execConfig.node,
+      pathPrepend: options?.exec?.pathPrepend ?? execConfig.pathPrepend,
+      safeBins: options?.exec?.safeBins ?? execConfig.safeBins,
+      strictInlineEval: options?.exec?.strictInlineEval ?? execConfig.strictInlineEval,
+      safeBinTrustedDirs: options?.exec?.safeBinTrustedDirs ?? execConfig.safeBinTrustedDirs,
+      safeBinProfiles: options?.exec?.safeBinProfiles ?? execConfig.safeBinProfiles,
+      agentId,
+      cwd: workspaceRoot,
+      allowBackground,
+      scopeKey,
+      sessionKey: options?.sessionKey,
+      messageProvider: options?.messageProvider,
+      currentChannelId: options?.currentChannelId,
+      currentThreadTs: options?.currentThreadTs,
+      accountId: options?.agentAccountId,
+      backgroundMs: options?.exec?.backgroundMs ?? execConfig.backgroundMs,
+      timeoutSec: options?.exec?.timeoutSec ?? execConfig.timeoutSec,
+      approvalRunningNoticeMs:
+        options?.exec?.approvalRunningNoticeMs ?? execConfig.approvalRunningNoticeMs,
+      notifyOnExit: options?.exec?.notifyOnExit ?? execConfig.notifyOnExit,
+      notifyOnExitEmptySuccess:
+        options?.exec?.notifyOnExitEmptySuccess ?? execConfig.notifyOnExitEmptySuccess,
+      sandbox: sandbox
+        ? {
+            containerName: sandbox.containerName,
+            workspaceDir: sandbox.workspaceDir,
+            containerWorkdir: sandbox.containerWorkdir,
+            env: sandbox.backend?.env ?? sandbox.docker.env,
+            buildExecSpec: sandbox.backend?.buildExecSpec.bind(sandbox.backend),
+            finalizeExec: sandbox.backend?.finalizeExec?.bind(sandbox.backend),
+          }
+        : undefined,
+    }),
+    {
+      config: options?.config,
+      sessionKey: options?.sessionKey,
+    },
+  );
   const processTool = createProcessTool({
     cleanupMs: cleanupMsOverride ?? execConfig.cleanupMs,
     scopeKey,
@@ -542,13 +558,25 @@ export function createOpenClawCodingTools(options?: {
               : createSandboxedEditTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
             workspaceOnly
               ? wrapToolWorkspaceRootGuardWithOptions(
-                  createSandboxedWriteTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
+                  wrapWriteToolWithNativeActionFallback(
+                    createSandboxedWriteTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
+                    {
+                      config: options?.config,
+                      sessionKey: options?.sessionKey,
+                    },
+                  ),
                   sandboxRoot,
                   {
                     containerWorkdir: sandbox.containerWorkdir,
                   },
                 )
-              : createSandboxedWriteTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
+              : wrapWriteToolWithNativeActionFallback(
+                  createSandboxedWriteTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
+                  {
+                    config: options?.config,
+                    sessionKey: options?.sessionKey,
+                  },
+                ),
           ]
         : []
       : []),

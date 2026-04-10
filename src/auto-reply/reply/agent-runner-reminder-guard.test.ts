@@ -78,6 +78,7 @@ describe("relayAutoReminderToConnectedNode", () => {
         params: {
           nodeId: "android-1",
           command: "reminder.schedule",
+          idempotencyKey: expect.any(String),
           params: {
             id: "cron-1",
             title: "OpenClaw follow-up",
@@ -132,6 +133,9 @@ describe("autoScheduleReminderCommitment", () => {
       3,
       expect.objectContaining({
         method: "node.invoke",
+        params: expect.objectContaining({
+          idempotencyKey: expect.any(String),
+        }),
       }),
     );
   });
