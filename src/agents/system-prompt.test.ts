@@ -354,6 +354,18 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Use `browser` for calendar/reminder flows only as a last fallback");
   });
 
+  it("prefers injected file context over redundant shell extraction", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["exec", "pdf"],
+    });
+
+    expect(prompt).toContain("## Document Attachments");
+    expect(prompt).toContain("`<file ...>` blocks");
+    expect(prompt).toContain("Do not use exec/shell just to re-read or OCR");
+    expect(prompt).toContain("document creation, conversion, editing, export");
+  });
+
   it("documents nodes tool as a generic node command invoke surface", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/openclaw",

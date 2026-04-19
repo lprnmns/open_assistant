@@ -182,7 +182,7 @@ function buildScheduleExecutionSection(params: {
   }
   if (hasNodes) {
     lines.push(
-      "- **CRITICAL**: When the user asks to add a calendar event, ALWAYS call `nodes(action=\"invoke\", invokeCommand=\"calendar.add\", invokeParamsJson=\"...\")` first. NEVER write an .ics file when a calendar-capable node might be connected — the nodes tool auto-resolves the target node.",
+      '- **CRITICAL**: When the user asks to add a calendar event, ALWAYS call `nodes(action="invoke", invokeCommand="calendar.add", invokeParamsJson="...")` first. NEVER write an .ics file when a calendar-capable node might be connected — the nodes tool auto-resolves the target node.',
     );
     lines.push(
       "- If you have a `calendarCandidate.toolInput` from a PDF extraction, pass that payload to `nodes` directly.",
@@ -199,7 +199,7 @@ function buildScheduleExecutionSection(params: {
   }
   if (hasCron) {
     lines.push(
-      "- **CRITICAL**: When the user asks to create a reminder, ALWAYS call `cron(action=\"add\", ...)` first. NEVER write an .ics file for reminders. If you have a `cronCandidate.toolInput` from a PDF extraction, pass that payload to `cron` directly.",
+      '- **CRITICAL**: When the user asks to create a reminder, ALWAYS call `cron(action="add", ...)` first. NEVER write an .ics file for reminders. If you have a `cronCandidate.toolInput` from a PDF extraction, pass that payload to `cron` directly.',
     );
     lines.push(
       "- Do not stop after printing JSON, candidates, ICS, or pseudo-reminder objects when the user asked you to actually create the reminder.",
@@ -212,6 +212,19 @@ function buildScheduleExecutionSection(params: {
   }
   lines.push("");
   return lines;
+}
+
+function buildDocumentAttachmentSection(params: { isMinimal: boolean }) {
+  if (params.isMinimal) {
+    return [];
+  }
+  return [
+    "## Document Attachments",
+    "- When the user attaches files and the prompt contains `<file ...>` blocks, treat those blocks as the primary extracted document context.",
+    "- Do not use exec/shell just to re-read or OCR an attached document when a relevant `<file>` block already contains usable text or extracted OCR.",
+    "- Use shell/workspace tools for document creation, conversion, editing, export, or when the injected context is missing, incomplete, or the user explicitly asks to manipulate the file.",
+    "",
+  ];
 }
 
 function buildDocsSection(params: { docsPath?: string; isMinimal: boolean; readToolName: string }) {
@@ -493,6 +506,9 @@ export function buildAgentSystemPrompt(params: {
     isMinimal,
     availableTools,
   });
+  const documentAttachmentSection = buildDocumentAttachmentSection({
+    isMinimal,
+  });
   const cognitiveModeSection = buildCognitiveModeSection({
     cognitiveMode: params.cognitiveMode,
     isMinimal,
@@ -554,6 +570,7 @@ export function buildAgentSystemPrompt(params: {
     "When approvals are required, preserve and show the full command/script exactly as provided (including chained operators like &&, ||, |, ;, or multiline shells) so the user can approve what will actually run.",
     "",
     ...scheduleExecutionSection,
+    ...documentAttachmentSection,
     ...safetySection,
     "## OpenClaw CLI Quick Reference",
     "OpenClaw is controlled via subcommands. Do not invent commands.",
