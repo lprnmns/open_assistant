@@ -1,5 +1,5 @@
-import path from "node:path";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 type CanvasModule = typeof import("@napi-rs/canvas");
@@ -55,8 +55,7 @@ export async function extractPdfContent(params: {
   const { getDocument } = await loadPdfJsModule();
   const require = createRequire(import.meta.url);
   const pdfJsEntry = require.resolve("pdfjs-dist/legacy/build/pdf.mjs");
-  const standardFontDataUrl =
-    `${pathToFileURL(path.resolve(path.dirname(pdfJsEntry), "..", "..", "standard_fonts")).href}/`;
+  const standardFontDataUrl = `${pathToFileURL(path.resolve(path.dirname(pdfJsEntry), "..", "..", "standard_fonts")).href}/`;
   const documentParams = {
     data: new Uint8Array(buffer),
     disableWorker: true,
@@ -105,12 +104,16 @@ export async function extractPdfContent(params: {
     const scale = Math.min(1, Math.sqrt(pixelBudget / Math.max(1, pagePixels)));
     const scaled = page.getViewport({ scale: Math.max(0.1, scale) });
     const canvas = createCanvas(Math.ceil(scaled.width), Math.ceil(scaled.height));
-    await page.render({
-      canvas: canvas as unknown as HTMLCanvasElement,
-      viewport: scaled,
-    }).promise;
-    const png = canvas.toBuffer("image/png");
-    images.push({ type: "image", data: png.toString("base64"), mimeType: "image/png" });
+    try {
+      await page.render({
+        canvasContext: canvas.getContext("2d") as unknown as CanvasRenderingContext2D,
+        viewport: scaled,
+      }).promise;
+      const png = canvas.toBuffer("image/png");
+      images.push({ type: "image", data: png.toString("base64"), mimeType: "image/png" });
+    } catch (err) {
+      onImageExtractionError?.(err);
+    }
   }
 
   return { text, images };
