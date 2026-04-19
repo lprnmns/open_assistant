@@ -230,6 +230,12 @@ import {
   type ToolsCatalogParams,
   ToolsCatalogParamsSchema,
   type ToolsCatalogResult,
+  type UiAction,
+  type UiActionPlan,
+  UiActionPlanSchema,
+  UiActionRiskSchema,
+  UiActionSchema,
+  type UiActionRisk,
   type Snapshot,
   SnapshotSchema,
   type StateVersion,
@@ -443,6 +449,7 @@ export const validateChatSendParams = ajv.compile(ChatSendParamsSchema);
 export const validateChatAbortParams = ajv.compile<ChatAbortParams>(ChatAbortParamsSchema);
 export const validateChatInjectParams = ajv.compile<ChatInjectParams>(ChatInjectParamsSchema);
 export const validateChatEvent = ajv.compile(ChatEventSchema);
+export const validateUiActionPlan = ajv.compile<UiActionPlan>(UiActionPlanSchema);
 export const validateUpdateRunParams = ajv.compile<UpdateRunParams>(UpdateRunParamsSchema);
 export const validateWebLoginStartParams =
   ajv.compile<WebLoginStartParams>(WebLoginStartParamsSchema);
@@ -587,6 +594,9 @@ export {
   ChatHistoryParamsSchema,
   ChatSendParamsSchema,
   ChatInjectParamsSchema,
+  UiActionRiskSchema,
+  UiActionSchema,
+  UiActionPlanSchema,
   UpdateRunParamsSchema,
   TickEventSchema,
   ShutdownEventSchema,
@@ -704,4 +714,7 @@ export type {
   PollParams,
   UpdateRunParams,
   ChatInjectParams,
+  UiActionRisk,
+  UiAction,
+  UiActionPlan,
 };

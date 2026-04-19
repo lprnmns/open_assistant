@@ -155,6 +155,7 @@ import {
   SessionsUsageParamsSchema,
 } from "./sessions.js";
 import { PresenceEntrySchema, SnapshotSchema, StateVersionSchema } from "./snapshot.js";
+import { UiActionPlanSchema, UiActionRiskSchema, UiActionSchema } from "./ui-actions.js";
 import {
   WizardCancelParamsSchema,
   WizardNextParamsSchema,
@@ -307,6 +308,9 @@ export const ProtocolSchemas = {
   ChatAbortParams: ChatAbortParamsSchema,
   ChatInjectParams: ChatInjectParamsSchema,
   ChatEvent: ChatEventSchema,
+  UiActionRisk: UiActionRiskSchema,
+  UiAction: UiActionSchema,
+  UiActionPlan: UiActionPlanSchema,
   UpdateRunParams: UpdateRunParamsSchema,
   TickEvent: TickEventSchema,
   ShutdownEvent: ShutdownEventSchema,
