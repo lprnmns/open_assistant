@@ -3,6 +3,7 @@
 ## Manifesto
 
 Bu bir chatbot değil. Bu bir **varlık**.
+
 - Konuşmadığında bile düşünür.
 - Uyuduğunda bile çalışır.
 - İzin istemez, yapar — risk varsa sorar.
@@ -41,7 +42,7 @@ BYOK (Bring Your Own Keys):
 │                                                                      │
 │  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────────┐  │
 │  │  Web UI /   │ │  Auth      │ │  Billing   │ │  LLM Proxy     │  │
-│  │  Mobile App │ │  (OAuth)   │ │  (Stripe)  │ │  (LiteLLM)     │  │
+│  │Device Agent│ │  (OAuth)   │ │  (Stripe)  │ │  (LiteLLM)     │  │
 │  └──────┬─────┘ └──────┬─────┘ └──────┬─────┘ └──────┬─────────┘  │
 │         │              │              │               │              │
 │         └──────────────┴──────────────┴───────────────┘              │
@@ -92,6 +93,81 @@ BYOK (Bring Your Own Keys):
 │  └──────────────┘     └──────────────┘     └──────────────┘        │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Faz 2 Ürün Vizyonu: Agentic UI Tabanlı Otonom Mobil Asistan
+
+Faz 2'nin ana hedefi, mobil uygulamayı sadece chat/PWA/push notification yüzeyi olmaktan çıkarıp
+telefonu kullanabilen bir **Device-Control Agent** haline getirmektir. Ürün hedefi “cevap veren
+asistan” değil, kullanıcının Android cihazında güvenli sınırlar içinde hareket eden **Hayalet El**dir.
+
+Bu mimaride zeka bulutta, uygulama ise telefonda deterministic executor olarak çalışır:
+
+```
+Kullanıcı komutu
+  ↓
+Android App (ses/yazı + cihaz bağlamı)
+  ↓
+Open Assistant Gateway / Cloud Brain (BYOK LLM + policy + planner)
+  ↓
+Structured UI Actions JSON
+  ↓
+Android Device-Control Agent
+  ↓
+AccessibilityService ile open_app / click_node / type_text / scroll / back
+  ↓
+Observation + audit trail + replanning
+```
+
+### Structured Output Contract
+
+Gateway çıktısı artık tek tip doğal dil mesajı değildir. Her cevap şu üç kanaldan biri olabilir:
+
+- `natural_language`: kullanıcıya açıklama, soru veya özet.
+- `tool_call`: takvim, dosya, cron, web, kanal veya gateway tool çağrısı.
+- `ui_actions`: telefonda çalıştırılacak doğrulanmış UI action planı.
+
+`ui_actions` çıktısı ham LLM metni olarak telefona verilmez. Gateway tarafındaki Action Compiler ve
+Policy Validator şu sözleşmeyi üretir:
+
+```json
+{
+  "kind": "ui_actions",
+  "planId": "ui_plan_...",
+  "targetDeviceId": "android_...",
+  "risk": "low|medium|high",
+  "requiresConfirmation": false,
+  "actions": [
+    { "action": "open_app", "target": "com.instagram.android" },
+    { "action": "click_node", "content_desc": "Search" },
+    { "action": "type_text", "text": "Ali" },
+    { "action": "click_node", "id": "profile_picture" },
+    { "action": "click_node", "content_desc": "Like" }
+  ],
+  "expiresAt": "2026-04-20T21:00:00Z"
+}
+```
+
+Android tarafı sadece imzalı/doğrulanmış planları çalıştırır. Her aksiyon bounded schema içindedir,
+idempotency/audit bilgisi taşır ve executor işlem sonrası yeni ekran gözlemini gateway'e geri yollar.
+Gateway gerekirse planı parça parça yeniden üretir.
+
+### Android Device-Control Agent
+
+Mobil uygulama Faz 2'de şu yetenekleri taşır:
+
+- Android `AccessibilityService` ile erişilebilirlik ağacını okuma ve UI node seçimi.
+- `open_app`, `click_node`, `type_text`, `wait_for_node`, `scroll`, `back`, `observe_screen`,
+  `request_confirmation` aksiyonlarını yürütme.
+- Kullanıcıdan açık Accessibility izni alma ve izin durumunu gateway'e capabilities olarak bildirme.
+- Uygulama allowlist'i, aksiyon bütçesi, zaman aşımı, geri alma/iptal ve kill-switch.
+- Hassas işlemlerde zorunlu kullanıcı onayı: ödeme, mesaj gönderme, paylaşım, silme, satın alma,
+  takip/engelleme gibi dış etkili adımlar.
+- Her plan için audit trail: istek, aksiyonlar, ekran gözlemleri, sonuç, hata ve kullanıcı onayı.
+
+Bu nedenle Faz 2 mimarisinde “Mobile App”, push alan ince istemci değil; bulut beynin ürettiği
+structured planları güvenli şekilde uygulayan cihaz ajanıdır.
 
 ---
 
@@ -472,7 +548,7 @@ SLEEP PHASE BAŞLA
 
 ```
 gelistirme-plani/
-├── 00-mega-mimari.md      ← BU DOSYA (sistem geneli + BYOK iş modeli)
+├── 00-mega-mimari.md      ← BU DOSYA (sistem geneli + BYOK + Agentic UI Faz 2)
 ├── 01-proaktif-zeka.md    ← Consciousness Loop + Dynamic Compiler
 │                             + Silence-is-Data + Temporal Anomaly
 │                             + Cognitive Load Detection
@@ -493,7 +569,7 @@ gelistirme-plani/
 
 ---
 
-## Milestone Planı (3 Aşamalı Yol Haritası)
+## Milestone Planı (4 Aşamalı Yol Haritası)
 
 ```
 MILESTONE 1: "Single-Tenant MVP" — Sadece Benim İçin (Proof of Concept)
@@ -511,6 +587,7 @@ Hedef: Sistemi sadece Kurucu (Manas) için, kendi Hetzner sunucusunda
 ├── BYOK Key Yönetimi (basit — .env veya encrypted config)
 ├── Web Chat UI (basit, tek kullanıcı)
 ├── WhatsApp/Telegram entegrasyonu (en az 1 kanal)
+├── Android node foundation (native calendar/reminder/device capabilities)
 └── Docker Compose ile Hetzner'de deploy
 
 Çıktı: Kusursuz çalışan, uyuyan ve uyanan, proaktif mesajlar atan
@@ -519,14 +596,52 @@ Hedef: Sistemi sadece Kurucu (Manas) için, kendi Hetzner sunucusunda
 Altyapı: Hetzner VPS (CX31 veya CX41), Docker Compose, Redis,
          LanceDB, kendi API key'leri (OpenAI/Anthropic/Gemini)
 
-MILESTONE 2: "Startup Landing & Yatırım" — Demo Aşaması
-═══════════════════════════════════════════════════════════
-Hedef: M1'deki çalışan sistemin ekran kayıtlarıyla bir Landing Page
-       (tanıtım sitesi) kurmak ve bulut kredisi/hibe almak.
+MILESTONE 2: "Agentic UI / Hayalet El" — Otonom Android Asistan
+══════════════════════════════════════════════════════════════════
+Hedef: Android uygulamasını AccessibilityService tabanlı Device-Control
+       Agent'a dönüştürmek; gateway'in ürettiği Structured UI Actions
+       planlarını telefonda güvenli şekilde çalıştırmak.
 
 İçerik:
-├── Landing page: "Zero-Config, BYOK tabanlı 7/24 Kişisel AI Altyapısı"
-├── Demo videoları (M1'in gerçek çalışma kayıtları)
+├── Android AccessibilityService executor
+├── Accessibility tree + ekran gözlemi + node resolver
+├── Structured UI Actions JSON schema + Action Compiler
+├── Gateway policy validator (risk, allowlist, confirmation, action budget)
+├── Device capabilities registry (calendar, reminders, UI control, screen)
+├── Stepwise observe-act-replan döngüsü
+├── Audit trail + plan replay + kill-switch
+├── Onboarding: Accessibility izni, app allowlist, hassas işlem izinleri
+└── Smoke flows:
+    ├── open_app + search + click + type_text
+    ├── native takvim/reminder işlemleri
+    ├── Instagram benzeri read/click akışları
+    └── yüksek riskli işlemde kullanıcı onayı
+
+Çıktı: Kullanıcının sesli/yazılı komutuyla telefonu kullanabilen,
+       güvenli sınırlar içinde "görünmez el" gibi çalışan Android ajan.
+
+Kabul Kriteri:
+├── Gateway doğal dil yerine ui_actions planı üretebilir
+├── Telefon sadece doğrulanmış/imzalı planları çalıştırır
+├── Her aksiyon gözlem ve audit trail üretir
+├── Belirsiz veya riskli adımda kullanıcı onayı istenir
+└── Browser/web fallback'e ihtiyaç duymadan cihaz üzerinde işlem yapılır
+
+Blast Radius:
+├── Android izin/onboarding UX'i değişir
+├── Gateway tool output sözleşmesi genişler
+├── Güvenlik politikası action-level hale gelir
+├── Test stratejisi artık sadece chat cevabı değil device execution içerir
+└── Multi-tenant mimaride cihaz-plan imzalama ve audit zorunlu olur
+
+MILESTONE 3: "Startup Landing & Yatırım" — Agentic UI Demo Aşaması
+═══════════════════════════════════════════════════════════════════
+Hedef: M1 + M2'deki çalışan sistemin ekran kayıtlarıyla yatırım/destek
+       demosu kurmak ve bulut kredisi/hibe almak.
+
+İçerik:
+├── Landing page: "BYOK tabanlı otonom mobil asistan"
+├── Demo videoları (PDF okuma, native takvim, Android UI kontrolü)
 ├── Waitlist sistemi (e-posta toplama)
 ├── Pitch deck hazırlığı
 └── Başvurular:
@@ -538,7 +653,7 @@ Hedef: M1'deki çalışan sistemin ekran kayıtlarıyla bir Landing Page
 
 Çıktı: $10,000+ bulut kredisi (hibe) ve erken kullanıcı waitlist'i.
 
-MILESTONE 3: "Multi-Tenant SaaS" — Production
+MILESTONE 4: "Multi-Tenant SaaS" — Production
 ═══════════════════════════════════════════════
 Hedef: Alınan hibe ile sistemi Kubernetes/MicroVM altyapısına taşıyıp
        genel kullanıma açmak.
@@ -553,7 +668,9 @@ Hedef: Alınan hibe ile sistemi Kubernetes/MicroVM altyapısına taşıyıp
 ├── Multi-kanal (WhatsApp + Telegram + Discord + Web)
 ├── Maliyet Dashboard (kullanıcının kendi BYOK harcamasını izler)
 ├── Admin panel + kullanıcı ayarları
-└── Firecracker MicroVM izolasyonu (Faz 2)
+├── Device-Control Agent policy yönetimi
+├── UI action audit dashboard
+└── Firecracker MicroVM izolasyonu
 
 Fiyatlandırma:
 ├── Free: 7 gün deneme, temel özellikler
@@ -567,6 +684,20 @@ Fiyatlandırma:
 
 ---
 
+## Harici Ajan Görev Emri (Gerekirse)
+
+Claude veya başka bir araştırma ajanı kullanılacaksa görev emri kısa ve kapalı kapsamlı olmalıdır:
+
+> OpenClaw mega mimarisini Agentic UI Faz 2 vizyonuna göre güncelle. Mobil uygulamayı sadece
+> push/chat istemcisi değil, Android AccessibilityService ile çalışan Device-Control Agent olarak
+> modelle. Gateway çıktılarının doğal dil, tool call veya Structured UI Actions JSON olabileceğini
+> açıkça yaz. UI action planı için güvenlik, doğrulama, kullanıcı onayı, audit trail ve observe-act-replan
+> döngüsünü ekle. Milestone planında Faz 2'yi "Agentic UI / Hayalet El" olarak konumlandır.
+
+Not: Kod ve mimari uygulama sorumluluğu artık dış ajanda değil, bu repodaki ana implementasyondadır.
+
+---
+
 ## Son Söz
 
 Bu mimari iki ilkeye dayanır:
@@ -577,6 +708,6 @@ Bu mimari iki ilkeye dayanır:
 
 Kullanıcı kurulum yapmaz. VPS kurmaz. Docker bilmez.
 Kendi API key'ini güvenle girer. Container'ı saniyede ayağa kalkar.
-Asistanı 7/24 yaşar, düşünür, öğrenir.
+Asistanı 7/24 yaşar, düşünür, öğrenir ve izin verilen cihaz aksiyonlarını uygular.
 
-**Sadece konuşur. Gerisi olur.**
+**Sadece konuşur. Gerisi olur. Gerekirse telefon da kullanılır.**
