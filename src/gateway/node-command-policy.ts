@@ -39,6 +39,8 @@ const CALL_LOG_COMMANDS = ["callLog.search"];
 
 const REMINDER_COMMANDS = ["reminder.list", "reminder.schedule", "reminder.cancel"];
 
+const UI_ACTION_COMMANDS = ["ui.actions.execute"];
+
 const PHOTOS_COMMANDS = ["photos.latest"];
 
 const MOTION_COMMANDS = ["motion.activity", "motion.pedometer"];
@@ -94,6 +96,7 @@ const PLATFORM_DEFAULTS: Record<string, string[]> = {
     ...CALENDAR_COMMANDS,
     ...CALL_LOG_COMMANDS,
     ...REMINDER_COMMANDS,
+    ...UI_ACTION_COMMANDS,
     ...SMS_COMMANDS,
     ...PHOTOS_COMMANDS,
     ...MOTION_COMMANDS,

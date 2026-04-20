@@ -70,7 +70,7 @@ const NODE_READ_ACTION_COMMANDS = {
   device_permissions: "device.permissions",
   device_health: "device.health",
 } as const;
-const AUTO_INVOKE_NODE_COMMANDS = new Set(["calendar.add"]);
+const AUTO_INVOKE_NODE_COMMANDS = new Set(["calendar.add", "ui.actions.execute"]);
 type GatewayCallOptions = ReturnType<typeof readGatewayCallOptions>;
 
 async function invokeNodeCommandPayload(params: {
@@ -237,7 +237,7 @@ export function createNodesTool(options?: {
     name: "nodes",
     ownerOnly: true,
     description:
-      'Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/run/invoke). For invokeCommand="calendar.add", node may be omitted when exactly one calendar-capable node is available. If you already have a calendarCandidate.toolInput, call nodes with it directly before asking follow-up questions or using browser automation.',
+      'Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/run/invoke). For invokeCommand="calendar.add" or invokeCommand="ui.actions.execute", node may be omitted when exactly one capable node is available. If you already have a calendarCandidate.toolInput, call nodes with it directly before asking follow-up questions or using browser automation. For phone UI-control requests, execute a Structured UI Action plan with invokeCommand="ui.actions.execute".',
     parameters: NodesToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;

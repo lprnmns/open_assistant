@@ -214,6 +214,21 @@ function buildScheduleExecutionSection(params: {
   return lines;
 }
 
+function buildDeviceUiActionsSection(params: { isMinimal: boolean; availableTools: Set<string> }) {
+  if (params.isMinimal || !params.availableTools.has("nodes")) {
+    return [];
+  }
+  return [
+    "## Device UI Actions",
+    '- For phone-control requests such as opening apps, tapping buttons, typing text, scrolling, or reading the visible screen, execute a Structured UI Action plan with `nodes(action="invoke", invokeCommand="ui.actions.execute", invokeParamsJson="...")`.',
+    '- The plan JSON must use `kind:"ui_actions"`, `planId`, `targetDeviceId`, `idempotencyKey`, `risk`, `requiresConfirmation`, and an `actions` array.',
+    "- Omit `node` for `ui.actions.execute` unless a prior tool result says there are multiple UI-control capable nodes or no UI-control node is available.",
+    '- Use `nodes(action="device_permissions")` first when you need to confirm whether Android deviceControl/accessibility is enabled.',
+    "- High-risk or externally visible actions require explicit confirmation and may be rejected by the device until local confirmation UX exists.",
+    "",
+  ];
+}
+
 function buildDocumentAttachmentSection(params: { isMinimal: boolean }) {
   if (params.isMinimal) {
     return [];
@@ -340,7 +355,7 @@ export function buildAgentSystemPrompt(params: {
       "Control web browser; use only as a last fallback for calendar/reminder flows when native nodes/cron paths are unavailable or the user explicitly asks for web automation",
     canvas: "Present/eval/snapshot the Canvas",
     nodes:
-      "List/describe paired nodes and invoke supported node commands such as notifications, camera, screen, location, device info, and calendar actions; for `calendar.add`, omit `node` when exactly one calendar-capable node exists and try native nodes before browser automation",
+      "List/describe paired nodes and invoke supported node commands such as notifications, camera, screen, location, device info, calendar actions, and structured Android UI actions; for `calendar.add` or `ui.actions.execute`, omit `node` when exactly one capable node exists and try native nodes before browser automation",
     cron: "Manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate); if you already have a cronCandidate/toolInput, call cron.add instead of only printing JSON",
     message: "Send messages and channel actions",
     gateway: "Restart, apply config, or run updates on the running OpenClaw process",
@@ -506,6 +521,10 @@ export function buildAgentSystemPrompt(params: {
     isMinimal,
     availableTools,
   });
+  const deviceUiActionsSection = buildDeviceUiActionsSection({
+    isMinimal,
+    availableTools,
+  });
   const documentAttachmentSection = buildDocumentAttachmentSection({
     isMinimal,
   });
@@ -538,7 +557,7 @@ export function buildAgentSystemPrompt(params: {
           `- ${processToolName}: manage background exec sessions`,
           "- browser: control OpenClaw's dedicated browser",
           "- canvas: present/eval/snapshot the Canvas",
-          "- nodes: list/describe paired nodes and invoke supported node commands such as notifications, camera, screen, location, device info, and calendar actions",
+          "- nodes: list/describe paired nodes and invoke supported node commands such as notifications, camera, screen, location, device info, calendar actions, and structured Android UI actions",
           "- cron: manage cron jobs and wake events (use for reminders; when scheduling a reminder, write the systemEvent text as something that will read like a reminder when it fires, and mention that it is a reminder depending on the time gap between setting and firing; include recent context in reminder text if appropriate)",
           "- sessions_list: list sessions",
           "- sessions_history: fetch session history",
@@ -570,6 +589,7 @@ export function buildAgentSystemPrompt(params: {
     "When approvals are required, preserve and show the full command/script exactly as provided (including chained operators like &&, ||, |, ;, or multiline shells) so the user can approve what will actually run.",
     "",
     ...scheduleExecutionSection,
+    ...deviceUiActionsSection,
     ...documentAttachmentSection,
     ...safetySection,
     "## OpenClaw CLI Quick Reference",

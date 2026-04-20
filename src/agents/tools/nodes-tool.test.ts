@@ -118,12 +118,14 @@ describe("createNodesTool screen_record duration guardrails", () => {
     expect(tool.ownerOnly).toBe(true);
   });
 
-  it("documents calendar.add auto node selection in the tool description", () => {
+  it("documents auto node selection in the tool description", () => {
     const tool = createNodesTool();
     expect(tool.description).toContain('invokeCommand="calendar.add"');
-    expect(tool.description).toContain("exactly one calendar-capable node");
+    expect(tool.description).toContain('invokeCommand="ui.actions.execute"');
+    expect(tool.description).toContain("exactly one capable node");
     expect(tool.description).toContain("calendarCandidate.toolInput");
     expect(tool.description).toContain("browser automation");
+    expect(tool.description).toContain("Structured UI Action plan");
   });
 
   it("auto-selects the sole calendar-capable node for calendar.add invoke", async () => {
@@ -182,6 +184,45 @@ describe("createNodesTool screen_record duration guardrails", () => {
       'node required for invokeCommand "calendar.add" (multiple calendar-capable nodes available)',
     );
     expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+
+  it("auto-selects the sole ui-control node for ui.actions.execute invoke", async () => {
+    gatewayMocks.callGatewayTool.mockResolvedValue({ ok: true });
+    nodeUtilsMocks.listNodes.mockResolvedValue([
+      {
+        nodeId: "phone-1",
+        commands: ["ui.actions.execute"],
+      },
+    ]);
+    const tool = createNodesTool();
+
+    await tool.execute("call-1", {
+      action: "invoke",
+      invokeCommand: "ui.actions.execute",
+      invokeParamsJson:
+        '{"kind":"ui_actions","planId":"plan-1","targetDeviceId":"phone-1","idempotencyKey":"idem-1","risk":"medium","requiresConfirmation":false,"actions":[{"action":"open_app","target":"com.instagram.android"}]}',
+    });
+
+    expect(nodeUtilsMocks.resolveNodeId).not.toHaveBeenCalled();
+    expect(nodeUtilsMocks.listNodes).toHaveBeenCalledTimes(1);
+    expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith(
+      "node.invoke",
+      {},
+      expect.objectContaining({
+        nodeId: "phone-1",
+        command: "ui.actions.execute",
+        params: {
+          kind: "ui_actions",
+          planId: "plan-1",
+          targetDeviceId: "phone-1",
+          idempotencyKey: "idem-1",
+          risk: "medium",
+          requiresConfirmation: false,
+          actions: [{ action: "open_app", target: "com.instagram.android" }],
+        },
+        idempotencyKey: expect.any(String),
+      }),
+    );
   });
 
   it("caps durationMs schema at 300000", () => {

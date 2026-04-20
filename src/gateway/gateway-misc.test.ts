@@ -377,6 +377,7 @@ describe("resolveNodeCommandAllowlist", () => {
     expect(allow.has("reminder.list")).toBe(true);
     expect(allow.has("reminder.schedule")).toBe(true);
     expect(allow.has("reminder.cancel")).toBe(true);
+    expect(allow.has("ui.actions.execute")).toBe(true);
     expect(allow.has("system.notify")).toBe(true);
   });
 

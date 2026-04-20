@@ -375,7 +375,23 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("- nodes:");
     expect(prompt).toContain("invoke supported node commands");
     expect(prompt).toContain("calendar actions");
+    expect(prompt).toContain("structured Android UI actions");
     expect(prompt).toContain("location");
+  });
+
+  it("adds device UI action guidance for paired Android control", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["nodes"],
+    });
+
+    expect(prompt).toContain("## Device UI Actions");
+    expect(prompt).toContain('invokeCommand="ui.actions.execute"');
+    expect(prompt).toContain('kind:"ui_actions"');
+    expect(prompt).toContain("Android deviceControl/accessibility");
+    expect(prompt).toContain(
+      "High-risk or externally visible actions require explicit confirmation",
+    );
   });
 
   it("documents ACP sessions_spawn agent targeting requirements", () => {
