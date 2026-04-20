@@ -68,6 +68,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import ai.openclaw.app.BuildConfig
 import ai.openclaw.app.LocationMode
 import ai.openclaw.app.MainViewModel
+import ai.openclaw.app.accessibility.DeviceControlAccessibilityService
 import ai.openclaw.app.node.DeviceNotificationListenerService
 
 @Composable
@@ -175,6 +176,10 @@ fun SettingsSheet(viewModel: MainViewModel) {
     remember {
       mutableStateOf(isNotificationListenerEnabled(context))
     }
+  var deviceControlEnabled by
+    remember {
+      mutableStateOf(isDeviceControlEnabled(context))
+    }
 
   var photosPermissionGranted by
     remember {
@@ -271,6 +276,7 @@ fun SettingsSheet(viewModel: MainViewModel) {
               PackageManager.PERMISSION_GRANTED
           notificationsPermissionGranted = hasNotificationsPermission(context)
           notificationListenerEnabled = isNotificationListenerEnabled(context)
+          deviceControlEnabled = isDeviceControlEnabled(context)
           photosPermissionGranted =
             ContextCompat.checkSelfPermission(context, photosPermission) ==
               PackageManager.PERMISSION_GRANTED
@@ -537,6 +543,46 @@ fun SettingsSheet(viewModel: MainViewModel) {
               },
             )
           }
+        }
+      }
+
+      // Device control uses Accessibility, so Android exposes it through a dedicated Settings surface.
+      item {
+        Text(
+          "DEVICE CONTROL",
+          style = mobileCaption1.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+          color = mobileAccent,
+        )
+      }
+      item {
+        Column(modifier = Modifier.settingsRowModifier()) {
+          ListItem(
+            modifier = Modifier.fillMaxWidth(),
+            colors = listItemColors,
+            headlineContent = { Text("Autonomous UI Control", style = mobileHeadline) },
+            supportingContent = {
+              Text(
+                if (deviceControlEnabled) {
+                  "Enabled. OpenClaw can execute structured UI action plans on this phone."
+                } else {
+                  "Enable Accessibility to let OpenClaw operate apps with structured UI actions."
+                },
+                style = mobileCallout,
+              )
+            },
+            trailingContent = {
+              Button(
+                onClick = { openDeviceControlSettings(context) },
+                colors = settingsPrimaryButtonColors(),
+                shape = RoundedCornerShape(14.dp),
+              ) {
+                Text(
+                  if (deviceControlEnabled) "Manage" else "Enable",
+                  style = mobileCallout.copy(fontWeight = FontWeight.Bold),
+                )
+              }
+            },
+          )
         }
       }
 
@@ -829,6 +875,14 @@ private fun openNotificationListenerSettings(context: Context) {
   }
 }
 
+private fun openDeviceControlSettings(context: Context) {
+  runCatching {
+    context.startActivity(DeviceControlAccessibilityService.settingsIntent())
+  }.getOrElse {
+    openAppSettings(context)
+  }
+}
+
 private fun hasNotificationsPermission(context: Context): Boolean {
   if (Build.VERSION.SDK_INT < 33) return true
   return ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -837,6 +891,10 @@ private fun hasNotificationsPermission(context: Context): Boolean {
 
 private fun isNotificationListenerEnabled(context: Context): Boolean {
   return DeviceNotificationListenerService.isAccessEnabled(context)
+}
+
+private fun isDeviceControlEnabled(context: Context): Boolean {
+  return DeviceControlAccessibilityService.isAccessEnabled(context)
 }
 
 private fun hasMotionCapabilities(context: Context): Boolean {
