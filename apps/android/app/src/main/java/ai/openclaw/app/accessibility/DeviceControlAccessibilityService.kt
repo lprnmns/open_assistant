@@ -2,8 +2,11 @@ package ai.openclaw.app.accessibility
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.Intent
+import android.graphics.Path
+import android.graphics.Rect
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -15,7 +18,9 @@ import ai.openclaw.app.protocol.OpenClawUiActionPlan
 import ai.openclaw.app.protocol.OpenClawUiActionRisk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 
 data class DeviceControlExecutionReport(
   val planId: String,
@@ -101,7 +106,7 @@ class DeviceControlAccessibilityService : AccessibilityService() {
           }
           is OpenClawUiAction.ClickNode -> {
             val node = waitForNode(action.selector(), action.timeoutMs ?: DefaultActionTimeoutMs)
-            if (!node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            if (!performNodeClick(node)) {
               throw DeviceControlExecutionException(
                 code = "ACTION_FAILED",
                 message = "Unable to click the requested UI node.",
@@ -177,6 +182,54 @@ class DeviceControlAccessibilityService : AccessibilityService() {
     launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     startActivity(launchIntent)
   }
+
+  private suspend fun performNodeClick(node: AccessibilityNodeInfo): Boolean {
+    val clickTarget = resolveAccessibilityClickTarget(node)
+    // Gesture tap is closer to physical user input and works for Compose text labels whose
+    // accessibility ACTION_CLICK may be accepted without activating the surrounding tab.
+    return tapNodeCenter(clickTarget) ||
+      clickTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK) ||
+      (clickTarget !== node && node.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+  }
+
+  private suspend fun tapNodeCenter(node: AccessibilityNodeInfo): Boolean =
+    suspendCancellableCoroutine { continuation ->
+      val bounds = Rect()
+      node.getBoundsInScreen(bounds)
+      if (bounds.isEmpty) {
+        continuation.resume(false)
+        return@suspendCancellableCoroutine
+      }
+      val path =
+        Path().apply {
+          moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+        }
+      val gesture =
+        GestureDescription.Builder()
+          .addStroke(GestureDescription.StrokeDescription(path, 0L, 80L))
+          .build()
+      val dispatched =
+        dispatchGesture(
+          gesture,
+          object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+              if (continuation.isActive) {
+                continuation.resume(true)
+              }
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+              if (continuation.isActive) {
+                continuation.resume(false)
+              }
+            }
+          },
+          null,
+        )
+      if (!dispatched && continuation.isActive) {
+        continuation.resume(false)
+      }
+    }
 
   private suspend fun waitForNode(selector: NodeSelector, timeoutMs: Long): AccessibilityNodeInfo {
     val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(0L)
@@ -290,5 +343,26 @@ class DeviceControlAccessibilityService : AccessibilityService() {
 
   private fun AccessibilityNodeInfo.summaryLabel(): String? =
     contentDescription.summaryLabel() ?: text.summaryLabel() ?: viewIdResourceName.summaryLabel()
+}
 
+private fun resolveAccessibilityClickTarget(node: AccessibilityNodeInfo): AccessibilityNodeInfo =
+  resolveClickableActionTarget(
+    start = node,
+    isClickable = { candidate -> candidate.isClickable },
+    parentOf = { candidate -> candidate.parent },
+  )
+
+internal fun <T> resolveClickableActionTarget(
+  start: T,
+  isClickable: (T) -> Boolean,
+  parentOf: (T) -> T?,
+): T {
+  var current: T? = start
+  while (current != null) {
+    if (isClickable(current)) {
+      return current
+    }
+    current = parentOf(current)
+  }
+  return start
 }
