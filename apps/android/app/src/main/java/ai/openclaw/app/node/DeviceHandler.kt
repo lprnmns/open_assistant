@@ -16,6 +16,7 @@ import android.os.StatFs
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import ai.openclaw.app.BuildConfig
+import ai.openclaw.app.accessibility.DeviceControlAccessibilityService
 import ai.openclaw.app.gateway.GatewaySession
 import java.util.Locale
 import kotlinx.serialization.json.JsonPrimitive
@@ -132,6 +133,7 @@ class DeviceHandler(
   private fun permissionsPayloadJson(): String {
     val canSendSms = appContext.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)
     val notificationAccess = DeviceNotificationListenerService.isAccessEnabled(appContext)
+    val accessibilityAccess = DeviceControlAccessibilityService.isAccessEnabled(appContext)
     val photosGranted =
       if (Build.VERSION.SDK_INT >= 33) {
         hasPermission(Manifest.permission.READ_MEDIA_IMAGES)
@@ -190,6 +192,13 @@ class DeviceHandler(
             "notifications",
             permissionStateJson(
               granted = notificationsGranted,
+              promptableWhenDenied = true,
+            ),
+          )
+          put(
+            "deviceControl",
+            permissionStateJson(
+              granted = accessibilityAccess,
               promptableWhenDenied = true,
             ),
           )
