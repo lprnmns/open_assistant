@@ -41,6 +41,7 @@ import {
   validateNodePairVerifyParams,
   validateNodeRenameParams,
 } from "../protocol/index.js";
+import { authorizeUiActionPlan } from "../ui-actions-policy.js";
 import { handleNodeInvokeResult } from "./nodes.handlers.invoke-result.js";
 import {
   respondInvalidParams,
@@ -1038,10 +1039,25 @@ export const nodeHandlers: GatewayRequestHandlers = {
         );
         return;
       }
+      let invokeParams = forwardedParams.params;
+      if (command === "ui.actions.execute") {
+        const decision = authorizeUiActionPlan(invokeParams, { nowMs: Date.now() });
+        if (!decision.ok) {
+          respond(
+            false,
+            undefined,
+            errorShape(ErrorCodes.INVALID_REQUEST, `invalid ui action plan: ${decision.message}`, {
+              details: { code: decision.code, command },
+            }),
+          );
+          return;
+        }
+        invokeParams = decision.plan;
+      }
       const res = await context.nodeRegistry.invoke({
         nodeId,
         command,
-        params: forwardedParams.params,
+        params: invokeParams,
         timeoutMs: p.timeoutMs,
         idempotencyKey: p.idempotencyKey,
       });

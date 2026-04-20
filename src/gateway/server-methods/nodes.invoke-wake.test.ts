@@ -375,6 +375,97 @@ describe("node.invoke APNs wake path", () => {
     expect(call?.[1]).toMatchObject({ ok: true, nodeId: "ios-node-reconnect" });
   });
 
+  it("rejects invalid ui action plans before invoking the node", async () => {
+    mocks.loadApnsRegistration.mockResolvedValue(null);
+    const nodeRegistry = {
+      get: vi.fn(() => ({
+        nodeId: "android-ui-node",
+        commands: ["ui.actions.execute"],
+        platform: "android 16",
+      })),
+      invoke: vi.fn().mockResolvedValue({ ok: true }),
+    };
+
+    const respond = await invokeNode({
+      nodeRegistry,
+      requestParams: {
+        nodeId: "android-ui-node",
+        command: "ui.actions.execute",
+        params: {
+          kind: "ui_actions",
+          planId: "plan-1",
+          targetDeviceId: "android-ui-node",
+          idempotencyKey: "idem-ui-plan",
+          risk: "medium",
+          requiresConfirmation: false,
+          actions: [],
+        },
+        idempotencyKey: "idem-ui-invoke",
+      },
+    });
+
+    const call = respond.mock.calls[0] as RespondCall | undefined;
+    expect(call?.[0]).toBe(false);
+    expect(call?.[2]?.code).toBe(ErrorCodes.INVALID_REQUEST);
+    expect(call?.[2]?.message).toContain("invalid ui action plan");
+    expect(call?.[2]?.details).toMatchObject({
+      code: "invalid_schema",
+      command: "ui.actions.execute",
+    });
+    expect(nodeRegistry.invoke).not.toHaveBeenCalled();
+  });
+
+  it("forwards valid ui action plans to the node", async () => {
+    mocks.loadApnsRegistration.mockResolvedValue(null);
+    const nodeRegistry = {
+      get: vi.fn(() => ({
+        nodeId: "android-ui-node",
+        commands: ["ui.actions.execute"],
+        platform: "android 16",
+      })),
+      invoke: vi.fn().mockResolvedValue({
+        ok: true,
+        payload: { executed: true },
+        payloadJSON: '{"executed":true}',
+      }),
+    };
+    const plan = {
+      kind: "ui_actions",
+      planId: "plan-1",
+      targetDeviceId: "android-ui-node",
+      idempotencyKey: "idem-ui-plan",
+      risk: "medium",
+      requiresConfirmation: false,
+      actions: [{ action: "open_app", target: "com.instagram.android" }],
+    };
+
+    const respond = await invokeNode({
+      nodeRegistry,
+      requestParams: {
+        nodeId: "android-ui-node",
+        command: "ui.actions.execute",
+        params: plan,
+        idempotencyKey: "idem-ui-invoke",
+      },
+    });
+
+    expect(nodeRegistry.invoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: "android-ui-node",
+        command: "ui.actions.execute",
+        params: plan,
+        idempotencyKey: "idem-ui-invoke",
+      }),
+    );
+    const call = respond.mock.calls[0] as RespondCall | undefined;
+    expect(call?.[0]).toBe(true);
+    expect(call?.[1]).toMatchObject({
+      ok: true,
+      nodeId: "android-ui-node",
+      payload: { executed: true },
+    });
+  });
+
   it("clears stale registrations after an invalid device token wake failure", async () => {
     const registration = directRegistration("ios-node-stale");
     mocks.loadApnsRegistration.mockResolvedValue(registration);
