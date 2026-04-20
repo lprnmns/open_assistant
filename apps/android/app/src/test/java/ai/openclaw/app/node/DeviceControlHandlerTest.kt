@@ -1,9 +1,14 @@
 package ai.openclaw.app.node
 
 import ai.openclaw.app.accessibility.DeviceControlExecutionReport
+import ai.openclaw.app.accessibility.DeviceControlObservedBounds
+import ai.openclaw.app.accessibility.DeviceControlObservedNode
 import ai.openclaw.app.protocol.OpenClawUiActionPlan
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertEquals
@@ -37,7 +42,29 @@ class DeviceControlHandlerTest {
           isAccessibilityEnabled = { true },
           executePlan = { plan ->
             delegatedPlan = plan
-            DeviceControlExecutionReport(planId = plan.planId, executedActions = 2, observations = listOf("root: Launcher"))
+            DeviceControlExecutionReport(
+              planId = plan.planId,
+              executedActions = 2,
+              observations = listOf("root: Launcher"),
+              observedNodes =
+                listOf(
+                  DeviceControlObservedNode(
+                    nodeRef = "o1n4",
+                    text = "Settings",
+                    contentDescription = null,
+                    viewId = "ai.openclaw.app:id/settings",
+                    className = "android.widget.TextView",
+                    packageName = "ai.openclaw.app",
+                    bounds = DeviceControlObservedBounds(left = 10, top = 20, right = 110, bottom = 60),
+                    clickable = false,
+                    enabled = true,
+                    focused = false,
+                    selected = false,
+                    editable = false,
+                    scrollable = false,
+                  ),
+                ),
+            )
           },
         )
 
@@ -50,6 +77,15 @@ class DeviceControlHandlerTest {
       assertEquals("plan-1", payload.getValue("planId").jsonPrimitive.content)
       assertEquals("2", payload.getValue("executedActions").jsonPrimitive.content)
       assertNotNull(payload["observations"])
+      val observedNode = payload.getValue("observedNodes").jsonArray.single().jsonObject
+      assertEquals("o1n4", observedNode.getValue("nodeRef").jsonPrimitive.content)
+      assertEquals("Settings", observedNode.getValue("text").jsonPrimitive.content)
+      assertEquals("ai.openclaw.app:id/settings", observedNode.getValue("viewId").jsonPrimitive.content)
+      assertEquals("android.widget.TextView", observedNode.getValue("className").jsonPrimitive.content)
+      assertEquals("ai.openclaw.app", observedNode.getValue("packageName").jsonPrimitive.content)
+      assertEquals(10, observedNode.getValue("bounds").jsonObject.getValue("left").jsonPrimitive.int)
+      assertFalse(observedNode.getValue("clickable").jsonPrimitive.boolean)
+      assertTrue(observedNode.getValue("enabled").jsonPrimitive.boolean)
     }
 
   @Test

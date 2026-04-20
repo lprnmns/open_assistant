@@ -3,10 +3,12 @@ package ai.openclaw.app.node
 import ai.openclaw.app.accessibility.DeviceControlAccessibilityService
 import ai.openclaw.app.accessibility.DeviceControlExecutionException
 import ai.openclaw.app.accessibility.DeviceControlExecutionReport
+import ai.openclaw.app.accessibility.DeviceControlObservedNode
 import ai.openclaw.app.gateway.GatewaySession
 import ai.openclaw.app.protocol.OpenClawUiActionPlan
 import ai.openclaw.app.protocol.parseOpenClawUiActionPlan
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -61,5 +63,42 @@ class DeviceControlHandler(
           observations.forEach { observation -> add(JsonPrimitive(observation)) }
         },
       )
+      put(
+        "observedNodes",
+        buildJsonArray {
+          observedNodes.forEach { node -> add(node.toJsonObject()) }
+        },
+      )
     }.toString()
+
+  private fun DeviceControlObservedNode.toJsonObject() =
+    buildJsonObject {
+      put("nodeRef", nodeRef)
+      putNullableString("text", text)
+      putNullableString("contentDescription", contentDescription)
+      putNullableString("viewId", viewId)
+      putNullableString("className", className)
+      putNullableString("packageName", packageName)
+      put(
+        "bounds",
+        buildJsonObject {
+          put("left", bounds.left)
+          put("top", bounds.top)
+          put("right", bounds.right)
+          put("bottom", bounds.bottom)
+        },
+      )
+      put("clickable", clickable)
+      put("enabled", enabled)
+      put("focused", focused)
+      put("selected", selected)
+      put("editable", editable)
+      put("scrollable", scrollable)
+    }
+
+  private fun JsonObjectBuilder.putNullableString(key: String, value: String?) {
+    if (value != null) {
+      put(key, value)
+    }
+  }
 }

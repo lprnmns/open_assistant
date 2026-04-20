@@ -26,6 +26,30 @@ data class DeviceControlExecutionReport(
   val planId: String,
   val executedActions: Int,
   val observations: List<String> = emptyList(),
+  val observedNodes: List<DeviceControlObservedNode> = emptyList(),
+)
+
+data class DeviceControlObservedBounds(
+  val left: Int,
+  val top: Int,
+  val right: Int,
+  val bottom: Int,
+)
+
+data class DeviceControlObservedNode(
+  val nodeRef: String,
+  val text: String? = null,
+  val contentDescription: String? = null,
+  val viewId: String? = null,
+  val className: String? = null,
+  val packageName: String? = null,
+  val bounds: DeviceControlObservedBounds,
+  val clickable: Boolean,
+  val enabled: Boolean,
+  val focused: Boolean,
+  val selected: Boolean,
+  val editable: Boolean,
+  val scrollable: Boolean,
 )
 
 class DeviceControlExecutionException(
@@ -59,6 +83,8 @@ class DeviceControlAccessibilityService : AccessibilityService() {
     private const val Tag = "OpenClawDeviceControl"
     private const val PostActionDelayMs = 250L
     private const val DefaultActionTimeoutMs = 5_000L
+    private const val MaxObservedNodes = 80
+    private const val MaxObservedTextChars = 160
 
     @Volatile private var activeService: DeviceControlAccessibilityService? = null
 
@@ -96,7 +122,9 @@ class DeviceControlAccessibilityService : AccessibilityService() {
   private suspend fun executePlanInternal(plan: OpenClawUiActionPlan): DeviceControlExecutionReport =
     withContext(Dispatchers.Main.immediate) {
       var executed = 0
+      var observationIndex = 0
       val observations = mutableListOf<String>()
+      val observedNodes = mutableListOf<DeviceControlObservedNode>()
       for (action in plan.actions) {
         when (action) {
           is OpenClawUiAction.OpenApp -> {
@@ -160,7 +188,11 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             executed += 1
             delay(PostActionDelayMs)
           }
-          OpenClawUiAction.ObserveScreen -> observations += observeRootSummary()
+          OpenClawUiAction.ObserveScreen -> {
+            observationIndex += 1
+            observations += observeRootSummary()
+            observedNodes += observeStructuredNodes(observationIndex)
+          }
           is OpenClawUiAction.RequestConfirmation -> {
             throw DeviceControlExecutionException(
               code = "USER_CONFIRMATION_REQUIRED",
@@ -169,7 +201,12 @@ class DeviceControlAccessibilityService : AccessibilityService() {
           }
         }
       }
-      DeviceControlExecutionReport(planId = plan.planId, executedActions = executed, observations = observations)
+      DeviceControlExecutionReport(
+        planId = plan.planId,
+        executedActions = executed,
+        observations = observations,
+        observedNodes = observedNodes,
+      )
     }
 
   private fun launchApp(packageName: String) {
@@ -293,6 +330,54 @@ class DeviceControlAccessibilityService : AccessibilityService() {
       .ifBlank { "screen available, no labeled nodes" }
   }
 
+  private fun observeStructuredNodes(observationIndex: Int): List<DeviceControlObservedNode> {
+    val root = rootInActiveWindow ?: return emptyList()
+    return walk(root)
+      .asSequence()
+      .mapIndexedNotNull { index, node -> node.toObservedNode(observationIndex, index) }
+      .take(MaxObservedNodes)
+      .toList()
+  }
+
+  private fun AccessibilityNodeInfo.toObservedNode(
+    observationIndex: Int,
+    traversalIndex: Int,
+  ): DeviceControlObservedNode? {
+    val bounds = Rect()
+    getBoundsInScreen(bounds)
+    val observed =
+      DeviceControlObservedNode(
+        nodeRef = "o${observationIndex}n$traversalIndex",
+        text = text.normalizedObservationText(),
+        contentDescription = contentDescription.normalizedObservationText(),
+        viewId = viewIdResourceName.normalizedObservationText(),
+        className = className.normalizedObservationText(),
+        packageName = packageName.normalizedObservationText(),
+        bounds =
+          DeviceControlObservedBounds(
+            left = bounds.left,
+            top = bounds.top,
+            right = bounds.right,
+            bottom = bounds.bottom,
+          ),
+        clickable = isClickable,
+        enabled = isEnabled,
+        focused = isFocused,
+        selected = isSelected,
+        editable = isEditable,
+        scrollable = isScrollable,
+      )
+    return observed.takeIf { it.hasPlanningSignal() }
+  }
+
+  private fun DeviceControlObservedNode.hasPlanningSignal(): Boolean =
+    text != null ||
+      contentDescription != null ||
+      viewId != null ||
+      clickable ||
+      editable ||
+      scrollable
+
   private fun walk(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
     val nodes = mutableListOf<AccessibilityNodeInfo>()
     val queue = ArrayDeque<AccessibilityNodeInfo>()
@@ -339,6 +424,12 @@ class DeviceControlAccessibilityService : AccessibilityService() {
   private fun CharSequence?.summaryLabel(): String? {
     val value = this?.toString()?.trim().orEmpty()
     return value.ifBlank { null }
+  }
+
+  private fun CharSequence?.normalizedObservationText(): String? {
+    val value = this?.toString()?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+    if (value.isBlank()) return null
+    return if (value.length <= MaxObservedTextChars) value else value.take(MaxObservedTextChars)
   }
 
   private fun AccessibilityNodeInfo.summaryLabel(): String? =
