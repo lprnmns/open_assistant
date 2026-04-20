@@ -20,6 +20,7 @@ class ConnectionManager(
   private val sendSmsAvailable: () -> Boolean,
   private val readSmsAvailable: () -> Boolean,
   private val callLogAvailable: () -> Boolean,
+  private val deviceControlEnabled: () -> Boolean,
   private val hasRecordAudioPermission: () -> Boolean,
   private val manualTls: () -> Boolean,
 ) {
@@ -92,6 +93,7 @@ class ConnectionManager(
       voiceWakeEnabled = voiceWakeMode() != VoiceWakeMode.Off && hasRecordAudioPermission(),
       motionActivityAvailable = motionActivityAvailable(),
       motionPedometerAvailable = motionPedometerAvailable(),
+      deviceControlEnabled = deviceControlEnabled(),
       debugBuild = BuildConfig.DEBUG,
     )
 

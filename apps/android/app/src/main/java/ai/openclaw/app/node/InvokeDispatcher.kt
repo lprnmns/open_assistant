@@ -14,6 +14,7 @@ import ai.openclaw.app.protocol.OpenClawNotificationsCommand
 import ai.openclaw.app.protocol.OpenClawReminderCommand
 import ai.openclaw.app.protocol.OpenClawSmsCommand
 import ai.openclaw.app.protocol.OpenClawSystemCommand
+import ai.openclaw.app.protocol.OpenClawUiActionCommand
 import ai.openclaw.app.reminder.ReminderHandler
 
 class InvokeDispatcher(
@@ -30,6 +31,7 @@ class InvokeDispatcher(
   private val motionHandler: MotionHandler,
   private val smsHandler: SmsHandler,
   private val a2uiHandler: A2UIHandler,
+  private val deviceControlHandler: DeviceControlHandler,
   private val debugHandler: DebugHandler,
   private val callLogHandler: CallLogHandler,
   private val isForeground: () -> Boolean,
@@ -38,6 +40,7 @@ class InvokeDispatcher(
   private val sendSmsAvailable: () -> Boolean,
   private val readSmsAvailable: () -> Boolean,
   private val callLogAvailable: () -> Boolean,
+  private val deviceControlEnabled: () -> Boolean,
   private val debugBuild: () -> Boolean,
   private val refreshNodeCanvasCapability: suspend () -> Boolean,
   private val onCanvasA2uiPush: () -> Unit,
@@ -177,6 +180,9 @@ class InvokeDispatcher(
       // CallLog command
       OpenClawCallLogCommand.Search.rawValue -> callLogHandler.handleCallLogSearch(paramsJson)
 
+      // UI action command
+      OpenClawUiActionCommand.Execute.rawValue -> deviceControlHandler.handleUiActionsExecute(paramsJson)
+
       // Debug commands
       "debug.ed25519" -> debugHandler.handleEd25519()
       "debug.logs" -> debugHandler.handleLogs()
@@ -292,6 +298,15 @@ class InvokeDispatcher(
           GatewaySession.InvokeResult.error(
             code = "CALL_LOG_UNAVAILABLE",
             message = "CALL_LOG_UNAVAILABLE: call log not available on this build",
+          )
+        }
+      InvokeCommandAvailability.DeviceControlEnabled ->
+        if (deviceControlEnabled()) {
+          null
+        } else {
+          GatewaySession.InvokeResult.error(
+            code = "ACCESSIBILITY_DISABLED",
+            message = "ACCESSIBILITY_DISABLED: enable OpenClaw Device Control in Android Accessibility settings",
           )
         }
       InvokeCommandAvailability.DebugBuild ->

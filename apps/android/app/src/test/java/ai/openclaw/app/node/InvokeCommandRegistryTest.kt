@@ -13,6 +13,7 @@ import ai.openclaw.app.protocol.OpenClawPhotosCommand
 import ai.openclaw.app.protocol.OpenClawReminderCommand
 import ai.openclaw.app.protocol.OpenClawSmsCommand
 import ai.openclaw.app.protocol.OpenClawSystemCommand
+import ai.openclaw.app.protocol.OpenClawUiActionCommand
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -38,6 +39,7 @@ class InvokeCommandRegistryTest {
       OpenClawCapability.CallLog.rawValue,
       OpenClawCapability.VoiceWake.rawValue,
       OpenClawCapability.Motion.rawValue,
+      OpenClawCapability.UiControl.rawValue,
     )
 
   private val coreCommands =
@@ -70,6 +72,7 @@ class InvokeCommandRegistryTest {
       OpenClawSmsCommand.Send.rawValue,
       OpenClawSmsCommand.Search.rawValue,
       OpenClawCallLogCommand.Search.rawValue,
+      OpenClawUiActionCommand.Execute.rawValue,
     )
 
   private val debugCommands = setOf("debug.logs", "debug.ed25519")
@@ -95,6 +98,7 @@ class InvokeCommandRegistryTest {
           voiceWakeEnabled = true,
           motionActivityAvailable = true,
           motionPedometerAvailable = true,
+          deviceControlEnabled = true,
         ),
       )
 
@@ -121,6 +125,7 @@ class InvokeCommandRegistryTest {
           callLogAvailable = true,
           motionActivityAvailable = true,
           motionPedometerAvailable = true,
+          deviceControlEnabled = true,
           debugBuild = true,
         ),
       )
@@ -141,6 +146,7 @@ class InvokeCommandRegistryTest {
           voiceWakeEnabled = false,
           motionActivityAvailable = true,
           motionPedometerAvailable = false,
+          deviceControlEnabled = false,
           debugBuild = false,
         ),
       )
@@ -204,6 +210,7 @@ class InvokeCommandRegistryTest {
     voiceWakeEnabled: Boolean = false,
     motionActivityAvailable: Boolean = false,
     motionPedometerAvailable: Boolean = false,
+    deviceControlEnabled: Boolean = false,
     debugBuild: Boolean = false,
   ): NodeRuntimeFlags =
     NodeRuntimeFlags(
@@ -215,6 +222,7 @@ class InvokeCommandRegistryTest {
       voiceWakeEnabled = voiceWakeEnabled,
       motionActivityAvailable = motionActivityAvailable,
       motionPedometerAvailable = motionPedometerAvailable,
+      deviceControlEnabled = deviceControlEnabled,
       debugBuild = debugBuild,
     )
 

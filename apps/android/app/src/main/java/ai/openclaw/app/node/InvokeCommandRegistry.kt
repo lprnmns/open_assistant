@@ -15,6 +15,7 @@ import ai.openclaw.app.protocol.OpenClawPhotosCommand
 import ai.openclaw.app.protocol.OpenClawReminderCommand
 import ai.openclaw.app.protocol.OpenClawSmsCommand
 import ai.openclaw.app.protocol.OpenClawSystemCommand
+import ai.openclaw.app.protocol.OpenClawUiActionCommand
 
 data class NodeRuntimeFlags(
   val cameraEnabled: Boolean,
@@ -25,6 +26,7 @@ data class NodeRuntimeFlags(
   val voiceWakeEnabled: Boolean,
   val motionActivityAvailable: Boolean,
   val motionPedometerAvailable: Boolean,
+  val deviceControlEnabled: Boolean,
   val debugBuild: Boolean,
 )
 
@@ -37,6 +39,7 @@ enum class InvokeCommandAvailability {
   CallLogAvailable,
   MotionActivityAvailable,
   MotionPedometerAvailable,
+  DeviceControlEnabled,
   DebugBuild,
 }
 
@@ -48,6 +51,7 @@ enum class NodeCapabilityAvailability {
   CallLogAvailable,
   VoiceWakeEnabled,
   MotionAvailable,
+  DeviceControlEnabled,
 }
 
 data class NodeCapabilitySpec(
@@ -95,6 +99,10 @@ object InvokeCommandRegistry {
       NodeCapabilitySpec(
         name = OpenClawCapability.CallLog.rawValue,
         availability = NodeCapabilityAvailability.CallLogAvailable,
+      ),
+      NodeCapabilitySpec(
+        name = OpenClawCapability.UiControl.rawValue,
+        availability = NodeCapabilityAvailability.DeviceControlEnabled,
       ),
     )
 
@@ -217,6 +225,10 @@ object InvokeCommandRegistry {
         availability = InvokeCommandAvailability.CallLogAvailable,
       ),
       InvokeCommandSpec(
+        name = OpenClawUiActionCommand.Execute.rawValue,
+        availability = InvokeCommandAvailability.DeviceControlEnabled,
+      ),
+      InvokeCommandSpec(
         name = "debug.logs",
         availability = InvokeCommandAvailability.DebugBuild,
       ),
@@ -241,6 +253,7 @@ object InvokeCommandRegistry {
           NodeCapabilityAvailability.CallLogAvailable -> flags.callLogAvailable
           NodeCapabilityAvailability.VoiceWakeEnabled -> flags.voiceWakeEnabled
           NodeCapabilityAvailability.MotionAvailable -> flags.motionActivityAvailable || flags.motionPedometerAvailable
+          NodeCapabilityAvailability.DeviceControlEnabled -> flags.deviceControlEnabled
         }
       }
       .map { it.name }
@@ -258,6 +271,7 @@ object InvokeCommandRegistry {
           InvokeCommandAvailability.CallLogAvailable -> flags.callLogAvailable
           InvokeCommandAvailability.MotionActivityAvailable -> flags.motionActivityAvailable
           InvokeCommandAvailability.MotionPedometerAvailable -> flags.motionPedometerAvailable
+          InvokeCommandAvailability.DeviceControlEnabled -> flags.deviceControlEnabled
           InvokeCommandAvailability.DebugBuild -> flags.debugBuild
         }
       }

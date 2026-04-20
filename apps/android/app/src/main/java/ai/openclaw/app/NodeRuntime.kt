@@ -17,6 +17,7 @@ import ai.openclaw.app.gateway.GatewayDiscovery
 import ai.openclaw.app.gateway.GatewayEndpoint
 import ai.openclaw.app.gateway.GatewaySession
 import ai.openclaw.app.gateway.probeGatewayTlsFingerprint
+import ai.openclaw.app.accessibility.DeviceControlAccessibilityService
 import ai.openclaw.app.node.*
 import ai.openclaw.app.reminder.DeviceAlarmScheduler
 import ai.openclaw.app.protocol.OpenClawCanvasA2UIAction
@@ -141,6 +142,10 @@ class NodeRuntime(
     getOperatorCanvasHostUrl = { operatorSession.currentCanvasHostUrl() },
   )
 
+  private val deviceControlHandler: DeviceControlHandler = DeviceControlHandler(
+    isAccessibilityEnabled = { DeviceControlAccessibilityService.isAccessEnabled(appContext) },
+  )
+
   private val connectionManager: ConnectionManager = ConnectionManager(
     prefs = prefs,
     cameraEnabled = { cameraEnabled.value },
@@ -151,6 +156,7 @@ class NodeRuntime(
     sendSmsAvailable = { BuildConfig.OPENCLAW_ENABLE_SMS && sms.canSendSms() },
     readSmsAvailable = { BuildConfig.OPENCLAW_ENABLE_SMS && sms.canReadSms() },
     callLogAvailable = { BuildConfig.OPENCLAW_ENABLE_CALL_LOG },
+    deviceControlEnabled = { DeviceControlAccessibilityService.isAccessEnabled(appContext) },
     hasRecordAudioPermission = { hasRecordAudioPermission() },
     manualTls = { manualTls.value },
   )
@@ -169,6 +175,7 @@ class NodeRuntime(
     motionHandler = motionHandler,
     smsHandler = smsHandlerImpl,
     a2uiHandler = a2uiHandler,
+    deviceControlHandler = deviceControlHandler,
     debugHandler = debugHandler,
     callLogHandler = callLogHandler,
     isForeground = { _isForeground.value },
@@ -177,6 +184,7 @@ class NodeRuntime(
     sendSmsAvailable = { BuildConfig.OPENCLAW_ENABLE_SMS && sms.canSendSms() },
     readSmsAvailable = { BuildConfig.OPENCLAW_ENABLE_SMS && sms.canReadSms() },
     callLogAvailable = { BuildConfig.OPENCLAW_ENABLE_CALL_LOG },
+    deviceControlEnabled = { DeviceControlAccessibilityService.isAccessEnabled(appContext) },
     debugBuild = { BuildConfig.DEBUG },
     refreshNodeCanvasCapability = { nodeSession.refreshNodeCanvasCapability() },
     onCanvasA2uiPush = {

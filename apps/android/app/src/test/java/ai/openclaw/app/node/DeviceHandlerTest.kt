@@ -14,8 +14,10 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.ConscryptMode
 
 @RunWith(RobolectricTestRunner::class)
+@ConscryptMode(ConscryptMode.Mode.OFF)
 class DeviceHandlerTest {
   @Test
   fun handleDeviceInfo_returnsStablePayload() {
@@ -90,6 +92,7 @@ class DeviceHandlerTest {
         "sms",
         "notificationListener",
         "notifications",
+        "deviceControl",
         "photos",
         "contacts",
         "calendar",
