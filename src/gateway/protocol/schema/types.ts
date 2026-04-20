@@ -136,6 +136,7 @@ export type ChatEvent = SchemaType<"ChatEvent">;
 export type UiActionRisk = SchemaType<"UiActionRisk">;
 export type UiAction = SchemaType<"UiAction">;
 export type UiActionPlan = SchemaType<"UiActionPlan">;
+export type UiTaskRunParams = SchemaType<"UiTaskRunParams">;
 export type UpdateRunParams = SchemaType<"UpdateRunParams">;
 export type TickEvent = SchemaType<"TickEvent">;
 export type ShutdownEvent = SchemaType<"ShutdownEvent">;

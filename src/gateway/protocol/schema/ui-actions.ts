@@ -161,3 +161,17 @@ export const UiActionPlanSchema = Type.Object(
   },
   { additionalProperties: false },
 );
+
+export const UiTaskRunParamsSchema = Type.Object(
+  {
+    objective: NonEmptyString,
+    nodeId: Type.Optional(NonEmptyString),
+    idempotencyKey: Type.Optional(NonEmptyString),
+    risk: Type.Optional(UiActionRiskSchema),
+    requiresConfirmation: Type.Optional(Type.Boolean()),
+    maxSteps: Type.Optional(Type.Integer({ minimum: 1, maximum: 10 })),
+    dryRun: Type.Optional(Type.Boolean()),
+    actions: Type.Optional(Type.Array(UiActionSchema, { minItems: 1, maxItems: 20 })),
+  },
+  { additionalProperties: false },
+);

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { formatValidationErrors, validateUiActionPlan, type UiActionPlan } from "./index.js";
+import {
+  formatValidationErrors,
+  validateUiActionPlan,
+  validateUiTaskRunParams,
+  type UiActionPlan,
+} from "./index.js";
 
 const validPlan = {
   kind: "ui_actions",
@@ -53,5 +58,20 @@ describe("ui action protocol validation", () => {
 
     expect(validateUiActionPlan(plan)).toBe(false);
     expect(formatValidationErrors(validateUiActionPlan.errors)).toContain("shell");
+  });
+
+  it("accepts a bounded UI task run request with optional action hints", () => {
+    expect(
+      validateUiTaskRunParams({
+        objective: "Open Instagram and search Ali",
+        maxSteps: 5,
+        actions: [{ action: "open_app", target: "com.instagram.android" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects UI task run requests without an objective", () => {
+    expect(validateUiTaskRunParams({ actions: [{ action: "observe_screen" }] })).toBe(false);
+    expect(formatValidationErrors(validateUiTaskRunParams.errors)).toContain("objective");
   });
 });

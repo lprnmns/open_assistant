@@ -155,7 +155,12 @@ import {
   SessionsUsageParamsSchema,
 } from "./sessions.js";
 import { PresenceEntrySchema, SnapshotSchema, StateVersionSchema } from "./snapshot.js";
-import { UiActionPlanSchema, UiActionRiskSchema, UiActionSchema } from "./ui-actions.js";
+import {
+  UiActionPlanSchema,
+  UiActionRiskSchema,
+  UiActionSchema,
+  UiTaskRunParamsSchema,
+} from "./ui-actions.js";
 import {
   WizardCancelParamsSchema,
   WizardNextParamsSchema,
@@ -311,6 +316,7 @@ export const ProtocolSchemas = {
   UiActionRisk: UiActionRiskSchema,
   UiAction: UiActionSchema,
   UiActionPlan: UiActionPlanSchema,
+  UiTaskRunParams: UiTaskRunParamsSchema,
   UpdateRunParams: UpdateRunParamsSchema,
   TickEvent: TickEventSchema,
   ShutdownEvent: ShutdownEventSchema,

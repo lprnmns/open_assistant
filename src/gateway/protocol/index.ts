@@ -236,6 +236,8 @@ import {
   UiActionRiskSchema,
   UiActionSchema,
   type UiActionRisk,
+  type UiTaskRunParams,
+  UiTaskRunParamsSchema,
   type Snapshot,
   SnapshotSchema,
   type StateVersion,
@@ -450,6 +452,7 @@ export const validateChatAbortParams = ajv.compile<ChatAbortParams>(ChatAbortPar
 export const validateChatInjectParams = ajv.compile<ChatInjectParams>(ChatInjectParamsSchema);
 export const validateChatEvent = ajv.compile(ChatEventSchema);
 export const validateUiActionPlan = ajv.compile<UiActionPlan>(UiActionPlanSchema);
+export const validateUiTaskRunParams = ajv.compile<UiTaskRunParams>(UiTaskRunParamsSchema);
 export const validateUpdateRunParams = ajv.compile<UpdateRunParams>(UpdateRunParamsSchema);
 export const validateWebLoginStartParams =
   ajv.compile<WebLoginStartParams>(WebLoginStartParamsSchema);
@@ -597,6 +600,7 @@ export {
   UiActionRiskSchema,
   UiActionSchema,
   UiActionPlanSchema,
+  UiTaskRunParamsSchema,
   UpdateRunParamsSchema,
   TickEventSchema,
   ShutdownEventSchema,
@@ -717,4 +721,5 @@ export type {
   UiActionRisk,
   UiAction,
   UiActionPlan,
+  UiTaskRunParams,
 };

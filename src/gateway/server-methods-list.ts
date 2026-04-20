@@ -88,6 +88,7 @@ const BASE_METHODS = [
   "node.pending.drain",
   "node.pending.enqueue",
   "node.invoke",
+  "ui.task.run",
   "node.pending.pull",
   "node.pending.ack",
   "node.invoke.result",
