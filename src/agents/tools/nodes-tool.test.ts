@@ -129,6 +129,7 @@ describe("createNodesTool screen_record duration guardrails", () => {
     expect(tool.description).toContain("Structured UI Action plan");
     expect(tool.description).toContain("node_ref");
     expect(tool.description).toContain("tap_point");
+    expect(tool.description).toContain("home");
   });
 
   it("auto-selects the sole calendar-capable node for calendar.add invoke", async () => {

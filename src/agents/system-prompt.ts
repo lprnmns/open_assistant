@@ -220,7 +220,7 @@ function buildDeviceUiActionsSection(params: { isMinimal: boolean; availableTool
   }
   return [
     "## Device UI Actions",
-    '- For open-ended phone-control requests such as opening apps, tapping buttons, typing text, scrolling, or reading the visible screen, prefer `nodes(action="ui_task", objective="...")` so the gateway can observe the screen and run a closed-loop task.',
+    '- For open-ended phone-control requests such as opening apps, navigating home/back, tapping buttons, typing text, scrolling, or reading the visible screen, prefer `nodes(action="ui_task", objective="...")` so the gateway can observe the screen and run a closed-loop task.',
     '- Use low-level `nodes(action="invoke", invokeCommand="ui.actions.execute", invokeParamsJson="...")` only when you already have an exact Structured UI Action plan.',
     '- The plan JSON must use `kind:"ui_actions"`, `planId`, `targetDeviceId`, `idempotencyKey`, `risk`, `requiresConfirmation`, and an `actions` array.',
     "- When an observation returns `observedNodes`, prefer durable selectors (`id`, `content_desc`, `text`) when available; use `node_ref` only for exact, short-lived follow-up taps from the latest observation.",

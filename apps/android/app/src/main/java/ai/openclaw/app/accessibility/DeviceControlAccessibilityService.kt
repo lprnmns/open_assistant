@@ -206,10 +206,20 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             delay(PostActionDelayMs)
           }
           is OpenClawUiAction.Back -> {
-            if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
+            if (!performGlobalAction(globalNavigationActionId(action))) {
               throw DeviceControlExecutionException(
                 code = "ACTION_FAILED",
                 message = "Unable to perform Android back action.",
+              )
+            }
+            executed += 1
+            delay(PostActionDelayMs)
+          }
+          is OpenClawUiAction.Home -> {
+            if (!performGlobalAction(globalNavigationActionId(action))) {
+              throw DeviceControlExecutionException(
+                code = "ACTION_FAILED",
+                message = "Unable to perform Android home action.",
               )
             }
             executed += 1
@@ -518,3 +528,10 @@ internal fun observedBoundsCenter(bounds: DeviceControlObservedBounds): Pair<Flo
     second = (bounds.top + bounds.bottom) / 2f,
   )
 }
+
+internal fun globalNavigationActionId(action: OpenClawUiAction): Int =
+  when (action) {
+    is OpenClawUiAction.Back -> AccessibilityService.GLOBAL_ACTION_BACK
+    is OpenClawUiAction.Home -> AccessibilityService.GLOBAL_ACTION_HOME
+    else -> throw IllegalArgumentException("unsupported global navigation action")
+  }

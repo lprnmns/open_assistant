@@ -69,6 +69,8 @@ sealed class OpenClawUiAction {
 
   data class Back(val timeoutMs: Long?) : OpenClawUiAction()
 
+  data class Home(val timeoutMs: Long?) : OpenClawUiAction()
+
   data object ObserveScreen : OpenClawUiAction()
 }
 
@@ -146,6 +148,7 @@ private fun parseAction(obj: JsonObject): OpenClawUiAction {
     "wait_for_node" -> parseWaitForNode(obj)
     "scroll" -> parseScroll(obj)
     "back" -> parseBack(obj)
+    "home" -> parseHome(obj)
     "observe_screen" -> parseObserveScreen(obj)
     "request_confirmation" -> parseRequestConfirmation(obj)
     else -> throw IllegalArgumentException("unknown ui action $action")
@@ -231,6 +234,11 @@ private fun parseScroll(obj: JsonObject): OpenClawUiAction.Scroll {
 private fun parseBack(obj: JsonObject): OpenClawUiAction.Back {
   requireOnlyKeys(obj, setOf("action", "timeoutMs"), "action")
   return OpenClawUiAction.Back(timeoutMs = obj.optionalTimeoutMs())
+}
+
+private fun parseHome(obj: JsonObject): OpenClawUiAction.Home {
+  requireOnlyKeys(obj, setOf("action", "timeoutMs"), "action")
+  return OpenClawUiAction.Home(timeoutMs = obj.optionalTimeoutMs())
 }
 
 private fun parseObserveScreen(obj: JsonObject): OpenClawUiAction.ObserveScreen {

@@ -1,9 +1,19 @@
 package ai.openclaw.app.accessibility
 
+import android.accessibilityservice.AccessibilityService
+import ai.openclaw.app.protocol.OpenClawUiAction
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class DeviceControlAccessibilityServiceTest {
+  @Test
+  fun globalNavigationActionId_mapsHomeActionToAndroidHome() {
+    assertEquals(
+      AccessibilityService.GLOBAL_ACTION_HOME,
+      globalNavigationActionId(OpenClawUiAction.Home(timeoutMs = null)),
+    )
+  }
+
   @Test
   fun resolveClickableActionTarget_usesClickableAncestorForStaticText() {
     val root = FakeNode(id = "settings-tab", clickable = true)

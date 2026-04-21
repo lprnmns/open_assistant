@@ -142,6 +142,14 @@ const BackActionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const HomeActionSchema = Type.Object(
+  {
+    action: Type.Literal("home"),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
 const ObserveScreenActionSchema = Type.Object(
   {
     action: Type.Literal("observe_screen"),
@@ -166,6 +174,7 @@ export const UiActionSchema = Type.Union([
   WaitForNodeActionSchema,
   ScrollActionSchema,
   BackActionSchema,
+  HomeActionSchema,
   ObserveScreenActionSchema,
   RequestConfirmationActionSchema,
 ]);
