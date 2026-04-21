@@ -24,7 +24,7 @@ import { resolveSessionAgentId } from "../agent-scope.js";
 import { resolveImageSanitizationLimits } from "../image-sanitization.js";
 import { optionalStringEnum, stringEnum } from "../schema/typebox.js";
 import { sanitizeToolResultImages } from "../tool-images.js";
-import { type AnyAgentTool, jsonResult, readStringParam } from "./common.js";
+import { type AnyAgentTool, jsonResult, readStringParam, textResult } from "./common.js";
 import { callGatewayTool, readGatewayCallOptions } from "./gateway.js";
 import { listNodes, resolveNode, resolveNodeId, resolveNodeIdFromList } from "./nodes-utils.js";
 
@@ -162,6 +162,28 @@ function extractPairingRequestId(message: string): string | null {
   }
   const value = (match[1] ?? "").trim();
   return value.length > 0 ? value : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function uiTaskToolResult(payload: unknown): AgentToolResult<unknown> {
+  if (!isRecord(payload) || payload.status !== "needs_plan") {
+    return jsonResult(payload);
+  }
+  return textResult(
+    [
+      "UI task status: needs_plan.",
+      "Use the latest observations/observedNodes below to choose the next safe actions.",
+      'Call `nodes(action="ui_task", objective="...", uiTaskActionsJson="[...]")` with a JSON action array; prefer click_node selectors by id/content_desc/text/node_ref, and use tap_point only when no reliable selector exists.',
+      "Do not claim the phone task is complete until a follow-up ui_task call returns status=completed or a clear blocker is reached.",
+      "",
+      "Raw ui.task.run result:",
+      JSON.stringify(payload, null, 2),
+    ].join("\n"),
+    payload,
+  );
 }
 
 // Flattened schema: runtime validates per-action requirements.
@@ -604,7 +626,7 @@ export function createNodesTool(options?: {
               taskParams.actions = actions;
             }
 
-            return jsonResult(await callGatewayTool("ui.task.run", gatewayOpts, taskParams));
+            return uiTaskToolResult(await callGatewayTool("ui.task.run", gatewayOpts, taskParams));
           }
           case "camera_clip": {
             const node = readStringParam(params, "node", { required: true });

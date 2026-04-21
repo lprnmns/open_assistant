@@ -231,11 +231,13 @@ describe("createNodesTool screen_record duration guardrails", () => {
   it("runs a UI task through the gateway closed-loop task runner", async () => {
     gatewayMocks.callGatewayTool.mockResolvedValue({
       status: "needs_plan",
-      steps: [{ stage: "observe", payload: { observedNodes: [] } }],
+      steps: [
+        { stage: "observe", payload: { observedNodes: [{ nodeRef: "o1n1", text: "Search" }] } },
+      ],
     });
     const tool = createNodesTool();
 
-    await tool.execute("call-1", {
+    const result = await tool.execute("call-1", {
       action: "ui_task",
       objective: "Open Instagram and search Ali",
       maxSteps: 4,
@@ -252,6 +254,9 @@ describe("createNodesTool screen_record duration guardrails", () => {
         actions: [{ action: "open_app", target: "com.instagram.android" }],
       },
     );
+    expect(String(result.content?.[0]?.text)).toContain("needs_plan");
+    expect(String(result.content?.[0]?.text)).toContain("observedNodes");
+    expect(String(result.content?.[0]?.text)).toContain("uiTaskActionsJson");
   });
 
   it("resolves node query for UI task runs when node is supplied", async () => {
