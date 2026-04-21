@@ -35,6 +35,15 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(plan)).toBe(true);
   });
 
+  it("accepts bounded coordinate tap actions", () => {
+    const plan = {
+      ...validPlan,
+      actions: [{ action: "tap_point", x: 540, y: 960 }],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("rejects plans without an idempotency key", () => {
     const plan = { ...validPlan };
     delete (plan as Record<string, unknown>).idempotencyKey;

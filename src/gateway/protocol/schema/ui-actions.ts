@@ -6,6 +6,7 @@ export const UiActionRiskSchema = Type.String({
 });
 
 const UiActionTimeoutMsSchema = Type.Optional(Type.Integer({ minimum: 0, maximum: 120_000 }));
+const UiActionCoordinateSchema = Type.Number({ minimum: 0, maximum: 10_000 });
 
 const OpenAppActionSchema = Type.Object(
   {
@@ -69,6 +70,16 @@ const TypeTextActionSchema = Type.Object(
   {
     action: Type.Literal("type_text"),
     text: NonEmptyString,
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
+const TapPointActionSchema = Type.Object(
+  {
+    action: Type.Literal("tap_point"),
+    x: UiActionCoordinateSchema,
+    y: UiActionCoordinateSchema,
     timeoutMs: UiActionTimeoutMsSchema,
   },
   { additionalProperties: false },
@@ -151,6 +162,7 @@ export const UiActionSchema = Type.Union([
   OpenAppActionSchema,
   ClickNodeActionSchema,
   TypeTextActionSchema,
+  TapPointActionSchema,
   WaitForNodeActionSchema,
   ScrollActionSchema,
   BackActionSchema,

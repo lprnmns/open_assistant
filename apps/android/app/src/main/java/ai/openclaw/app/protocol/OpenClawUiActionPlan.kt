@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
@@ -39,6 +40,12 @@ sealed class OpenClawUiAction {
 
   data class TypeText(
     val text: String,
+    val timeoutMs: Long?,
+  ) : OpenClawUiAction()
+
+  data class TapPoint(
+    val x: Float,
+    val y: Float,
     val timeoutMs: Long?,
   ) : OpenClawUiAction()
 
@@ -135,6 +142,7 @@ private fun parseAction(obj: JsonObject): OpenClawUiAction {
     "open_app" -> parseOpenApp(obj)
     "click_node" -> parseClickNode(obj)
     "type_text" -> parseTypeText(obj)
+    "tap_point" -> parseTapPoint(obj)
     "wait_for_node" -> parseWaitForNode(obj)
     "scroll" -> parseScroll(obj)
     "back" -> parseBack(obj)
@@ -174,6 +182,15 @@ private fun parseTypeText(obj: JsonObject): OpenClawUiAction.TypeText {
   requireOnlyKeys(obj, setOf("action", "text", "timeoutMs"), "action")
   return OpenClawUiAction.TypeText(
     text = obj.requiredString("text"),
+    timeoutMs = obj.optionalTimeoutMs(),
+  )
+}
+
+private fun parseTapPoint(obj: JsonObject): OpenClawUiAction.TapPoint {
+  requireOnlyKeys(obj, setOf("action", "x", "y", "timeoutMs"), "action")
+  return OpenClawUiAction.TapPoint(
+    x = obj.requiredCoordinate("x"),
+    y = obj.requiredCoordinate("y"),
     timeoutMs = obj.optionalTimeoutMs(),
   )
 }
@@ -260,6 +277,15 @@ private fun JsonObject.optionalTimeoutMs(): Long? {
     throw IllegalArgumentException("timeoutMs must be between 0 and 120000")
   }
   return timeoutMs
+}
+
+private fun JsonObject.requiredCoordinate(key: String): Float {
+  val coordinate =
+    get(key)?.jsonPrimitive?.doubleOrNull ?: throw IllegalArgumentException("$key required")
+  if (coordinate !in 0.0..10_000.0) {
+    throw IllegalArgumentException("$key must be between 0 and 10000")
+  }
+  return coordinate.toFloat()
 }
 
 private fun requireOnlyKeys(

@@ -175,6 +175,16 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             executed += 1
             delay(PostActionDelayMs)
           }
+          is OpenClawUiAction.TapPoint -> {
+            if (!tapPoint(action.x, action.y)) {
+              throw DeviceControlExecutionException(
+                code = "ACTION_FAILED",
+                message = "Unable to tap the requested screen coordinate.",
+              )
+            }
+            executed += 1
+            delay(PostActionDelayMs)
+          }
           is OpenClawUiAction.WaitForNode -> {
             waitForNode(action.selector(), action.timeoutMs ?: DefaultActionTimeoutMs)
             executed += 1

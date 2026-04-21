@@ -95,6 +95,47 @@ class OpenClawUiActionPlanParserTest {
   }
 
   @Test
+  fun parsesTapPointActions() {
+    val plan =
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [{ "action": "tap_point", "x": 540, "y": 960 }]
+        }
+        """.trimIndent(),
+      )
+
+    val action = plan.actions.single() as OpenClawUiAction.TapPoint
+    assertEquals(540f, action.x)
+    assertEquals(960f, action.y)
+  }
+
+  @Test
+  fun rejectsTapPointActionsWithNegativeCoordinates() {
+    assertParseFails("x must be between 0 and 10000") {
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [{ "action": "tap_point", "x": -1, "y": 960 }]
+        }
+        """.trimIndent(),
+      )
+    }
+  }
+
+  @Test
   fun rejectsArbitraryActionFields() {
     assertParseFails("unexpected action property shell") {
       parseOpenClawUiActionPlan(
