@@ -74,6 +74,27 @@ class OpenClawUiActionPlanParserTest {
   }
 
   @Test
+  fun parsesClickActionsWithObservedNodeReference() {
+    val plan =
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [{ "action": "click_node", "node_ref": "o1n13" }]
+        }
+        """.trimIndent(),
+      )
+
+    val action = plan.actions.single() as OpenClawUiAction.ClickNode
+    assertEquals("o1n13", action.nodeRef)
+  }
+
+  @Test
   fun rejectsArbitraryActionFields() {
     assertParseFails("unexpected action property shell") {
       parseOpenClawUiActionPlan(

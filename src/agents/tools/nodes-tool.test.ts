@@ -127,6 +127,7 @@ describe("createNodesTool screen_record duration guardrails", () => {
     expect(tool.description).toContain("calendarCandidate.toolInput");
     expect(tool.description).toContain("browser automation");
     expect(tool.description).toContain("Structured UI Action plan");
+    expect(tool.description).toContain("node_ref");
   });
 
   it("auto-selects the sole calendar-capable node for calendar.add invoke", async () => {
@@ -241,11 +242,15 @@ describe("createNodesTool screen_record duration guardrails", () => {
     });
 
     expect(nodeUtilsMocks.resolveNodeId).not.toHaveBeenCalled();
-    expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith("ui.task.run", {}, {
-      objective: "Open Instagram and search Ali",
-      maxSteps: 4,
-      actions: [{ action: "open_app", target: "com.instagram.android" }],
-    });
+    expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith(
+      "ui.task.run",
+      {},
+      {
+        objective: "Open Instagram and search Ali",
+        maxSteps: 4,
+        actions: [{ action: "open_app", target: "com.instagram.android" }],
+      },
+    );
   });
 
   it("resolves node query for UI task runs when node is supplied", async () => {
@@ -260,10 +265,14 @@ describe("createNodesTool screen_record duration guardrails", () => {
     });
 
     expect(nodeUtilsMocks.resolveNodeId).toHaveBeenCalledWith({}, "Redmi");
-    expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith("ui.task.run", {}, {
-      objective: "Observe screen",
-      nodeId: "phone-1",
-    });
+    expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith(
+      "ui.task.run",
+      {},
+      {
+        objective: "Observe screen",
+        nodeId: "phone-1",
+      },
+    );
   });
 
   it("caps durationMs schema at 300000", () => {

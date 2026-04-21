@@ -49,10 +49,20 @@ const ClickByTextActionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const ClickByNodeRefActionSchema = Type.Object(
+  {
+    action: Type.Literal("click_node"),
+    node_ref: NonEmptyString,
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
 export const ClickNodeActionSchema = Type.Union([
   ClickByIdActionSchema,
   ClickByContentDescriptionActionSchema,
   ClickByTextActionSchema,
+  ClickByNodeRefActionSchema,
 ]);
 
 const TypeTextActionSchema = Type.Object(

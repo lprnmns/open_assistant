@@ -33,6 +33,7 @@ sealed class OpenClawUiAction {
     val id: String?,
     val contentDesc: String?,
     val text: String?,
+    val nodeRef: String?,
     val timeoutMs: Long?,
   ) : OpenClawUiAction()
 
@@ -152,17 +153,19 @@ private fun parseOpenApp(obj: JsonObject): OpenClawUiAction.OpenApp {
 }
 
 private fun parseClickNode(obj: JsonObject): OpenClawUiAction.ClickNode {
-  requireOnlyKeys(obj, setOf("action", "id", "content_desc", "text", "timeoutMs"), "action")
+  requireOnlyKeys(obj, setOf("action", "id", "content_desc", "text", "node_ref", "timeoutMs"), "action")
   val id = obj.optionalString("id")
   val contentDesc = obj.optionalString("content_desc")
   val text = obj.optionalString("text")
-  if (id == null && contentDesc == null && text == null) {
+  val nodeRef = obj.optionalString("node_ref")
+  if (id == null && contentDesc == null && text == null && nodeRef == null) {
     throw IllegalArgumentException("click_node requires a selector")
   }
   return OpenClawUiAction.ClickNode(
     id = id,
     contentDesc = contentDesc,
     text = text,
+    nodeRef = nodeRef,
     timeoutMs = obj.optionalTimeoutMs(),
   )
 }

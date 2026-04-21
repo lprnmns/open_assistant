@@ -26,6 +26,15 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(validPlan)).toBe(true);
   });
 
+  it("accepts click actions that target an observed node reference", () => {
+    const plan = {
+      ...validPlan,
+      actions: [{ action: "click_node", node_ref: "o1n13" }],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("rejects plans without an idempotency key", () => {
     const plan = { ...validPlan };
     delete (plan as Record<string, unknown>).idempotencyKey;

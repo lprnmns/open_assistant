@@ -58,6 +58,8 @@ class DeviceControlExecutionException(
 ) : Exception(message)
 
 class DeviceControlAccessibilityService : AccessibilityService() {
+  private val observedNodesByRef = mutableMapOf<String, DeviceControlObservedNode>()
+
   override fun onServiceConnected() {
     super.onServiceConnected()
     activeService = this
@@ -133,12 +135,27 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             delay(PostActionDelayMs)
           }
           is OpenClawUiAction.ClickNode -> {
-            val node = waitForNode(action.selector(), action.timeoutMs ?: DefaultActionTimeoutMs)
-            if (!performNodeClick(node)) {
-              throw DeviceControlExecutionException(
-                code = "ACTION_FAILED",
-                message = "Unable to click the requested UI node.",
-              )
+            if (action.nodeRef != null) {
+              val observedNode =
+                observedNodesByRef[action.nodeRef]
+                  ?: throw DeviceControlExecutionException(
+                    code = "NODE_NOT_FOUND",
+                    message = "No observed UI node matched node_ref ${action.nodeRef}. Run observe_screen first.",
+                  )
+              if (!tapObservedBoundsCenter(observedNode.bounds)) {
+                throw DeviceControlExecutionException(
+                  code = "ACTION_FAILED",
+                  message = "Unable to tap the observed UI node.",
+                )
+              }
+            } else {
+              val node = waitForNode(action.selector(), action.timeoutMs ?: DefaultActionTimeoutMs)
+              if (!performNodeClick(node)) {
+                throw DeviceControlExecutionException(
+                  code = "ACTION_FAILED",
+                  message = "Unable to click the requested UI node.",
+                )
+              }
             }
             executed += 1
             delay(PostActionDelayMs)
@@ -229,17 +246,32 @@ class DeviceControlAccessibilityService : AccessibilityService() {
       (clickTarget !== node && node.performAction(AccessibilityNodeInfo.ACTION_CLICK))
   }
 
-  private suspend fun tapNodeCenter(node: AccessibilityNodeInfo): Boolean =
+  private suspend fun tapNodeCenter(node: AccessibilityNodeInfo): Boolean {
+    val bounds = Rect()
+    node.getBoundsInScreen(bounds)
+    return tapObservedBoundsCenter(
+      DeviceControlObservedBounds(
+        left = bounds.left,
+        top = bounds.top,
+        right = bounds.right,
+        bottom = bounds.bottom,
+      ),
+    )
+  }
+
+  private suspend fun tapObservedBoundsCenter(bounds: DeviceControlObservedBounds): Boolean {
+    val center = observedBoundsCenter(bounds) ?: return false
+    return tapPoint(center.first, center.second)
+  }
+
+  private suspend fun tapPoint(
+    x: Float,
+    y: Float,
+  ): Boolean =
     suspendCancellableCoroutine { continuation ->
-      val bounds = Rect()
-      node.getBoundsInScreen(bounds)
-      if (bounds.isEmpty) {
-        continuation.resume(false)
-        return@suspendCancellableCoroutine
-      }
       val path =
         Path().apply {
-          moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+          moveTo(x, y)
         }
       val gesture =
         GestureDescription.Builder()
@@ -331,12 +363,21 @@ class DeviceControlAccessibilityService : AccessibilityService() {
   }
 
   private fun observeStructuredNodes(observationIndex: Int): List<DeviceControlObservedNode> {
-    val root = rootInActiveWindow ?: return emptyList()
-    return walk(root)
+    val root =
+      rootInActiveWindow
+        ?: run {
+          observedNodesByRef.clear()
+          return emptyList()
+        }
+    val snapshot =
+      walk(root)
       .asSequence()
       .mapIndexedNotNull { index, node -> node.toObservedNode(observationIndex, index) }
       .take(MaxObservedNodes)
       .toList()
+    observedNodesByRef.clear()
+    snapshot.forEach { node -> observedNodesByRef[node.nodeRef] = node }
+    return snapshot
   }
 
   private fun AccessibilityNodeInfo.toObservedNode(
@@ -456,4 +497,14 @@ internal fun <T> resolveClickableActionTarget(
     current = parentOf(current)
   }
   return start
+}
+
+internal fun observedBoundsCenter(bounds: DeviceControlObservedBounds): Pair<Float, Float>? {
+  if (bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
+    return null
+  }
+  return Pair(
+    first = (bounds.left + bounds.right) / 2f,
+    second = (bounds.top + bounds.bottom) / 2f,
+  )
 }
