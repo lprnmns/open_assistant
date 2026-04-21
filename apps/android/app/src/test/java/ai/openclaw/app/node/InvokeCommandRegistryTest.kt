@@ -29,6 +29,7 @@ class InvokeCommandRegistryTest {
       OpenClawCapability.Photos.rawValue,
       OpenClawCapability.Contacts.rawValue,
       OpenClawCapability.Calendar.rawValue,
+      OpenClawCapability.UiControl.rawValue,
     )
 
   private val optionalCapabilities =
@@ -39,7 +40,6 @@ class InvokeCommandRegistryTest {
       OpenClawCapability.CallLog.rawValue,
       OpenClawCapability.VoiceWake.rawValue,
       OpenClawCapability.Motion.rawValue,
-      OpenClawCapability.UiControl.rawValue,
     )
 
   private val coreCommands =
@@ -59,6 +59,7 @@ class InvokeCommandRegistryTest {
       OpenClawContactsCommand.Add.rawValue,
       OpenClawCalendarCommand.Events.rawValue,
       OpenClawCalendarCommand.Add.rawValue,
+      OpenClawUiActionCommand.Execute.rawValue,
     )
 
   private val optionalCommands =
@@ -72,7 +73,6 @@ class InvokeCommandRegistryTest {
       OpenClawSmsCommand.Send.rawValue,
       OpenClawSmsCommand.Search.rawValue,
       OpenClawCallLogCommand.Search.rawValue,
-      OpenClawUiActionCommand.Execute.rawValue,
     )
 
   private val debugCommands = setOf("debug.logs", "debug.ed25519")

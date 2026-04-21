@@ -100,10 +100,7 @@ object InvokeCommandRegistry {
         name = OpenClawCapability.CallLog.rawValue,
         availability = NodeCapabilityAvailability.CallLogAvailable,
       ),
-      NodeCapabilitySpec(
-        name = OpenClawCapability.UiControl.rawValue,
-        availability = NodeCapabilityAvailability.DeviceControlEnabled,
-      ),
+      NodeCapabilitySpec(name = OpenClawCapability.UiControl.rawValue),
     )
 
   val all: List<InvokeCommandSpec> =
@@ -226,7 +223,6 @@ object InvokeCommandRegistry {
       ),
       InvokeCommandSpec(
         name = OpenClawUiActionCommand.Execute.rawValue,
-        availability = InvokeCommandAvailability.DeviceControlEnabled,
       ),
       InvokeCommandSpec(
         name = "debug.logs",
