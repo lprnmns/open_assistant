@@ -15,6 +15,22 @@ class DeviceControlAccessibilityServiceTest {
   }
 
   @Test
+  fun globalNavigationActionId_mapsSystemNavigationActions() {
+    assertEquals(
+      AccessibilityService.GLOBAL_ACTION_RECENTS,
+      globalNavigationActionId(OpenClawUiAction.Recents(timeoutMs = null)),
+    )
+    assertEquals(
+      AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS,
+      globalNavigationActionId(OpenClawUiAction.Notifications(timeoutMs = null)),
+    )
+    assertEquals(
+      AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS,
+      globalNavigationActionId(OpenClawUiAction.QuickSettings(timeoutMs = null)),
+    )
+  }
+
+  @Test
   fun resolveClickableActionTarget_usesClickableAncestorForStaticText() {
     val root = FakeNode(id = "settings-tab", clickable = true)
     val label = FakeNode(id = "settings-label", clickable = false, parent = root)

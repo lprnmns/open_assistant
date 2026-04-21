@@ -150,6 +150,30 @@ const HomeActionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const RecentsActionSchema = Type.Object(
+  {
+    action: Type.Literal("recents"),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
+const NotificationsActionSchema = Type.Object(
+  {
+    action: Type.Literal("notifications"),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
+const QuickSettingsActionSchema = Type.Object(
+  {
+    action: Type.Literal("quick_settings"),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
 const ObserveScreenActionSchema = Type.Object(
   {
     action: Type.Literal("observe_screen"),
@@ -175,6 +199,9 @@ export const UiActionSchema = Type.Union([
   ScrollActionSchema,
   BackActionSchema,
   HomeActionSchema,
+  RecentsActionSchema,
+  NotificationsActionSchema,
+  QuickSettingsActionSchema,
   ObserveScreenActionSchema,
   RequestConfirmationActionSchema,
 ]);

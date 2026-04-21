@@ -53,6 +53,15 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(plan)).toBe(true);
   });
 
+  it("accepts bounded Android system navigation actions", () => {
+    const plan = {
+      ...validPlan,
+      actions: [{ action: "recents" }, { action: "notifications" }, { action: "quick_settings" }],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("rejects plans without an idempotency key", () => {
     const plan = { ...validPlan };
     delete (plan as Record<string, unknown>).idempotencyKey;

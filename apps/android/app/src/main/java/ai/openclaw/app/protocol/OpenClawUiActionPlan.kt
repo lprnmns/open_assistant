@@ -71,6 +71,12 @@ sealed class OpenClawUiAction {
 
   data class Home(val timeoutMs: Long?) : OpenClawUiAction()
 
+  data class Recents(val timeoutMs: Long?) : OpenClawUiAction()
+
+  data class Notifications(val timeoutMs: Long?) : OpenClawUiAction()
+
+  data class QuickSettings(val timeoutMs: Long?) : OpenClawUiAction()
+
   data object ObserveScreen : OpenClawUiAction()
 }
 
@@ -149,6 +155,9 @@ private fun parseAction(obj: JsonObject): OpenClawUiAction {
     "scroll" -> parseScroll(obj)
     "back" -> parseBack(obj)
     "home" -> parseHome(obj)
+    "recents" -> parseRecents(obj)
+    "notifications" -> parseNotifications(obj)
+    "quick_settings" -> parseQuickSettings(obj)
     "observe_screen" -> parseObserveScreen(obj)
     "request_confirmation" -> parseRequestConfirmation(obj)
     else -> throw IllegalArgumentException("unknown ui action $action")
@@ -239,6 +248,21 @@ private fun parseBack(obj: JsonObject): OpenClawUiAction.Back {
 private fun parseHome(obj: JsonObject): OpenClawUiAction.Home {
   requireOnlyKeys(obj, setOf("action", "timeoutMs"), "action")
   return OpenClawUiAction.Home(timeoutMs = obj.optionalTimeoutMs())
+}
+
+private fun parseRecents(obj: JsonObject): OpenClawUiAction.Recents {
+  requireOnlyKeys(obj, setOf("action", "timeoutMs"), "action")
+  return OpenClawUiAction.Recents(timeoutMs = obj.optionalTimeoutMs())
+}
+
+private fun parseNotifications(obj: JsonObject): OpenClawUiAction.Notifications {
+  requireOnlyKeys(obj, setOf("action", "timeoutMs"), "action")
+  return OpenClawUiAction.Notifications(timeoutMs = obj.optionalTimeoutMs())
+}
+
+private fun parseQuickSettings(obj: JsonObject): OpenClawUiAction.QuickSettings {
+  requireOnlyKeys(obj, setOf("action", "timeoutMs"), "action")
+  return OpenClawUiAction.QuickSettings(timeoutMs = obj.optionalTimeoutMs())
 }
 
 private fun parseObserveScreen(obj: JsonObject): OpenClawUiAction.ObserveScreen {

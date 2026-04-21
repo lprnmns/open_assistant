@@ -225,6 +225,19 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             executed += 1
             delay(PostActionDelayMs)
           }
+          is OpenClawUiAction.Recents,
+          is OpenClawUiAction.Notifications,
+          is OpenClawUiAction.QuickSettings,
+          -> {
+            if (!performGlobalAction(globalNavigationActionId(action))) {
+              throw DeviceControlExecutionException(
+                code = "ACTION_FAILED",
+                message = "Unable to perform Android system navigation action.",
+              )
+            }
+            executed += 1
+            delay(PostActionDelayMs)
+          }
           OpenClawUiAction.ObserveScreen -> {
             observationIndex += 1
             observations += observeRootSummary()
@@ -533,5 +546,8 @@ internal fun globalNavigationActionId(action: OpenClawUiAction): Int =
   when (action) {
     is OpenClawUiAction.Back -> AccessibilityService.GLOBAL_ACTION_BACK
     is OpenClawUiAction.Home -> AccessibilityService.GLOBAL_ACTION_HOME
+    is OpenClawUiAction.Recents -> AccessibilityService.GLOBAL_ACTION_RECENTS
+    is OpenClawUiAction.Notifications -> AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS
+    is OpenClawUiAction.QuickSettings -> AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS
     else -> throw IllegalArgumentException("unsupported global navigation action")
   }

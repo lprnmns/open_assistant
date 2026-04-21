@@ -137,6 +137,32 @@ class OpenClawUiActionPlanParserTest {
   }
 
   @Test
+  fun parsesSystemNavigationActions() {
+    val plan =
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [
+            { "action": "recents" },
+            { "action": "notifications" },
+            { "action": "quick_settings" }
+          ]
+        }
+        """.trimIndent(),
+      )
+
+    assertTrue(plan.actions[0] is OpenClawUiAction.Recents)
+    assertTrue(plan.actions[1] is OpenClawUiAction.Notifications)
+    assertTrue(plan.actions[2] is OpenClawUiAction.QuickSettings)
+  }
+
+  @Test
   fun rejectsTapPointActionsWithNegativeCoordinates() {
     assertParseFails("x must be between 0 and 10000") {
       parseOpenClawUiActionPlan(
