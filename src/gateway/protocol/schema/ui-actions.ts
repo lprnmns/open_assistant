@@ -174,6 +174,14 @@ const QuickSettingsActionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const ImeEnterActionSchema = Type.Object(
+  {
+    action: Type.Literal("ime_enter"),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
 const ObserveScreenActionSchema = Type.Object(
   {
     action: Type.Literal("observe_screen"),
@@ -202,6 +210,7 @@ export const UiActionSchema = Type.Union([
   RecentsActionSchema,
   NotificationsActionSchema,
   QuickSettingsActionSchema,
+  ImeEnterActionSchema,
   ObserveScreenActionSchema,
   RequestConfirmationActionSchema,
 ]);

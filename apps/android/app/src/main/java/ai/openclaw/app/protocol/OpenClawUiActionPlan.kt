@@ -77,6 +77,8 @@ sealed class OpenClawUiAction {
 
   data class QuickSettings(val timeoutMs: Long?) : OpenClawUiAction()
 
+  data class ImeEnter(val timeoutMs: Long?) : OpenClawUiAction()
+
   data object ObserveScreen : OpenClawUiAction()
 }
 
@@ -158,6 +160,7 @@ private fun parseAction(obj: JsonObject): OpenClawUiAction {
     "recents" -> parseRecents(obj)
     "notifications" -> parseNotifications(obj)
     "quick_settings" -> parseQuickSettings(obj)
+    "ime_enter" -> parseImeEnter(obj)
     "observe_screen" -> parseObserveScreen(obj)
     "request_confirmation" -> parseRequestConfirmation(obj)
     else -> throw IllegalArgumentException("unknown ui action $action")
@@ -263,6 +266,11 @@ private fun parseNotifications(obj: JsonObject): OpenClawUiAction.Notifications 
 private fun parseQuickSettings(obj: JsonObject): OpenClawUiAction.QuickSettings {
   requireOnlyKeys(obj, setOf("action", "timeoutMs"), "action")
   return OpenClawUiAction.QuickSettings(timeoutMs = obj.optionalTimeoutMs())
+}
+
+private fun parseImeEnter(obj: JsonObject): OpenClawUiAction.ImeEnter {
+  requireOnlyKeys(obj, setOf("action", "timeoutMs"), "action")
+  return OpenClawUiAction.ImeEnter(timeoutMs = obj.optionalTimeoutMs())
 }
 
 private fun parseObserveScreen(obj: JsonObject): OpenClawUiAction.ObserveScreen {

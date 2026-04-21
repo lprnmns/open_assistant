@@ -62,6 +62,15 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(plan)).toBe(true);
   });
 
+  it("accepts Android IME enter actions", () => {
+    const plan = {
+      ...validPlan,
+      actions: [{ action: "ime_enter" }],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("rejects plans without an idempotency key", () => {
     const plan = { ...validPlan };
     delete (plan as Record<string, unknown>).idempotencyKey;

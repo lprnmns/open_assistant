@@ -31,6 +31,14 @@ class DeviceControlAccessibilityServiceTest {
   }
 
   @Test
+  fun imeEnterActionId_usesAndroidImeEnterAction() {
+    assertEquals(
+      android.R.id.accessibilityActionImeEnter,
+      imeEnterActionId(),
+    )
+  }
+
+  @Test
   fun resolveClickableActionTarget_usesClickableAncestorForStaticText() {
     val root = FakeNode(id = "settings-tab", clickable = true)
     val label = FakeNode(id = "settings-label", clickable = false, parent = root)

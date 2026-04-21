@@ -175,6 +175,17 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             executed += 1
             delay(PostActionDelayMs)
           }
+          is OpenClawUiAction.ImeEnter -> {
+            val node = focusedEditableNode()
+            if (!node.performAction(imeEnterActionId())) {
+              throw DeviceControlExecutionException(
+                code = "ACTION_FAILED",
+                message = "Unable to perform IME enter on the focused UI node.",
+              )
+            }
+            executed += 1
+            delay(PostActionDelayMs)
+          }
           is OpenClawUiAction.TapPoint -> {
             if (!tapPoint(action.x, action.y)) {
               throw DeviceControlExecutionException(
@@ -551,3 +562,5 @@ internal fun globalNavigationActionId(action: OpenClawUiAction): Int =
     is OpenClawUiAction.QuickSettings -> AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS
     else -> throw IllegalArgumentException("unsupported global navigation action")
   }
+
+internal fun imeEnterActionId(): Int = android.R.id.accessibilityActionImeEnter

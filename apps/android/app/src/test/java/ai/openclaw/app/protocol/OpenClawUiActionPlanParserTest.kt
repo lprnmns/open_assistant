@@ -163,6 +163,26 @@ class OpenClawUiActionPlanParserTest {
   }
 
   @Test
+  fun parsesImeEnterActions() {
+    val plan =
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [{ "action": "ime_enter" }]
+        }
+        """.trimIndent(),
+      )
+
+    assertTrue(plan.actions.single() is OpenClawUiAction.ImeEnter)
+  }
+
+  @Test
   fun rejectsTapPointActionsWithNegativeCoordinates() {
     assertParseFails("x must be between 0 and 10000") {
       parseOpenClawUiActionPlan(
