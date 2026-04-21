@@ -386,6 +386,7 @@ describe("buildAgentSystemPrompt", () => {
     });
 
     expect(prompt).toContain("## Device UI Actions");
+    expect(prompt).toContain('nodes(action="ui_task"');
     expect(prompt).toContain('invokeCommand="ui.actions.execute"');
     expect(prompt).toContain('kind:"ui_actions"');
     expect(prompt).toContain("Android deviceControl/accessibility");

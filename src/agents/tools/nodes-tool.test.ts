@@ -122,6 +122,7 @@ describe("createNodesTool screen_record duration guardrails", () => {
     const tool = createNodesTool();
     expect(tool.description).toContain('invokeCommand="calendar.add"');
     expect(tool.description).toContain('invokeCommand="ui.actions.execute"');
+    expect(tool.description).toContain('action="ui_task"');
     expect(tool.description).toContain("exactly one capable node");
     expect(tool.description).toContain("calendarCandidate.toolInput");
     expect(tool.description).toContain("browser automation");
@@ -223,6 +224,46 @@ describe("createNodesTool screen_record duration guardrails", () => {
         idempotencyKey: expect.any(String),
       }),
     );
+  });
+
+  it("runs a UI task through the gateway closed-loop task runner", async () => {
+    gatewayMocks.callGatewayTool.mockResolvedValue({
+      status: "needs_plan",
+      steps: [{ stage: "observe", payload: { observedNodes: [] } }],
+    });
+    const tool = createNodesTool();
+
+    await tool.execute("call-1", {
+      action: "ui_task",
+      objective: "Open Instagram and search Ali",
+      maxSteps: 4,
+      uiTaskActionsJson: '[{"action":"open_app","target":"com.instagram.android"}]',
+    });
+
+    expect(nodeUtilsMocks.resolveNodeId).not.toHaveBeenCalled();
+    expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith("ui.task.run", {}, {
+      objective: "Open Instagram and search Ali",
+      maxSteps: 4,
+      actions: [{ action: "open_app", target: "com.instagram.android" }],
+    });
+  });
+
+  it("resolves node query for UI task runs when node is supplied", async () => {
+    gatewayMocks.callGatewayTool.mockResolvedValue({ status: "needs_plan" });
+    nodeUtilsMocks.resolveNodeId.mockResolvedValueOnce("phone-1");
+    const tool = createNodesTool();
+
+    await tool.execute("call-1", {
+      action: "ui_task",
+      node: "Redmi",
+      objective: "Observe screen",
+    });
+
+    expect(nodeUtilsMocks.resolveNodeId).toHaveBeenCalledWith({}, "Redmi");
+    expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith("ui.task.run", {}, {
+      objective: "Observe screen",
+      nodeId: "phone-1",
+    });
   });
 
   it("caps durationMs schema at 300000", () => {

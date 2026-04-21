@@ -47,6 +47,7 @@ const NODES_TOOL_ACTIONS = [
   "device_info",
   "device_permissions",
   "device_health",
+  "ui_task",
   "run",
   "invoke",
 ] as const;
@@ -56,6 +57,7 @@ const NOTIFY_DELIVERIES = ["system", "overlay", "auto"] as const;
 const NOTIFICATIONS_ACTIONS = ["open", "dismiss", "reply"] as const;
 const CAMERA_FACING = ["front", "back", "both"] as const;
 const LOCATION_ACCURACY = ["coarse", "balanced", "precise"] as const;
+const UI_ACTION_RISKS = ["low", "medium", "high"] as const;
 const MEDIA_INVOKE_ACTIONS = {
   "camera.snap": "camera_snap",
   "camera.clip": "camera_clip",
@@ -200,6 +202,13 @@ const NodesToolSchema = Type.Object({
   notificationAction: optionalStringEnum(NOTIFICATIONS_ACTIONS),
   notificationKey: Type.Optional(Type.String()),
   notificationReplyText: Type.Optional(Type.String()),
+  // ui_task
+  objective: Type.Optional(Type.String()),
+  uiTaskActionsJson: Type.Optional(Type.String()),
+  uiTaskDryRun: Type.Optional(Type.Boolean()),
+  uiTaskRequiresConfirmation: Type.Optional(Type.Boolean()),
+  maxSteps: Type.Optional(Type.Number()),
+  risk: optionalStringEnum(UI_ACTION_RISKS),
   // run
   command: Type.Optional(Type.Array(Type.String())),
   cwd: Type.Optional(Type.String()),
@@ -237,7 +246,7 @@ export function createNodesTool(options?: {
     name: "nodes",
     ownerOnly: true,
     description:
-      'Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/run/invoke). For invokeCommand="calendar.add" or invokeCommand="ui.actions.execute", node may be omitted when exactly one capable node is available. If you already have a calendarCandidate.toolInput, call nodes with it directly before asking follow-up questions or using browser automation. For phone UI-control requests, execute a Structured UI Action plan with invokeCommand="ui.actions.execute".',
+      'Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/ui_task/run/invoke). For phone UI-control requests, prefer action="ui_task" so the gateway can observe the screen and run a closed-loop task; use invokeCommand="ui.actions.execute" only when you already have an exact Structured UI Action plan. For invokeCommand="calendar.add" or invokeCommand="ui.actions.execute", node may be omitted when exactly one capable node exists. If you already have a calendarCandidate.toolInput, call nodes with it directly before asking follow-up questions or using browser automation.',
     parameters: NodesToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -556,6 +565,46 @@ export function createNodesTool(options?: {
             const payload =
               payloadRaw && typeof payloadRaw === "object" && payloadRaw !== null ? payloadRaw : {};
             return jsonResult(payload);
+          }
+          case "ui_task": {
+            const objective = readStringParam(params, "objective", { required: true });
+            const taskParams: Record<string, unknown> = { objective };
+            const node = readStringParam(params, "node");
+            if (node) {
+              taskParams.nodeId = await resolveNodeId(gatewayOpts, node);
+            }
+            if (typeof params.maxSteps === "number" && Number.isFinite(params.maxSteps)) {
+              taskParams.maxSteps = Math.trunc(params.maxSteps);
+            }
+            if (typeof params.risk === "string" && params.risk.trim()) {
+              taskParams.risk = params.risk.trim();
+            }
+            if (typeof params.uiTaskDryRun === "boolean") {
+              taskParams.dryRun = params.uiTaskDryRun;
+            }
+            if (typeof params.uiTaskRequiresConfirmation === "boolean") {
+              taskParams.requiresConfirmation = params.uiTaskRequiresConfirmation;
+            }
+
+            const actionsJson =
+              typeof params.uiTaskActionsJson === "string" ? params.uiTaskActionsJson.trim() : "";
+            if (actionsJson) {
+              let actions: unknown;
+              try {
+                actions = JSON.parse(actionsJson);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                throw new Error(`uiTaskActionsJson must be valid JSON: ${message}`, {
+                  cause: err,
+                });
+              }
+              if (!Array.isArray(actions)) {
+                throw new Error("uiTaskActionsJson must be a JSON array");
+              }
+              taskParams.actions = actions;
+            }
+
+            return jsonResult(await callGatewayTool("ui.task.run", gatewayOpts, taskParams));
           }
           case "camera_clip": {
             const node = readStringParam(params, "node", { required: true });

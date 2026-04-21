@@ -220,7 +220,8 @@ function buildDeviceUiActionsSection(params: { isMinimal: boolean; availableTool
   }
   return [
     "## Device UI Actions",
-    '- For phone-control requests such as opening apps, tapping buttons, typing text, scrolling, or reading the visible screen, execute a Structured UI Action plan with `nodes(action="invoke", invokeCommand="ui.actions.execute", invokeParamsJson="...")`.',
+    '- For open-ended phone-control requests such as opening apps, tapping buttons, typing text, scrolling, or reading the visible screen, prefer `nodes(action="ui_task", objective="...")` so the gateway can observe the screen and run a closed-loop task.',
+    '- Use low-level `nodes(action="invoke", invokeCommand="ui.actions.execute", invokeParamsJson="...")` only when you already have an exact Structured UI Action plan.',
     '- The plan JSON must use `kind:"ui_actions"`, `planId`, `targetDeviceId`, `idempotencyKey`, `risk`, `requiresConfirmation`, and an `actions` array.',
     "- Omit `node` for `ui.actions.execute` unless a prior tool result says there are multiple UI-control capable nodes or no UI-control node is available.",
     '- Use `nodes(action="device_permissions")` first when you need to confirm whether Android deviceControl/accessibility is enabled.',
