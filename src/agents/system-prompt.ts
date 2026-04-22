@@ -220,13 +220,14 @@ function buildDeviceUiActionsSection(params: { isMinimal: boolean; availableTool
   }
   return [
     "## Device UI Actions",
-    '- For open-ended phone-control requests such as opening apps, navigating home/back/recents/notifications/quick_settings, tapping buttons, typing text, using `ime_enter` after text entry, scrolling, or reading the visible screen, prefer `nodes(action="ui_task", objective="...")` so the gateway can observe the screen and run a closed-loop task.',
+    '- For open-ended phone-control requests such as opening apps, navigating home/back/recents/notifications/quick_settings, tapping buttons, typing text, using `ime_enter` after text entry, scrolling/swiping, or reading the visible screen, prefer `nodes(action="ui_task", objective="...")` so the gateway can observe the screen and run a closed-loop task.',
     '- Use low-level `nodes(action="invoke", invokeCommand="ui.actions.execute", invokeParamsJson="...")` only when you already have an exact Structured UI Action plan.',
     '- The plan JSON must use `kind:"ui_actions"`, `planId`, `targetDeviceId`, `idempotencyKey`, `risk`, `requiresConfirmation`, and an `actions` array.',
     "- When an observation returns `observedNodes`, prefer durable selectors (`id`, `content_desc`, `text`) when available; use `node_ref` only for exact, short-lived follow-up taps from the latest observation.",
     "- Use `long_click_node` for Android long-press gestures such as context menus, app shortcuts, selection handles, or UI affordances that require press-and-hold.",
     "- Use `clear_text` before `type_text` when replacing existing input content.",
     "- For `type_text`, pass `id/content_desc/node_ref` when the target text field is known; otherwise it writes into the currently focused editable field.",
+    "- Use `swipe` for physical screen drag gestures such as feeds, carousels, pull-to-refresh, or pages where semantic `scroll` is unavailable; keep coordinates bounded and based on the latest observation/screenshot.",
     "- Use `tap_point` only as a bounded coordinate fallback when no reliable UI node selector exists; base it on the latest observation/screenshot and avoid externally visible actions without confirmation.",
     "- Omit `node` for `ui.actions.execute` unless a prior tool result says there are multiple UI-control capable nodes or no UI-control node is available.",
     '- Use `nodes(action="device_permissions")` first when you need to confirm whether Android deviceControl/accessibility is enabled.',

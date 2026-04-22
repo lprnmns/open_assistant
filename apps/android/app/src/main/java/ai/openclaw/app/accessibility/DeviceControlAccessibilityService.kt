@@ -249,6 +249,24 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             executed += 1
             delay(PostActionDelayMs)
           }
+          is OpenClawUiAction.Swipe -> {
+            if (
+              !swipeBetweenPoints(
+                startX = action.startX,
+                startY = action.startY,
+                endX = action.endX,
+                endY = action.endY,
+                durationMs = action.durationMs ?: swipeDurationMs(action.amount),
+              )
+            ) {
+              throw DeviceControlExecutionException(
+                code = "ACTION_FAILED",
+                message = "Unable to perform the requested swipe gesture.",
+              )
+            }
+            executed += 1
+            delay(PostActionDelayMs)
+          }
           is OpenClawUiAction.WaitForNode -> {
             waitForNode(action.selector(), action.timeoutMs ?: DefaultActionTimeoutMs)
             executed += 1
@@ -395,6 +413,46 @@ class DeviceControlAccessibilityService : AccessibilityService() {
       val path =
         Path().apply {
           moveTo(x, y)
+        }
+      val gesture =
+        GestureDescription.Builder()
+          .addStroke(GestureDescription.StrokeDescription(path, 0L, durationMs))
+          .build()
+      val dispatched =
+        dispatchGesture(
+          gesture,
+          object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+              if (continuation.isActive) {
+                continuation.resume(true)
+              }
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+              if (continuation.isActive) {
+                continuation.resume(false)
+              }
+            }
+          },
+          null,
+        )
+      if (!dispatched && continuation.isActive) {
+        continuation.resume(false)
+      }
+    }
+
+  private suspend fun swipeBetweenPoints(
+    startX: Float,
+    startY: Float,
+    endX: Float,
+    endY: Float,
+    durationMs: Long,
+  ): Boolean =
+    suspendCancellableCoroutine { continuation ->
+      val path =
+        Path().apply {
+          moveTo(startX, startY)
+          lineTo(endX, endY)
         }
       val gesture =
         GestureDescription.Builder()
@@ -703,3 +761,10 @@ internal fun globalNavigationActionId(action: OpenClawUiAction): Int =
   }
 
 internal fun imeEnterActionId(): Int = android.R.id.accessibilityActionImeEnter
+
+internal fun swipeDurationMs(amount: String?): Long =
+  when (amount) {
+    "small" -> 250L
+    "large" -> 650L
+    else -> 450L
+  }

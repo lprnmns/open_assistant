@@ -129,6 +129,7 @@ describe("createNodesTool screen_record duration guardrails", () => {
     expect(tool.description).toContain("Structured UI Action plan");
     expect(tool.description).toContain("node_ref");
     expect(tool.description).toContain("tap_point");
+    expect(tool.description).toContain("swipe");
     expect(tool.description).toContain("home");
     expect(tool.description).toContain("recents");
     expect(tool.description).toContain("quick_settings");

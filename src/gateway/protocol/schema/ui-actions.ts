@@ -148,6 +148,20 @@ const TapPointActionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const SwipeActionSchema = Type.Object(
+  {
+    action: Type.Literal("swipe"),
+    startX: UiActionCoordinateSchema,
+    startY: UiActionCoordinateSchema,
+    endX: UiActionCoordinateSchema,
+    endY: UiActionCoordinateSchema,
+    durationMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_000 })),
+    amount: Type.Optional(Type.String({ enum: ["small", "medium", "large"] })),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
 const WaitForNodeByIdActionSchema = Type.Object(
   {
     action: Type.Literal("wait_for_node"),
@@ -268,6 +282,7 @@ export const UiActionSchema = Type.Union([
   TypeTextActionSchema,
   ClearTextActionSchema,
   TapPointActionSchema,
+  SwipeActionSchema,
   WaitForNodeActionSchema,
   ScrollActionSchema,
   BackActionSchema,

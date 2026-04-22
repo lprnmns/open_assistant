@@ -67,6 +67,16 @@ sealed class OpenClawUiAction {
     val timeoutMs: Long?,
   ) : OpenClawUiAction()
 
+  data class Swipe(
+    val startX: Float,
+    val startY: Float,
+    val endX: Float,
+    val endY: Float,
+    val amount: String?,
+    val durationMs: Long?,
+    val timeoutMs: Long?,
+  ) : OpenClawUiAction()
+
   data class WaitForNode(
     val id: String?,
     val contentDesc: String?,
@@ -173,6 +183,7 @@ private fun parseAction(obj: JsonObject): OpenClawUiAction {
     "type_text" -> parseTypeText(obj)
     "clear_text" -> parseClearText(obj)
     "tap_point" -> parseTapPoint(obj)
+    "swipe" -> parseSwipe(obj)
     "wait_for_node" -> parseWaitForNode(obj)
     "scroll" -> parseScroll(obj)
     "back" -> parseBack(obj)
@@ -257,6 +268,27 @@ private fun parseTapPoint(obj: JsonObject): OpenClawUiAction.TapPoint {
   return OpenClawUiAction.TapPoint(
     x = obj.requiredCoordinate("x"),
     y = obj.requiredCoordinate("y"),
+    timeoutMs = obj.optionalTimeoutMs(),
+  )
+}
+
+private fun parseSwipe(obj: JsonObject): OpenClawUiAction.Swipe {
+  requireOnlyKeys(
+    obj,
+    setOf("action", "startX", "startY", "endX", "endY", "amount", "durationMs", "timeoutMs"),
+    "action",
+  )
+  val amount = obj.optionalString("amount")
+  if (amount != null && amount !in setOf("small", "medium", "large")) {
+    throw IllegalArgumentException("swipe amount must be small, medium, or large")
+  }
+  return OpenClawUiAction.Swipe(
+    startX = obj.requiredCoordinate("startX"),
+    startY = obj.requiredCoordinate("startY"),
+    endX = obj.requiredCoordinate("endX"),
+    endY = obj.requiredCoordinate("endY"),
+    amount = amount,
+    durationMs = obj.optionalDurationMs(),
     timeoutMs = obj.optionalTimeoutMs(),
   )
 }
@@ -368,6 +400,16 @@ private fun JsonObject.optionalTimeoutMs(): Long? {
     throw IllegalArgumentException("timeoutMs must be between 0 and 120000")
   }
   return timeoutMs
+}
+
+private fun JsonObject.optionalDurationMs(): Long? {
+  val value = get("durationMs") ?: return null
+  val durationMs =
+    value.jsonPrimitive.longOrNull ?: throw IllegalArgumentException("durationMs must be an integer")
+  if (durationMs !in 1..2_000) {
+    throw IllegalArgumentException("durationMs must be between 1 and 2000")
+  }
+  return durationMs
 }
 
 private fun JsonObject.requiredCoordinate(key: String): Float {

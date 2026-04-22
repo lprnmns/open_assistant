@@ -39,6 +39,14 @@ class DeviceControlAccessibilityServiceTest {
   }
 
   @Test
+  fun swipeDurationMs_mapsAmountsToBoundedGestureDurations() {
+    assertEquals(250L, swipeDurationMs("small"))
+    assertEquals(450L, swipeDurationMs("medium"))
+    assertEquals(650L, swipeDurationMs("large"))
+    assertEquals(450L, swipeDurationMs(null))
+  }
+
+  @Test
   fun resolveClickableActionTarget_usesClickableAncestorForStaticText() {
     val root = FakeNode(id = "settings-tab", clickable = true)
     val label = FakeNode(id = "settings-label", clickable = false, parent = root)

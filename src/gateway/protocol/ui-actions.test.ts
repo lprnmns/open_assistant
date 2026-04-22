@@ -56,6 +56,18 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(plan)).toBe(true);
   });
 
+  it("accepts bounded coordinate swipe actions", () => {
+    const plan = {
+      ...validPlan,
+      actions: [
+        { action: "swipe", startX: 540, startY: 1600, endX: 540, endY: 500 },
+        { action: "swipe", startX: 900, startY: 900, endX: 200, endY: 900, durationMs: 450 },
+      ],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("accepts Android home navigation actions", () => {
     const plan = {
       ...validPlan,

@@ -143,6 +143,36 @@ class OpenClawUiActionPlanParserTest {
   }
 
   @Test
+  fun parsesSwipeActions() {
+    val plan =
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [
+            { "action": "swipe", "startX": 540, "startY": 1600, "endX": 540, "endY": 500 },
+            { "action": "swipe", "startX": 900, "startY": 900, "endX": 200, "endY": 900, "durationMs": 450 }
+          ]
+        }
+        """.trimIndent(),
+      )
+
+    val first = plan.actions[0] as OpenClawUiAction.Swipe
+    val second = plan.actions[1] as OpenClawUiAction.Swipe
+    assertEquals(540f, first.startX)
+    assertEquals(1600f, first.startY)
+    assertEquals(540f, first.endX)
+    assertEquals(500f, first.endY)
+    assertEquals(null, first.durationMs)
+    assertEquals(450L, second.durationMs)
+  }
+
+  @Test
   fun parsesHomeActions() {
     val plan =
       parseOpenClawUiActionPlan(
