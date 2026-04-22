@@ -127,6 +127,17 @@ const TypeTextActionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const ClearTextActionSchema = Type.Object(
+  {
+    action: Type.Literal("clear_text"),
+    id: Type.Optional(NonEmptyString),
+    content_desc: Type.Optional(NonEmptyString),
+    node_ref: Type.Optional(NonEmptyString),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
 const TapPointActionSchema = Type.Object(
   {
     action: Type.Literal("tap_point"),
@@ -255,6 +266,7 @@ export const UiActionSchema = Type.Union([
   ClickNodeActionSchema,
   LongClickNodeActionSchema,
   TypeTextActionSchema,
+  ClearTextActionSchema,
   TapPointActionSchema,
   WaitForNodeActionSchema,
   ScrollActionSchema,

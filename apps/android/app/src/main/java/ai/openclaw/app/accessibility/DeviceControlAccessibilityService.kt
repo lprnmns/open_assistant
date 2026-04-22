@@ -189,7 +189,12 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             delay(PostActionDelayMs)
           }
           is OpenClawUiAction.TypeText -> {
-            val node = editableNodeForTypeText(action)
+            val node =
+              editableNodeForTextInput(
+                nodeRef = action.nodeRef,
+                selector = action.selectorOrNull(),
+                timeoutMs = action.timeoutMs,
+              )
             val args =
               Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text)
@@ -198,6 +203,26 @@ class DeviceControlAccessibilityService : AccessibilityService() {
               throw DeviceControlExecutionException(
                 code = "ACTION_FAILED",
                 message = "Unable to type into the focused UI node.",
+              )
+            }
+            executed += 1
+            delay(PostActionDelayMs)
+          }
+          is OpenClawUiAction.ClearText -> {
+            val node =
+              editableNodeForTextInput(
+                nodeRef = action.nodeRef,
+                selector = action.selectorOrNull(),
+                timeoutMs = action.timeoutMs,
+              )
+            val args =
+              Bundle().apply {
+                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "")
+              }
+            if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+              throw DeviceControlExecutionException(
+                code = "ACTION_FAILED",
+                message = "Unable to clear the requested UI text field.",
               )
             }
             executed += 1
@@ -427,8 +452,12 @@ class DeviceControlAccessibilityService : AccessibilityService() {
       )
   }
 
-  private suspend fun editableNodeForTypeText(action: OpenClawUiAction.TypeText): AccessibilityNodeInfo {
-    action.nodeRef?.let { nodeRef ->
+  private suspend fun editableNodeForTextInput(
+    nodeRef: String?,
+    selector: NodeSelector?,
+    timeoutMs: Long?,
+  ): AccessibilityNodeInfo {
+    nodeRef?.let { nodeRef ->
       val observedNode =
         observedNodesByRef[nodeRef]
           ?: throw DeviceControlExecutionException(
@@ -445,8 +474,7 @@ class DeviceControlAccessibilityService : AccessibilityService() {
       return focusedEditableNode()
     }
 
-    val selector = action.selectorOrNull() ?: return focusedEditableNode()
-    val node = waitForNode(selector, action.timeoutMs ?: DefaultActionTimeoutMs)
+    val node = selector?.let { waitForNode(it, timeoutMs ?: DefaultActionTimeoutMs) } ?: return focusedEditableNode()
     if (node.isEditable) {
       return node
     }
@@ -574,6 +602,13 @@ class DeviceControlAccessibilityService : AccessibilityService() {
     NodeSelector(id = id, contentDescription = contentDesc, text = text)
 
   private fun OpenClawUiAction.TypeText.selectorOrNull(): NodeSelector? {
+    if (id == null && contentDesc == null) {
+      return null
+    }
+    return NodeSelector(id = id, contentDescription = contentDesc, text = null)
+  }
+
+  private fun OpenClawUiAction.ClearText.selectorOrNull(): NodeSelector? {
     if (id == null && contentDesc == null) {
       return null
     }

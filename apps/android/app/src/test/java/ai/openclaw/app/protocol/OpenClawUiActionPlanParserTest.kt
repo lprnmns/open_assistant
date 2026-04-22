@@ -236,6 +236,32 @@ class OpenClawUiActionPlanParserTest {
   }
 
   @Test
+  fun parsesClearTextActionsWithOptionalTargetSelectors() {
+    val plan =
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [
+            { "action": "clear_text" },
+            { "action": "clear_text", "node_ref": "o1n4" }
+          ]
+        }
+        """.trimIndent(),
+      )
+
+    val first = plan.actions[0] as OpenClawUiAction.ClearText
+    val second = plan.actions[1] as OpenClawUiAction.ClearText
+    assertEquals(null, first.nodeRef)
+    assertEquals("o1n4", second.nodeRef)
+  }
+
+  @Test
   fun rejectsTapPointActionsWithNegativeCoordinates() {
     assertParseFails("x must be between 0 and 10000") {
       parseOpenClawUiActionPlan(

@@ -95,6 +95,15 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(plan)).toBe(true);
   });
 
+  it("accepts clear_text actions with optional target selectors", () => {
+    const plan = {
+      ...validPlan,
+      actions: [{ action: "clear_text" }, { action: "clear_text", node_ref: "o1n4" }],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("rejects plans without an idempotency key", () => {
     const plan = { ...validPlan };
     delete (plan as Record<string, unknown>).idempotencyKey;

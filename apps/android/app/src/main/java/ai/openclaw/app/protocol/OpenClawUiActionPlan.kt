@@ -54,6 +54,13 @@ sealed class OpenClawUiAction {
     val timeoutMs: Long?,
   ) : OpenClawUiAction()
 
+  data class ClearText(
+    val id: String?,
+    val contentDesc: String?,
+    val nodeRef: String?,
+    val timeoutMs: Long?,
+  ) : OpenClawUiAction()
+
   data class TapPoint(
     val x: Float,
     val y: Float,
@@ -164,6 +171,7 @@ private fun parseAction(obj: JsonObject): OpenClawUiAction {
     "click_node" -> parseClickNode(obj)
     "long_click_node" -> parseLongClickNode(obj)
     "type_text" -> parseTypeText(obj)
+    "clear_text" -> parseClearText(obj)
     "tap_point" -> parseTapPoint(obj)
     "wait_for_node" -> parseWaitForNode(obj)
     "scroll" -> parseScroll(obj)
@@ -227,6 +235,16 @@ private fun parseTypeText(obj: JsonObject): OpenClawUiAction.TypeText {
   requireOnlyKeys(obj, setOf("action", "id", "content_desc", "node_ref", "text", "timeoutMs"), "action")
   return OpenClawUiAction.TypeText(
     text = obj.requiredString("text"),
+    id = obj.optionalString("id"),
+    contentDesc = obj.optionalString("content_desc"),
+    nodeRef = obj.optionalString("node_ref"),
+    timeoutMs = obj.optionalTimeoutMs(),
+  )
+}
+
+private fun parseClearText(obj: JsonObject): OpenClawUiAction.ClearText {
+  requireOnlyKeys(obj, setOf("action", "id", "content_desc", "node_ref", "timeoutMs"), "action")
+  return OpenClawUiAction.ClearText(
     id = obj.optionalString("id"),
     contentDesc = obj.optionalString("content_desc"),
     nodeRef = obj.optionalString("node_ref"),
