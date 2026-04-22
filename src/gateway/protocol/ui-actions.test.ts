@@ -35,6 +35,18 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(plan)).toBe(true);
   });
 
+  it("accepts long click actions with stable selectors", () => {
+    const plan = {
+      ...validPlan,
+      actions: [
+        { action: "long_click_node", content_desc: "Instagram" },
+        { action: "long_click_node", node_ref: "o1n13" },
+      ],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("accepts bounded coordinate tap actions", () => {
     const plan = {
       ...validPlan,

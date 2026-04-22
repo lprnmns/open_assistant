@@ -396,6 +396,7 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("quick_settings");
     expect(prompt).toContain("ime_enter");
     expect(prompt).toContain("id/content_desc/node_ref");
+    expect(prompt).toContain("long_click_node");
     expect(prompt).toContain("Android deviceControl/accessibility");
     expect(prompt).toContain(
       "High-risk or externally visible actions require explicit confirmation",

@@ -84,6 +84,8 @@ class DeviceControlAccessibilityService : AccessibilityService() {
   companion object {
     private const val Tag = "OpenClawDeviceControl"
     private const val PostActionDelayMs = 250L
+    private const val TapDurationMs = 80L
+    private const val LongPressDurationMs = 700L
     private const val DefaultActionTimeoutMs = 5_000L
     private const val MaxObservedNodes = 80
     private const val MaxObservedTextChars = 160
@@ -154,6 +156,32 @@ class DeviceControlAccessibilityService : AccessibilityService() {
                 throw DeviceControlExecutionException(
                   code = "ACTION_FAILED",
                   message = "Unable to click the requested UI node.",
+                )
+              }
+            }
+            executed += 1
+            delay(PostActionDelayMs)
+          }
+          is OpenClawUiAction.LongClickNode -> {
+            if (action.nodeRef != null) {
+              val observedNode =
+                observedNodesByRef[action.nodeRef]
+                  ?: throw DeviceControlExecutionException(
+                    code = "NODE_NOT_FOUND",
+                    message = "No observed UI node matched node_ref ${action.nodeRef}. Run observe_screen first.",
+                  )
+              if (!longPressObservedBoundsCenter(observedNode.bounds)) {
+                throw DeviceControlExecutionException(
+                  code = "ACTION_FAILED",
+                  message = "Unable to long-press the observed UI node.",
+                )
+              }
+            } else {
+              val node = waitForNode(action.selector(), action.timeoutMs ?: DefaultActionTimeoutMs)
+              if (!performNodeLongClick(node)) {
+                throw DeviceControlExecutionException(
+                  code = "ACTION_FAILED",
+                  message = "Unable to long-click the requested UI node.",
                 )
               }
             }
@@ -290,10 +318,30 @@ class DeviceControlAccessibilityService : AccessibilityService() {
       (clickTarget !== node && node.performAction(AccessibilityNodeInfo.ACTION_CLICK))
   }
 
+  private suspend fun performNodeLongClick(node: AccessibilityNodeInfo): Boolean {
+    val longClickTarget = resolveAccessibilityLongClickTarget(node)
+    return longPressNodeCenter(longClickTarget) ||
+      longClickTarget.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) ||
+      (longClickTarget !== node && node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK))
+  }
+
   private suspend fun tapNodeCenter(node: AccessibilityNodeInfo): Boolean {
     val bounds = Rect()
     node.getBoundsInScreen(bounds)
     return tapObservedBoundsCenter(
+      DeviceControlObservedBounds(
+        left = bounds.left,
+        top = bounds.top,
+        right = bounds.right,
+        bottom = bounds.bottom,
+      ),
+    )
+  }
+
+  private suspend fun longPressNodeCenter(node: AccessibilityNodeInfo): Boolean {
+    val bounds = Rect()
+    node.getBoundsInScreen(bounds)
+    return longPressObservedBoundsCenter(
       DeviceControlObservedBounds(
         left = bounds.left,
         top = bounds.top,
@@ -308,9 +356,15 @@ class DeviceControlAccessibilityService : AccessibilityService() {
     return tapPoint(center.first, center.second)
   }
 
+  private suspend fun longPressObservedBoundsCenter(bounds: DeviceControlObservedBounds): Boolean {
+    val center = observedBoundsCenter(bounds) ?: return false
+    return tapPoint(center.first, center.second, durationMs = LongPressDurationMs)
+  }
+
   private suspend fun tapPoint(
     x: Float,
     y: Float,
+    durationMs: Long = TapDurationMs,
   ): Boolean =
     suspendCancellableCoroutine { continuation ->
       val path =
@@ -319,7 +373,7 @@ class DeviceControlAccessibilityService : AccessibilityService() {
         }
       val gesture =
         GestureDescription.Builder()
-          .addStroke(GestureDescription.StrokeDescription(path, 0L, 80L))
+          .addStroke(GestureDescription.StrokeDescription(path, 0L, durationMs))
           .build()
       val dispatched =
         dispatchGesture(
@@ -513,6 +567,9 @@ class DeviceControlAccessibilityService : AccessibilityService() {
   private fun OpenClawUiAction.ClickNode.selector(): NodeSelector =
     NodeSelector(id = id, contentDescription = contentDesc, text = text)
 
+  private fun OpenClawUiAction.LongClickNode.selector(): NodeSelector =
+    NodeSelector(id = id, contentDescription = contentDesc, text = text)
+
   private fun OpenClawUiAction.WaitForNode.selector(): NodeSelector =
     NodeSelector(id = id, contentDescription = contentDesc, text = text)
 
@@ -565,6 +622,13 @@ private fun resolveAccessibilityClickTarget(node: AccessibilityNodeInfo): Access
   resolveClickableActionTarget(
     start = node,
     isClickable = { candidate -> candidate.isClickable },
+    parentOf = { candidate -> candidate.parent },
+  )
+
+private fun resolveAccessibilityLongClickTarget(node: AccessibilityNodeInfo): AccessibilityNodeInfo =
+  resolveClickableActionTarget(
+    start = node,
+    isClickable = { candidate -> candidate.isLongClickable },
     parentOf = { candidate -> candidate.parent },
   )
 

@@ -95,6 +95,32 @@ class OpenClawUiActionPlanParserTest {
   }
 
   @Test
+  fun parsesLongClickActionsWithSelectors() {
+    val plan =
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [
+            { "action": "long_click_node", "content_desc": "Instagram" },
+            { "action": "long_click_node", "node_ref": "o1n13" }
+          ]
+        }
+        """.trimIndent(),
+      )
+
+    val first = plan.actions[0] as OpenClawUiAction.LongClickNode
+    val second = plan.actions[1] as OpenClawUiAction.LongClickNode
+    assertEquals("Instagram", first.contentDesc)
+    assertEquals("o1n13", second.nodeRef)
+  }
+
+  @Test
   fun parsesTapPointActions() {
     val plan =
       parseOpenClawUiActionPlan(

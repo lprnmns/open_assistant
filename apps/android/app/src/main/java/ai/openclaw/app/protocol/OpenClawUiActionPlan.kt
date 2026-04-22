@@ -38,6 +38,14 @@ sealed class OpenClawUiAction {
     val timeoutMs: Long?,
   ) : OpenClawUiAction()
 
+  data class LongClickNode(
+    val id: String?,
+    val contentDesc: String?,
+    val text: String?,
+    val nodeRef: String?,
+    val timeoutMs: Long?,
+  ) : OpenClawUiAction()
+
   data class TypeText(
     val text: String,
     val id: String?,
@@ -154,6 +162,7 @@ private fun parseAction(obj: JsonObject): OpenClawUiAction {
   return when (val action = obj.requiredString("action")) {
     "open_app" -> parseOpenApp(obj)
     "click_node" -> parseClickNode(obj)
+    "long_click_node" -> parseLongClickNode(obj)
     "type_text" -> parseTypeText(obj)
     "tap_point" -> parseTapPoint(obj)
     "wait_for_node" -> parseWaitForNode(obj)
@@ -188,6 +197,24 @@ private fun parseClickNode(obj: JsonObject): OpenClawUiAction.ClickNode {
     throw IllegalArgumentException("click_node requires a selector")
   }
   return OpenClawUiAction.ClickNode(
+    id = id,
+    contentDesc = contentDesc,
+    text = text,
+    nodeRef = nodeRef,
+    timeoutMs = obj.optionalTimeoutMs(),
+  )
+}
+
+private fun parseLongClickNode(obj: JsonObject): OpenClawUiAction.LongClickNode {
+  requireOnlyKeys(obj, setOf("action", "id", "content_desc", "text", "node_ref", "timeoutMs"), "action")
+  val id = obj.optionalString("id")
+  val contentDesc = obj.optionalString("content_desc")
+  val text = obj.optionalString("text")
+  val nodeRef = obj.optionalString("node_ref")
+  if (id == null && contentDesc == null && text == null && nodeRef == null) {
+    throw IllegalArgumentException("long_click_node requires a selector")
+  }
+  return OpenClawUiAction.LongClickNode(
     id = id,
     contentDesc = contentDesc,
     text = text,

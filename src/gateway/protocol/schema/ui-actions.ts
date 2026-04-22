@@ -66,6 +66,55 @@ export const ClickNodeActionSchema = Type.Union([
   ClickByNodeRefActionSchema,
 ]);
 
+const LongClickByIdActionSchema = Type.Object(
+  {
+    action: Type.Literal("long_click_node"),
+    id: NonEmptyString,
+    content_desc: Type.Optional(NonEmptyString),
+    text: Type.Optional(NonEmptyString),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
+const LongClickByContentDescriptionActionSchema = Type.Object(
+  {
+    action: Type.Literal("long_click_node"),
+    id: Type.Optional(NonEmptyString),
+    content_desc: NonEmptyString,
+    text: Type.Optional(NonEmptyString),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
+const LongClickByTextActionSchema = Type.Object(
+  {
+    action: Type.Literal("long_click_node"),
+    id: Type.Optional(NonEmptyString),
+    content_desc: Type.Optional(NonEmptyString),
+    text: NonEmptyString,
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
+const LongClickByNodeRefActionSchema = Type.Object(
+  {
+    action: Type.Literal("long_click_node"),
+    node_ref: NonEmptyString,
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
+export const LongClickNodeActionSchema = Type.Union([
+  LongClickByIdActionSchema,
+  LongClickByContentDescriptionActionSchema,
+  LongClickByTextActionSchema,
+  LongClickByNodeRefActionSchema,
+]);
+
 const TypeTextActionSchema = Type.Object(
   {
     action: Type.Literal("type_text"),
@@ -204,6 +253,7 @@ const RequestConfirmationActionSchema = Type.Object(
 export const UiActionSchema = Type.Union([
   OpenAppActionSchema,
   ClickNodeActionSchema,
+  LongClickNodeActionSchema,
   TypeTextActionSchema,
   TapPointActionSchema,
   WaitForNodeActionSchema,
