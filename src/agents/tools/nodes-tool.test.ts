@@ -133,6 +133,8 @@ describe("createNodesTool screen_record duration guardrails", () => {
     expect(tool.description).toContain("recents");
     expect(tool.description).toContain("quick_settings");
     expect(tool.description).toContain("ime_enter");
+    expect(tool.description).toContain("type_text");
+    expect(tool.description).toContain("id/content_desc/node_ref");
   });
 
   it("auto-selects the sole calendar-capable node for calendar.add invoke", async () => {

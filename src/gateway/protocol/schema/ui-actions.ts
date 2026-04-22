@@ -69,6 +69,9 @@ export const ClickNodeActionSchema = Type.Union([
 const TypeTextActionSchema = Type.Object(
   {
     action: Type.Literal("type_text"),
+    id: Type.Optional(NonEmptyString),
+    content_desc: Type.Optional(NonEmptyString),
+    node_ref: Type.Optional(NonEmptyString),
     text: NonEmptyString,
     timeoutMs: UiActionTimeoutMsSchema,
   },

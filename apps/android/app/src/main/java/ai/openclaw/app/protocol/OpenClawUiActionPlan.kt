@@ -40,6 +40,9 @@ sealed class OpenClawUiAction {
 
   data class TypeText(
     val text: String,
+    val id: String?,
+    val contentDesc: String?,
+    val nodeRef: String?,
     val timeoutMs: Long?,
   ) : OpenClawUiAction()
 
@@ -194,9 +197,12 @@ private fun parseClickNode(obj: JsonObject): OpenClawUiAction.ClickNode {
 }
 
 private fun parseTypeText(obj: JsonObject): OpenClawUiAction.TypeText {
-  requireOnlyKeys(obj, setOf("action", "text", "timeoutMs"), "action")
+  requireOnlyKeys(obj, setOf("action", "id", "content_desc", "node_ref", "text", "timeoutMs"), "action")
   return OpenClawUiAction.TypeText(
     text = obj.requiredString("text"),
+    id = obj.optionalString("id"),
+    contentDesc = obj.optionalString("content_desc"),
+    nodeRef = obj.optionalString("node_ref"),
     timeoutMs = obj.optionalTimeoutMs(),
   )
 }

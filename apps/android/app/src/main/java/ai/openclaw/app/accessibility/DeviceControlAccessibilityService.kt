@@ -161,7 +161,7 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             delay(PostActionDelayMs)
           }
           is OpenClawUiAction.TypeText -> {
-            val node = focusedEditableNode()
+            val node = editableNodeForTypeText(action)
             val args =
               Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, action.text)
@@ -373,6 +373,39 @@ class DeviceControlAccessibilityService : AccessibilityService() {
       )
   }
 
+  private suspend fun editableNodeForTypeText(action: OpenClawUiAction.TypeText): AccessibilityNodeInfo {
+    action.nodeRef?.let { nodeRef ->
+      val observedNode =
+        observedNodesByRef[nodeRef]
+          ?: throw DeviceControlExecutionException(
+            code = "NODE_NOT_FOUND",
+            message = "No observed UI node matched node_ref $nodeRef. Run observe_screen first.",
+          )
+      if (!tapObservedBoundsCenter(observedNode.bounds)) {
+        throw DeviceControlExecutionException(
+          code = "ACTION_FAILED",
+          message = "Unable to tap the observed text input bounds.",
+        )
+      }
+      delay(PostActionDelayMs)
+      return focusedEditableNode()
+    }
+
+    val selector = action.selectorOrNull() ?: return focusedEditableNode()
+    val node = waitForNode(selector, action.timeoutMs ?: DefaultActionTimeoutMs)
+    if (node.isEditable) {
+      return node
+    }
+    if (!performNodeClick(node)) {
+      throw DeviceControlExecutionException(
+        code = "ACTION_FAILED",
+        message = "Unable to focus the requested text input.",
+      )
+    }
+    delay(PostActionDelayMs)
+    return focusedEditableNode()
+  }
+
   private fun firstScrollableNode(): AccessibilityNodeInfo {
     val root =
       rootInActiveWindow
@@ -482,6 +515,13 @@ class DeviceControlAccessibilityService : AccessibilityService() {
 
   private fun OpenClawUiAction.WaitForNode.selector(): NodeSelector =
     NodeSelector(id = id, contentDescription = contentDesc, text = text)
+
+  private fun OpenClawUiAction.TypeText.selectorOrNull(): NodeSelector? {
+    if (id == null && contentDesc == null) {
+      return null
+    }
+    return NodeSelector(id = id, contentDescription = contentDesc, text = null)
+  }
 
   private data class NodeSelector(
     val id: String?,

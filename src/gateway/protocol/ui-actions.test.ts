@@ -71,6 +71,18 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(plan)).toBe(true);
   });
 
+  it("accepts type_text actions with target selectors", () => {
+    const plan = {
+      ...validPlan,
+      actions: [
+        { action: "type_text", content_desc: "Search", text: "Ali" },
+        { action: "type_text", node_ref: "o1n4", text: "Ali" },
+      ],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("rejects plans without an idempotency key", () => {
     const plan = { ...validPlan };
     delete (plan as Record<string, unknown>).idempotencyKey;
