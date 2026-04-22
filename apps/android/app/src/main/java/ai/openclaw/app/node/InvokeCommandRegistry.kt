@@ -1,6 +1,7 @@
 package ai.openclaw.app.node
 
 import ai.openclaw.app.protocol.OpenClawCalendarCommand
+import ai.openclaw.app.protocol.OpenClawAppsCommand
 import ai.openclaw.app.protocol.OpenClawCanvasA2UICommand
 import ai.openclaw.app.protocol.OpenClawCanvasCommand
 import ai.openclaw.app.protocol.OpenClawCameraCommand
@@ -69,6 +70,7 @@ object InvokeCommandRegistry {
   val capabilityManifest: List<NodeCapabilitySpec> =
     listOf(
       NodeCapabilitySpec(name = OpenClawCapability.Canvas.rawValue),
+      NodeCapabilitySpec(name = OpenClawCapability.Apps.rawValue),
       NodeCapabilitySpec(name = OpenClawCapability.Device.rawValue),
       NodeCapabilitySpec(name = OpenClawCapability.Notifications.rawValue),
       NodeCapabilitySpec(name = OpenClawCapability.Reminder.rawValue),
@@ -179,6 +181,12 @@ object InvokeCommandRegistry {
       ),
       InvokeCommandSpec(
         name = OpenClawDeviceCommand.Health.rawValue,
+      ),
+      InvokeCommandSpec(
+        name = OpenClawAppsCommand.List.rawValue,
+      ),
+      InvokeCommandSpec(
+        name = OpenClawAppsCommand.Resolve.rawValue,
       ),
       InvokeCommandSpec(
         name = OpenClawNotificationsCommand.List.rawValue,

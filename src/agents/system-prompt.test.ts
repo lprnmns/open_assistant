@@ -390,6 +390,7 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain('invokeCommand="ui.actions.execute"');
     expect(prompt).toContain('kind:"ui_actions"');
     expect(prompt).toContain("node_ref");
+    expect(prompt).toContain("apps_resolve");
     expect(prompt).toContain("tap_point");
     expect(prompt).toContain("swipe");
     expect(prompt).toContain("home");

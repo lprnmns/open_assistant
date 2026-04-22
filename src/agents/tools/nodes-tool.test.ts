@@ -138,6 +138,41 @@ describe("createNodesTool screen_record duration guardrails", () => {
     expect(tool.description).toContain("id/content_desc/node_ref");
     expect(tool.description).toContain("long_click_node");
     expect(tool.description).toContain("clear_text");
+    expect(tool.description).toContain("apps_resolve");
+  });
+
+  it("invokes apps.resolve with an app query", async () => {
+    gatewayMocks.callGatewayTool.mockResolvedValue({
+      payload: {
+        bestMatch: {
+          label: "Instagram",
+          packageName: "com.instagram.android",
+        },
+      },
+    });
+    const tool = createNodesTool();
+
+    await tool.execute("call-1", {
+      action: "apps_resolve",
+      node: "Redmi",
+      appQuery: "Instagram",
+      limit: 3,
+    });
+
+    expect(nodeUtilsMocks.resolveNodeId).toHaveBeenCalledWith({}, "Redmi");
+    expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith(
+      "node.invoke",
+      {},
+      expect.objectContaining({
+        nodeId: "node-1",
+        command: "apps.resolve",
+        params: {
+          query: "Instagram",
+          limit: 3,
+        },
+        idempotencyKey: expect.any(String),
+      }),
+    );
   });
 
   it("auto-selects the sole calendar-capable node for calendar.add invoke", async () => {

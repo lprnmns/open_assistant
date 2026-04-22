@@ -1,6 +1,7 @@
 package ai.openclaw.app.node
 
 import ai.openclaw.app.protocol.OpenClawCalendarCommand
+import ai.openclaw.app.protocol.OpenClawAppsCommand
 import ai.openclaw.app.protocol.OpenClawCameraCommand
 import ai.openclaw.app.protocol.OpenClawCallLogCommand
 import ai.openclaw.app.protocol.OpenClawCapability
@@ -23,6 +24,7 @@ class InvokeCommandRegistryTest {
     setOf(
       OpenClawCapability.Canvas.rawValue,
       OpenClawCapability.Device.rawValue,
+      OpenClawCapability.Apps.rawValue,
       OpenClawCapability.Notifications.rawValue,
       OpenClawCapability.Reminder.rawValue,
       OpenClawCapability.System.rawValue,
@@ -48,6 +50,8 @@ class InvokeCommandRegistryTest {
       OpenClawDeviceCommand.Info.rawValue,
       OpenClawDeviceCommand.Permissions.rawValue,
       OpenClawDeviceCommand.Health.rawValue,
+      OpenClawAppsCommand.List.rawValue,
+      OpenClawAppsCommand.Resolve.rawValue,
       OpenClawNotificationsCommand.List.rawValue,
       OpenClawNotificationsCommand.Actions.rawValue,
       OpenClawReminderCommand.Schedule.rawValue,

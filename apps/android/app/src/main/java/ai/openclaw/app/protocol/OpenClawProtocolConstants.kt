@@ -2,6 +2,7 @@ package ai.openclaw.app.protocol
 
 enum class OpenClawCapability(val rawValue: String) {
   Canvas("canvas"),
+  Apps("apps"),
   Camera("camera"),
   Sms("sms"),
   VoiceWake("voiceWake"),
@@ -81,6 +82,16 @@ enum class OpenClawDeviceCommand(val rawValue: String) {
 
   companion object {
     const val NamespacePrefix: String = "device."
+  }
+}
+
+enum class OpenClawAppsCommand(val rawValue: String) {
+  List("apps.list"),
+  Resolve("apps.resolve"),
+  ;
+
+  companion object {
+    const val NamespacePrefix: String = "apps."
   }
 }
 

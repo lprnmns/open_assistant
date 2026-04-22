@@ -30,6 +30,8 @@ const ANDROID_NOTIFICATION_COMMANDS = [...NOTIFICATION_COMMANDS, "notifications.
 const DEVICE_COMMANDS = ["device.info", "device.status"];
 const ANDROID_DEVICE_COMMANDS = [...DEVICE_COMMANDS, "device.permissions", "device.health"];
 
+const APPS_COMMANDS = ["apps.list", "apps.resolve"];
+
 const CONTACTS_COMMANDS = ["contacts.search"];
 const CONTACTS_DANGEROUS_COMMANDS = ["contacts.add"];
 
@@ -92,6 +94,7 @@ const PLATFORM_DEFAULTS: Record<string, string[]> = {
     ...ANDROID_NOTIFICATION_COMMANDS,
     NODE_SYSTEM_NOTIFY_COMMAND,
     ...ANDROID_DEVICE_COMMANDS,
+    ...APPS_COMMANDS,
     ...CONTACTS_COMMANDS,
     ...CALENDAR_COMMANDS,
     ...CALL_LOG_COMMANDS,

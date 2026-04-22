@@ -371,6 +371,8 @@ describe("resolveNodeCommandAllowlist", () => {
     expect(allow.has("notifications.actions")).toBe(true);
     expect(allow.has("device.permissions")).toBe(true);
     expect(allow.has("device.health")).toBe(true);
+    expect(allow.has("apps.list")).toBe(true);
+    expect(allow.has("apps.resolve")).toBe(true);
     expect(allow.has("callLog.search")).toBe(true);
     expect(allow.has("sms.search")).toBe(true);
     expect(allow.has("calendar.add")).toBe(true);

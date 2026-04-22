@@ -1,6 +1,7 @@
 package ai.openclaw.app.node
 
 import ai.openclaw.app.gateway.GatewaySession
+import ai.openclaw.app.protocol.OpenClawAppsCommand
 import ai.openclaw.app.protocol.OpenClawCalendarCommand
 import ai.openclaw.app.protocol.OpenClawCanvasA2UICommand
 import ai.openclaw.app.protocol.OpenClawCanvasCommand
@@ -22,6 +23,7 @@ class InvokeDispatcher(
   private val cameraHandler: CameraHandler,
   private val locationHandler: LocationHandler,
   private val deviceHandler: DeviceHandler,
+  private val appsHandler: AppsHandler,
   private val notificationsHandler: NotificationsHandler,
   private val reminderHandler: ReminderHandler,
   private val systemHandler: SystemHandler,
@@ -143,6 +145,10 @@ class InvokeDispatcher(
       OpenClawDeviceCommand.Info.rawValue -> deviceHandler.handleDeviceInfo(paramsJson)
       OpenClawDeviceCommand.Permissions.rawValue -> deviceHandler.handleDevicePermissions(paramsJson)
       OpenClawDeviceCommand.Health.rawValue -> deviceHandler.handleDeviceHealth(paramsJson)
+
+      // Apps command
+      OpenClawAppsCommand.List.rawValue -> appsHandler.handleAppsList(paramsJson)
+      OpenClawAppsCommand.Resolve.rawValue -> appsHandler.handleAppsResolve(paramsJson)
 
       // Notifications command
       OpenClawNotificationsCommand.List.rawValue -> notificationsHandler.handleNotificationsList(paramsJson)

@@ -97,6 +97,10 @@ class NodeRuntime(
     callLogEnabled = BuildConfig.OPENCLAW_ENABLE_CALL_LOG,
   )
 
+  private val appsHandler: AppsHandler = AppsHandler(
+    appContext = appContext,
+  )
+
   private val notificationsHandler: NotificationsHandler = NotificationsHandler(
     appContext = appContext,
   )
@@ -166,6 +170,7 @@ class NodeRuntime(
     cameraHandler = cameraHandler,
     locationHandler = locationHandler,
     deviceHandler = deviceHandler,
+    appsHandler = appsHandler,
     notificationsHandler = notificationsHandler,
     reminderHandler = reminderHandler,
     systemHandler = systemHandler,

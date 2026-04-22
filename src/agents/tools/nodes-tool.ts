@@ -47,6 +47,8 @@ const NODES_TOOL_ACTIONS = [
   "device_info",
   "device_permissions",
   "device_health",
+  "apps_list",
+  "apps_resolve",
   "ui_task",
   "run",
   "invoke",
@@ -71,6 +73,7 @@ const NODE_READ_ACTION_COMMANDS = {
   device_info: "device.info",
   device_permissions: "device.permissions",
   device_health: "device.health",
+  apps_list: "apps.list",
 } as const;
 const AUTO_INVOKE_NODE_COMMANDS = new Set(["calendar.add", "ui.actions.execute"]);
 type GatewayCallOptions = ReturnType<typeof readGatewayCallOptions>;
@@ -220,6 +223,8 @@ const NodesToolSchema = Type.Object({
   maxAgeMs: Type.Optional(Type.Number()),
   locationTimeoutMs: Type.Optional(Type.Number()),
   desiredAccuracy: optionalStringEnum(LOCATION_ACCURACY),
+  // apps_list / apps_resolve
+  appQuery: Type.Optional(Type.String()),
   // notifications_action
   notificationAction: optionalStringEnum(NOTIFICATIONS_ACTIONS),
   notificationKey: Type.Optional(Type.String()),
@@ -268,7 +273,7 @@ export function createNodesTool(options?: {
     name: "nodes",
     ownerOnly: true,
     description:
-      'Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/ui_task/run/invoke). For phone UI-control requests, prefer action="ui_task" so the gateway can observe the screen and run a closed-loop task. Use observedNodes node_ref values only for exact, short-lived follow-up taps from the latest observation; prefer durable id/content_desc/text selectors when available. Use home/back/recents/notifications/quick_settings navigation when a task needs a clean phone state, safe navigation reset, app switching, or system shade access. Use long_click_node for context menus and long-press UI affordances. Use clear_text before type_text when replacing existing text; use type_text with id/content_desc/node_ref when targeting a known text field, then use ime_enter when the focused field needs the keyboard search/send/enter action. Use swipe for physical drag gestures such as feeds/carousels/pull-to-refresh when semantic scroll is unavailable. Use tap_point only as a bounded coordinate fallback when no reliable selector exists. Use invokeCommand="ui.actions.execute" only when you already have an exact Structured UI Action plan. For invokeCommand="calendar.add" or invokeCommand="ui.actions.execute", node may be omitted when exactly one capable node exists. If you already have a calendarCandidate.toolInput, call nodes with it directly before asking follow-up questions or using browser automation.',
+      'Discover and control paired nodes (status/describe/pairing/notify/camera/photos/screen/location/notifications/apps/ui_task/run/invoke). Use apps_resolve before open_app when the user names an app but you do not have a reliable package id. For phone UI-control requests, prefer action="ui_task" so the gateway can observe the screen and run a closed-loop task. Use observedNodes node_ref values only for exact, short-lived follow-up taps from the latest observation; prefer durable id/content_desc/text selectors when available. Use home/back/recents/notifications/quick_settings navigation when a task needs a clean phone state, safe navigation reset, app switching, or system shade access. Use long_click_node for context menus and long-press UI affordances. Use clear_text before type_text when replacing existing text; use type_text with id/content_desc/node_ref when targeting a known text field, then use ime_enter when the focused field needs the keyboard search/send/enter action. Use swipe for physical drag gestures such as feeds/carousels/pull-to-refresh when semantic scroll is unavailable. Use tap_point only as a bounded coordinate fallback when no reliable selector exists. Use invokeCommand="ui.actions.execute" only when you already have an exact Structured UI Action plan. For invokeCommand="calendar.add" or invokeCommand="ui.actions.execute", node may be omitted when exactly one capable node exists. If you already have a calendarCandidate.toolInput, call nodes with it directly before asking follow-up questions or using browser automation.',
     parameters: NodesToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
@@ -541,13 +546,46 @@ export function createNodesTool(options?: {
           case "device_status":
           case "device_info":
           case "device_permissions":
-          case "device_health": {
+          case "device_health":
+          case "apps_list": {
             const node = readStringParam(params, "node", { required: true });
             const command = NODE_READ_ACTION_COMMANDS[action];
+            const query =
+              typeof params.appQuery === "string" && params.appQuery.trim()
+                ? params.appQuery.trim()
+                : undefined;
+            const limit =
+              typeof params.limit === "number" && Number.isFinite(params.limit)
+                ? Math.trunc(params.limit)
+                : undefined;
             const payloadRaw = await invokeNodeCommandPayload({
               gatewayOpts,
               node,
               command,
+              commandParams: {
+                ...(query ? { query } : {}),
+                ...(limit ? { limit } : {}),
+              },
+            });
+            const payload =
+              payloadRaw && typeof payloadRaw === "object" && payloadRaw !== null ? payloadRaw : {};
+            return jsonResult(payload);
+          }
+          case "apps_resolve": {
+            const node = readStringParam(params, "node", { required: true });
+            const query = readStringParam(params, "appQuery", { required: true });
+            const limit =
+              typeof params.limit === "number" && Number.isFinite(params.limit)
+                ? Math.trunc(params.limit)
+                : undefined;
+            const payloadRaw = await invokeNodeCommandPayload({
+              gatewayOpts,
+              node,
+              command: "apps.resolve",
+              commandParams: {
+                query,
+                ...(limit ? { limit } : {}),
+              },
             });
             const payload =
               payloadRaw && typeof payloadRaw === "object" && payloadRaw !== null ? payloadRaw : {};
