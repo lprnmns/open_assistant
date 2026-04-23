@@ -35,7 +35,7 @@ internal interface AppsDataSource {
   fun listLaunchableApps(context: Context): List<LaunchableAppRecord>
 }
 
-private object SystemAppsDataSource : AppsDataSource {
+internal object SystemAppsDataSource : AppsDataSource {
   override fun listLaunchableApps(context: Context): List<LaunchableAppRecord> {
     val packageManager = context.packageManager
     val launcherIntent =
@@ -185,6 +185,23 @@ internal fun filterAndRankApps(
         .thenBy { it.second.packageName },
     )
     .map { it.second }
+}
+
+internal fun resolveLaunchableApp(
+  apps: List<LaunchableAppRecord>,
+  target: String,
+): LaunchableAppRecord? {
+  val trimmedTarget = target.trim()
+  if (trimmedTarget.isEmpty()) {
+    return null
+  }
+  apps
+    .firstOrNull { app -> app.packageName.equals(trimmedTarget, ignoreCase = true) }
+    ?.let { return it }
+  return filterAndRankApps(
+    apps = apps,
+    request = AppsQueryRequest(query = trimmedTarget, limit = 1),
+  ).firstOrNull()
 }
 
 private fun appSearchScore(app: LaunchableAppRecord, normalizedQuery: String): Int? {

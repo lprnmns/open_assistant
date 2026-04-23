@@ -13,6 +13,8 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
+import ai.openclaw.app.node.SystemAppsDataSource
+import ai.openclaw.app.node.resolveLaunchableApp
 import ai.openclaw.app.protocol.OpenClawUiAction
 import ai.openclaw.app.protocol.OpenClawUiActionPlan
 import ai.openclaw.app.protocol.OpenClawUiActionRisk
@@ -344,9 +346,11 @@ class DeviceControlAccessibilityService : AccessibilityService() {
   private fun launchApp(packageName: String) {
     val launchIntent =
       packageManager.getLaunchIntentForPackage(packageName)
+        ?: resolveLaunchableApp(SystemAppsDataSource.listLaunchableApps(this), packageName)
+          ?.let { app -> packageManager.getLaunchIntentForPackage(app.packageName) }
         ?: throw DeviceControlExecutionException(
           code = "APP_NOT_FOUND",
-          message = "No launchable app found for package $packageName.",
+          message = "No launchable app found for target $packageName.",
         )
     launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     startActivity(launchIntent)

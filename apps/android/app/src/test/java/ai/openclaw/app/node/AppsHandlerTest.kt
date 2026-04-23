@@ -54,6 +54,22 @@ class AppsHandlerTest {
     assertEquals("INVALID_REQUEST", result.error?.code)
   }
 
+  @Test
+  fun resolveLaunchableApp_prefersExactPackageName() {
+    val app = resolveLaunchableApp(sampleApps(), "com.google.android.calendar")
+
+    assertEquals("Google Calendar", app?.label)
+    assertEquals("com.google.android.calendar", app?.packageName)
+  }
+
+  @Test
+  fun resolveLaunchableApp_resolvesHumanReadableAppName() {
+    val app = resolveLaunchableApp(sampleApps(), "insta")
+
+    assertEquals("Instagram", app?.label)
+    assertEquals("com.instagram.android", app?.packageName)
+  }
+
   private fun sampleApps(): List<LaunchableAppRecord> =
     listOf(
       LaunchableAppRecord(
