@@ -3,6 +3,7 @@ package ai.openclaw.app.node
 import ai.openclaw.app.accessibility.DeviceControlExecutionReport
 import ai.openclaw.app.accessibility.DeviceControlObservedBounds
 import ai.openclaw.app.accessibility.DeviceControlObservedNode
+import ai.openclaw.app.accessibility.DeviceControlScreenState
 import ai.openclaw.app.protocol.OpenClawUiActionPlan
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
@@ -46,6 +47,13 @@ class DeviceControlHandlerTest {
               planId = plan.planId,
               executedActions = 2,
               observations = listOf("root: Launcher"),
+              screen =
+                DeviceControlScreenState(
+                  activePackageName = "ai.openclaw.app",
+                  bounds = DeviceControlObservedBounds(left = 0, top = 0, right = 1080, bottom = 2400),
+                  width = 1080,
+                  height = 2400,
+                ),
               observedNodes =
                 listOf(
                   DeviceControlObservedNode(
@@ -77,6 +85,11 @@ class DeviceControlHandlerTest {
       assertEquals("plan-1", payload.getValue("planId").jsonPrimitive.content)
       assertEquals("2", payload.getValue("executedActions").jsonPrimitive.content)
       assertNotNull(payload["observations"])
+      val screen = payload.getValue("screen").jsonObject
+      assertEquals("ai.openclaw.app", screen.getValue("activePackageName").jsonPrimitive.content)
+      assertEquals(1080, screen.getValue("width").jsonPrimitive.int)
+      assertEquals(2400, screen.getValue("height").jsonPrimitive.int)
+      assertEquals(0, screen.getValue("bounds").jsonObject.getValue("left").jsonPrimitive.int)
       val observedNode = payload.getValue("observedNodes").jsonArray.single().jsonObject
       assertEquals("o1n4", observedNode.getValue("nodeRef").jsonPrimitive.content)
       assertEquals("Settings", observedNode.getValue("text").jsonPrimitive.content)

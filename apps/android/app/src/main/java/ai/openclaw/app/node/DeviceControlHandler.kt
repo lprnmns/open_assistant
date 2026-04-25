@@ -4,6 +4,7 @@ import ai.openclaw.app.accessibility.DeviceControlAccessibilityService
 import ai.openclaw.app.accessibility.DeviceControlExecutionException
 import ai.openclaw.app.accessibility.DeviceControlExecutionReport
 import ai.openclaw.app.accessibility.DeviceControlObservedNode
+import ai.openclaw.app.accessibility.DeviceControlScreenState
 import ai.openclaw.app.gateway.GatewaySession
 import ai.openclaw.app.protocol.OpenClawUiActionPlan
 import ai.openclaw.app.protocol.parseOpenClawUiActionPlan
@@ -57,6 +58,7 @@ class DeviceControlHandler(
       put("status", JsonPrimitive("completed"))
       put("planId", JsonPrimitive(planId))
       put("executedActions", JsonPrimitive(executedActions))
+      screen?.let { put("screen", it.toJsonObject()) }
       put(
         "observations",
         buildJsonArray {
@@ -70,6 +72,22 @@ class DeviceControlHandler(
         },
       )
     }.toString()
+
+  private fun DeviceControlScreenState.toJsonObject() =
+    buildJsonObject {
+      putNullableString("activePackageName", activePackageName)
+      put("width", width)
+      put("height", height)
+      put(
+        "bounds",
+        buildJsonObject {
+          put("left", bounds.left)
+          put("top", bounds.top)
+          put("right", bounds.right)
+          put("bottom", bounds.bottom)
+        },
+      )
+    }
 
   private fun DeviceControlObservedNode.toJsonObject() =
     buildJsonObject {

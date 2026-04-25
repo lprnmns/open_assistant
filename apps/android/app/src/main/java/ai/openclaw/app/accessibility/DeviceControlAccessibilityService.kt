@@ -24,10 +24,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
+import kotlin.math.max
 
 data class DeviceControlExecutionReport(
   val planId: String,
   val executedActions: Int,
+  val screen: DeviceControlScreenState? = null,
   val observations: List<String> = emptyList(),
   val observedNodes: List<DeviceControlObservedNode> = emptyList(),
 )
@@ -37,6 +39,13 @@ data class DeviceControlObservedBounds(
   val top: Int,
   val right: Int,
   val bottom: Int,
+)
+
+data class DeviceControlScreenState(
+  val activePackageName: String?,
+  val bounds: DeviceControlObservedBounds,
+  val width: Int,
+  val height: Int,
 )
 
 data class DeviceControlObservedNode(
@@ -344,6 +353,7 @@ class DeviceControlAccessibilityService : AccessibilityService() {
       DeviceControlExecutionReport(
         planId = plan.planId,
         executedActions = executed,
+        screen = currentScreenState(),
         observations = observations,
         observedNodes = observedNodes,
       )
@@ -626,6 +636,24 @@ class DeviceControlAccessibilityService : AccessibilityService() {
     observedNodesByRef.clear()
     snapshot.forEach { node -> observedNodesByRef[node.nodeRef] = node }
     return snapshot
+  }
+
+  private fun currentScreenState(): DeviceControlScreenState? {
+    val root = rootInActiveWindow ?: return null
+    val bounds = Rect()
+    root.getBoundsInScreen(bounds)
+    return DeviceControlScreenState(
+      activePackageName = root.packageName.normalizedObservationText(),
+      bounds =
+        DeviceControlObservedBounds(
+          left = bounds.left,
+          top = bounds.top,
+          right = bounds.right,
+          bottom = bounds.bottom,
+        ),
+      width = max(0, bounds.right - bounds.left),
+      height = max(0, bounds.bottom - bounds.top),
+    )
   }
 
   private fun AccessibilityNodeInfo.toObservedNode(
