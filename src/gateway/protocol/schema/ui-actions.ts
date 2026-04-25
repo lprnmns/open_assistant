@@ -17,6 +17,16 @@ const OpenAppActionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const OpenUriActionSchema = Type.Object(
+  {
+    action: Type.Literal("open_uri"),
+    uri: Type.String({ minLength: 1, pattern: "^https?://" }),
+    packageName: Type.Optional(NonEmptyString),
+    timeoutMs: UiActionTimeoutMsSchema,
+  },
+  { additionalProperties: false },
+);
+
 const ClickByIdActionSchema = Type.Object(
   {
     action: Type.Literal("click_node"),
@@ -277,6 +287,7 @@ const RequestConfirmationActionSchema = Type.Object(
 
 export const UiActionSchema = Type.Union([
   OpenAppActionSchema,
+  OpenUriActionSchema,
   ClickNodeActionSchema,
   LongClickNodeActionSchema,
   TypeTextActionSchema,

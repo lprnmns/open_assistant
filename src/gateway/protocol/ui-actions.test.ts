@@ -68,6 +68,21 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(plan)).toBe(true);
   });
 
+  it("accepts bounded web URI open actions", () => {
+    const plan = {
+      ...validPlan,
+      actions: [
+        {
+          action: "open_uri",
+          uri: "https://www.instagram.com/rterdogan/",
+          packageName: "com.instagram.android",
+        },
+      ],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("accepts Android home navigation actions", () => {
     const plan = {
       ...validPlan,

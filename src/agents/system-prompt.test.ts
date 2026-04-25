@@ -392,6 +392,7 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("node_ref");
     expect(prompt).toContain("apps_resolve");
     expect(prompt).toContain("human app names");
+    expect(prompt).toContain("open_uri");
     expect(prompt).toContain("tap_point");
     expect(prompt).toContain("swipe");
     expect(prompt).toContain("home");

@@ -140,6 +140,7 @@ describe("createNodesTool screen_record duration guardrails", () => {
     expect(tool.description).toContain("clear_text");
     expect(tool.description).toContain("apps_resolve");
     expect(tool.description).toContain("human app names");
+    expect(tool.description).toContain("open_uri");
   });
 
   it("invokes apps.resolve with an app query", async () => {

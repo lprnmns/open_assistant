@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Path
 import android.graphics.Rect
+import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
@@ -135,6 +136,11 @@ class DeviceControlAccessibilityService : AccessibilityService() {
         when (action) {
           is OpenClawUiAction.OpenApp -> {
             launchApp(action.target)
+            executed += 1
+            delay(PostActionDelayMs)
+          }
+          is OpenClawUiAction.OpenUri -> {
+            openUri(action.uri, action.packageName)
             executed += 1
             delay(PostActionDelayMs)
           }
@@ -354,6 +360,27 @@ class DeviceControlAccessibilityService : AccessibilityService() {
         )
     launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     startActivity(launchIntent)
+  }
+
+  private fun openUri(
+    uri: String,
+    packageName: String?,
+  ) {
+    val intent =
+      Intent(Intent.ACTION_VIEW, Uri.parse(uri)).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (!packageName.isNullOrBlank()) {
+          setPackage(packageName)
+        }
+      }
+    try {
+      startActivity(intent)
+    } catch (err: Throwable) {
+      throw DeviceControlExecutionException(
+        code = "APP_NOT_FOUND",
+        message = "No app could open URI $uri: ${err.message ?: "unknown error"}.",
+      )
+    }
   }
 
   private suspend fun performNodeClick(node: AccessibilityNodeInfo): Boolean {

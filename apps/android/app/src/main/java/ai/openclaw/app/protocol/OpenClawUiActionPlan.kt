@@ -10,6 +10,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import java.util.Locale
 
 enum class OpenClawUiActionRisk(val rawValue: String) {
   Low("low"),
@@ -27,6 +28,12 @@ enum class OpenClawUiActionRisk(val rawValue: String) {
 sealed class OpenClawUiAction {
   data class OpenApp(
     val target: String,
+    val timeoutMs: Long?,
+  ) : OpenClawUiAction()
+
+  data class OpenUri(
+    val uri: String,
+    val packageName: String?,
     val timeoutMs: Long?,
   ) : OpenClawUiAction()
 
@@ -178,6 +185,7 @@ private fun parseActions(actions: JsonArray): List<OpenClawUiAction> {
 private fun parseAction(obj: JsonObject): OpenClawUiAction {
   return when (val action = obj.requiredString("action")) {
     "open_app" -> parseOpenApp(obj)
+    "open_uri" -> parseOpenUri(obj)
     "click_node" -> parseClickNode(obj)
     "long_click_node" -> parseLongClickNode(obj)
     "type_text" -> parseTypeText(obj)
@@ -202,6 +210,20 @@ private fun parseOpenApp(obj: JsonObject): OpenClawUiAction.OpenApp {
   requireOnlyKeys(obj, setOf("action", "target", "timeoutMs"), "action")
   return OpenClawUiAction.OpenApp(
     target = obj.requiredString("target"),
+    timeoutMs = obj.optionalTimeoutMs(),
+  )
+}
+
+private fun parseOpenUri(obj: JsonObject): OpenClawUiAction.OpenUri {
+  requireOnlyKeys(obj, setOf("action", "uri", "packageName", "timeoutMs"), "action")
+  val uri = obj.requiredString("uri")
+  val scheme = uri.substringBefore(":", missingDelimiterValue = "").lowercase(Locale.ROOT)
+  if (scheme !in setOf("http", "https")) {
+    throw IllegalArgumentException("open_uri uri must use http or https")
+  }
+  return OpenClawUiAction.OpenUri(
+    uri = uri,
+    packageName = obj.optionalString("packageName"),
     timeoutMs = obj.optionalTimeoutMs(),
   )
 }

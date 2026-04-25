@@ -173,6 +173,53 @@ class OpenClawUiActionPlanParserTest {
   }
 
   @Test
+  fun parsesOpenUriActions() {
+    val plan =
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [
+            {
+              "action": "open_uri",
+              "uri": "https://www.instagram.com/rterdogan/",
+              "packageName": "com.instagram.android"
+            }
+          ]
+        }
+        """.trimIndent(),
+      )
+
+    val action = plan.actions.single() as OpenClawUiAction.OpenUri
+    assertEquals("https://www.instagram.com/rterdogan/", action.uri)
+    assertEquals("com.instagram.android", action.packageName)
+  }
+
+  @Test
+  fun rejectsOpenUriActionsWithUnsafeSchemes() {
+    assertParseFails("open_uri uri must use http or https") {
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [{ "action": "open_uri", "uri": "tel:+15555550123" }]
+        }
+        """.trimIndent(),
+      )
+    }
+  }
+
+  @Test
   fun parsesHomeActions() {
     val plan =
       parseOpenClawUiActionPlan(
