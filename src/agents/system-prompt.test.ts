@@ -395,6 +395,7 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("open_uri");
     expect(prompt).toContain("tap_point");
     expect(prompt).toContain("swipe");
+    expect(prompt).toContain("wait");
     expect(prompt).toContain("home");
     expect(prompt).toContain("recents");
     expect(prompt).toContain("quick_settings");

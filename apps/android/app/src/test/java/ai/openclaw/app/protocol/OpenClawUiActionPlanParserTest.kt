@@ -220,6 +220,29 @@ class OpenClawUiActionPlanParserTest {
   }
 
   @Test
+  fun parsesWaitActions() {
+    val plan =
+      parseOpenClawUiActionPlan(
+        """
+        {
+          "kind": "ui_actions",
+          "planId": "ui_plan_123",
+          "targetDeviceId": "android_redmi",
+          "idempotencyKey": "ui_plan_123_attempt_1",
+          "risk": "low",
+          "requiresConfirmation": false,
+          "actions": [
+            { "action": "wait", "durationMs": 2000 }
+          ]
+        }
+        """.trimIndent(),
+      )
+
+    val action = plan.actions.single() as OpenClawUiAction.Wait
+    assertEquals(2000L, action.durationMs)
+  }
+
+  @Test
   fun parsesHomeActions() {
     val plan =
       parseOpenClawUiActionPlan(

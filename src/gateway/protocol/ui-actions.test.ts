@@ -83,6 +83,15 @@ describe("ui action protocol validation", () => {
     expect(validateUiActionPlan(plan)).toBe(true);
   });
 
+  it("accepts bounded wait actions", () => {
+    const plan = {
+      ...validPlan,
+      actions: [{ action: "wait", durationMs: 2_000 }],
+    };
+
+    expect(validateUiActionPlan(plan)).toBe(true);
+  });
+
   it("accepts Android home navigation actions", () => {
     const plan = {
       ...validPlan,

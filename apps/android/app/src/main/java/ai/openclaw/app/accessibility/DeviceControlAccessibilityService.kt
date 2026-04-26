@@ -284,6 +284,10 @@ class DeviceControlAccessibilityService : AccessibilityService() {
             executed += 1
             delay(PostActionDelayMs)
           }
+          is OpenClawUiAction.Wait -> {
+            delay(action.durationMs)
+            executed += 1
+          }
           is OpenClawUiAction.WaitForNode -> {
             waitForNode(action.selector(), action.timeoutMs ?: DefaultActionTimeoutMs)
             executed += 1

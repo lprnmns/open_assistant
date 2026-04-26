@@ -84,6 +84,10 @@ sealed class OpenClawUiAction {
     val timeoutMs: Long?,
   ) : OpenClawUiAction()
 
+  data class Wait(
+    val durationMs: Long,
+  ) : OpenClawUiAction()
+
   data class WaitForNode(
     val id: String?,
     val contentDesc: String?,
@@ -192,6 +196,7 @@ private fun parseAction(obj: JsonObject): OpenClawUiAction {
     "clear_text" -> parseClearText(obj)
     "tap_point" -> parseTapPoint(obj)
     "swipe" -> parseSwipe(obj)
+    "wait" -> parseWait(obj)
     "wait_for_node" -> parseWaitForNode(obj)
     "scroll" -> parseScroll(obj)
     "back" -> parseBack(obj)
@@ -313,6 +318,16 @@ private fun parseSwipe(obj: JsonObject): OpenClawUiAction.Swipe {
     durationMs = obj.optionalDurationMs(),
     timeoutMs = obj.optionalTimeoutMs(),
   )
+}
+
+private fun parseWait(obj: JsonObject): OpenClawUiAction.Wait {
+  requireOnlyKeys(obj, setOf("action", "durationMs"), "action")
+  val durationMs =
+    obj["durationMs"]?.jsonPrimitive?.longOrNull ?: throw IllegalArgumentException("durationMs required")
+  if (durationMs !in 0..120_000) {
+    throw IllegalArgumentException("durationMs must be between 0 and 120000")
+  }
+  return OpenClawUiAction.Wait(durationMs = durationMs)
 }
 
 private fun parseWaitForNode(obj: JsonObject): OpenClawUiAction.WaitForNode {

@@ -172,6 +172,14 @@ const SwipeActionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const WaitActionSchema = Type.Object(
+  {
+    action: Type.Literal("wait"),
+    durationMs: Type.Integer({ minimum: 0, maximum: 120_000 }),
+  },
+  { additionalProperties: false },
+);
+
 const WaitForNodeByIdActionSchema = Type.Object(
   {
     action: Type.Literal("wait_for_node"),
@@ -294,6 +302,7 @@ export const UiActionSchema = Type.Union([
   ClearTextActionSchema,
   TapPointActionSchema,
   SwipeActionSchema,
+  WaitActionSchema,
   WaitForNodeActionSchema,
   ScrollActionSchema,
   BackActionSchema,
